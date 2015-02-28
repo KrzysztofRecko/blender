@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <float.h>
+#include <omp.h>
 
 #include "MEM_guardedalloc.h"
 
@@ -115,12 +116,12 @@ typedef struct process {        /* parameters, storage */
 	MetaballBVHNode metaball_bvh; /* The simplest bvh */
 	Box allbb;                   /* Bounding box of all metaelems */
 
-	MetaballBVHNode **bvh_queue; /* Queue used during bvh traversal */
+	//MetaballBVHNode **bvh_queue; /* Queue used during bvh traversal */
 	unsigned int bvh_queue_size;
 
-	CUBES *cubes;               /* stack of cubes waiting for polygonization */
-	CENTERLIST **centers;       /* cube center hash table */
-	CORNER **corners;           /* corner value hash table */
+	//CUBES *cubes;               /* stack of cubes waiting for polygonization */
+	//CENTERLIST **centers;       /* cube center hash table */
+	//CORNER **corners;           /* corner value hash table */
 	EDGELIST **edges;           /* edge and vertex id hash table */
 
 	int (*indices)[4];          /* output indices */
@@ -135,11 +136,24 @@ typedef struct process {        /* parameters, storage */
 	MemArena *pgn_elements;
 } PROCESS;
 
+typedef struct chunk {
+	PROCESS *process;
+	Box bb;
+
+	MetaballBVHNode **bvh_queue;
+
+	CUBES *cubes;
+	CENTERLIST **centers;
+	CORNER **corners;
+
+	MemArena *mem;
+} CHUNK;
+
 /* Forward declarations */
-static int vertid(PROCESS *process, const CORNER *c1, const CORNER *c2);
-static void add_cube(PROCESS *process, int i, int j, int k);
+static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2);
+static void add_cube(CHUNK *chunk, int i, int j, int k);
 static void make_face(PROCESS *process, int i1, int i2, int i3, int i4);
-static void converge(PROCESS *process, const CORNER *c1, const CORNER *c2, float r_p[3]);
+static void converge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, float r_p[3]);
 
 /* ******************* SIMPLE BVH ********************* */
 
@@ -358,30 +372,30 @@ static float densfunc(const MetaElem *ball, float x, float y, float z)
  * Computes density at given position form all metaballs which contain this point in their box.
  * Traverses BVH using a queue.
  */
-static float metaball(PROCESS *process, float x, float y, float z)
+static float metaball(CHUNK *chunk, float x, float y, float z)
 {
 	int i;
 	float dens = 0.0f;
 	unsigned int front = 0, back = 0;
 	MetaballBVHNode *node;
 
-	process->bvh_queue[front++] = &process->metaball_bvh;
+	chunk->bvh_queue[front++] = &chunk->process->metaball_bvh;
 
 	while (front != back) {
-		node = process->bvh_queue[back++];
+		node = chunk->bvh_queue[back++];
 
 		for (i = 0; i < 2; i++) {
 			if ((node->bb[i].min[0] <= x) && (node->bb[i].max[0] >= x) &&
 			    (node->bb[i].min[1] <= y) && (node->bb[i].max[1] >= y) &&
 			    (node->bb[i].min[2] <= z) && (node->bb[i].max[2] >= z))
 			{
-				if (node->child[i])	process->bvh_queue[front++] = node->child[i];
+				if (node->child[i])	chunk->bvh_queue[front++] = node->child[i];
 				else dens += densfunc(node->bb[i].ml, x, y, z);
 			}
 		}
 	}
 
-	return process->thresh - dens;
+	return chunk->process->thresh - dens;
 }
 
 /**
@@ -433,14 +447,19 @@ static void make_face(PROCESS *process, int i1, int i2, int i3, int i4)
 }
 
 /* Frees allocated memory */
-static void freepolygonize(PROCESS *process)
+static void freeprocess(PROCESS *process)
 {
-	if (process->corners) MEM_freeN(process->corners);
 	if (process->edges) MEM_freeN(process->edges);
-	if (process->centers) MEM_freeN(process->centers);
 	if (process->mainb) MEM_freeN(process->mainb);
-	if (process->bvh_queue) MEM_freeN(process->bvh_queue);
 	if (process->pgn_elements) BLI_memarena_free(process->pgn_elements);
+}
+
+static void freechunk(CHUNK *chunk)
+{
+	if (chunk->corners) MEM_freeN(chunk->corners);
+	if (chunk->centers) MEM_freeN(chunk->centers);
+	if (chunk->bvh_queue) MEM_freeN(chunk->bvh_queue);
+	if (chunk->mem) BLI_memarena_free(chunk->mem);
 }
 
 /* **************** POLYGONIZATION ************************ */
@@ -482,7 +501,7 @@ static int rightface[12] = {
 /**
  * triangulate the cube directly, without decomposition
  */
-static void docube(PROCESS *process, CUBE *cube)
+static void docube(CHUNK *chunk, CUBE *cube)
 {
 	INTLISTS *polys;
 	CORNER *c1, *c2;
@@ -496,12 +515,12 @@ static void docube(PROCESS *process, CUBE *cube)
 	}
 
 	/* Using faces[] table, adds neighbouring cube if surface intersects face in this direction. */
-	if (MB_BIT(faces[index], 0)) add_cube(process, cube->i - 1, cube->j, cube->k);
-	if (MB_BIT(faces[index], 1)) add_cube(process, cube->i + 1, cube->j, cube->k);
-	if (MB_BIT(faces[index], 2)) add_cube(process, cube->i, cube->j - 1, cube->k);
-	if (MB_BIT(faces[index], 3)) add_cube(process, cube->i, cube->j + 1, cube->k);
-	if (MB_BIT(faces[index], 4)) add_cube(process, cube->i, cube->j, cube->k - 1);
-	if (MB_BIT(faces[index], 5)) add_cube(process, cube->i, cube->j, cube->k + 1);
+	if (MB_BIT(faces[index], 0)) add_cube(chunk, cube->i - 1, cube->j, cube->k);
+	if (MB_BIT(faces[index], 1)) add_cube(chunk, cube->i + 1, cube->j, cube->k);
+	if (MB_BIT(faces[index], 2)) add_cube(chunk, cube->i, cube->j - 1, cube->k);
+	if (MB_BIT(faces[index], 3)) add_cube(chunk, cube->i, cube->j + 1, cube->k);
+	if (MB_BIT(faces[index], 4)) add_cube(chunk, cube->i, cube->j, cube->k - 1);
+	if (MB_BIT(faces[index], 5)) add_cube(chunk, cube->i, cube->j, cube->k + 1);
 
 	/* Using cubetable[], determines polygons for output. */
 	for (polys = cubetable[index]; polys; polys = polys->next) {
@@ -513,49 +532,52 @@ static void docube(PROCESS *process, CUBE *cube)
 			c1 = cube->corners[corner1[edges->i]];
 			c2 = cube->corners[corner2[edges->i]];
 
-			indexar[count] = vertid(process, c1, c2);
+			indexar[count] = vertid(chunk, c1, c2);
 			count++;
 		}
 
-		/* Adds faces to output. */
-		if (count > 2) {
-			switch (count) {
-				case 3:
-					make_face(process, indexar[2], indexar[1], indexar[0], 0);
-					break;
-				case 4:
-					if (indexar[0] == 0) make_face(process, indexar[0], indexar[3], indexar[2], indexar[1]);
-					else make_face(process, indexar[3], indexar[2], indexar[1], indexar[0]);
-					break;
-				case 5:
-					if (indexar[0] == 0) make_face(process, indexar[0], indexar[3], indexar[2], indexar[1]);
-					else make_face(process, indexar[3], indexar[2], indexar[1], indexar[0]);
+#pragma omp critical
+		{
+			/* Adds faces to output. */
+			if (count > 2) {
+				switch (count) {
+					case 3:
+						make_face(chunk->process, indexar[2], indexar[1], indexar[0], 0);
+						break;
+					case 4:
+						if (indexar[0] == 0) make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
+						else make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
+						break;
+					case 5:
+						if (indexar[0] == 0) make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
+						else make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
 
-					make_face(process, indexar[4], indexar[3], indexar[0], 0);
-					break;
-				case 6:
-					if (indexar[0] == 0) {
-						make_face(process, indexar[0], indexar[3], indexar[2], indexar[1]);
-						make_face(process, indexar[0], indexar[5], indexar[4], indexar[3]);
-					}
-					else {
-						make_face(process, indexar[3], indexar[2], indexar[1], indexar[0]);
-						make_face(process, indexar[5], indexar[4], indexar[3], indexar[0]);
-					}
-					break;
-				case 7:
-					if (indexar[0] == 0) {
-						make_face(process, indexar[0], indexar[3], indexar[2], indexar[1]);
-						make_face(process, indexar[0], indexar[5], indexar[4], indexar[3]);
-					}
-					else {
-						make_face(process, indexar[3], indexar[2], indexar[1], indexar[0]);
-						make_face(process, indexar[5], indexar[4], indexar[3], indexar[0]);
-					}
+						make_face(chunk->process, indexar[4], indexar[3], indexar[0], 0);
+						break;
+					case 6:
+						if (indexar[0] == 0) {
+							make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
+							make_face(chunk->process, indexar[0], indexar[5], indexar[4], indexar[3]);
+						}
+						else {
+							make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
+							make_face(chunk->process, indexar[5], indexar[4], indexar[3], indexar[0]);
+						}
+						break;
+					case 7:
+						if (indexar[0] == 0) {
+							make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
+							make_face(chunk->process, indexar[0], indexar[5], indexar[4], indexar[3]);
+						}
+						else {
+							make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
+							make_face(chunk->process, indexar[5], indexar[4], indexar[3], indexar[0]);
+						}
 
-					make_face(process, indexar[6], indexar[5], indexar[0], 0);
+						make_face(chunk->process, indexar[6], indexar[5], indexar[0], 0);
 
-					break;
+						break;
+				}
 			}
 		}
 	}
@@ -565,7 +587,7 @@ static void docube(PROCESS *process, CUBE *cube)
  * return corner with the given lattice location
  * set (and cache) its function value
  */
-static CORNER *setcorner(PROCESS *process, int i, int j, int k)
+static CORNER *setcorner(CHUNK *chunk, int i, int j, int k)
 {
 	/* for speed, do corner value caching here */
 	CORNER *c;
@@ -573,7 +595,7 @@ static CORNER *setcorner(PROCESS *process, int i, int j, int k)
 
 	/* does corner exist? */
 	index = HASH(i, j, k);
-	c = process->corners[index];
+	c = chunk->corners[index];
 
 	for (; c != NULL; c = c->next) {
 		if (c->i == i && c->j == j && c->k == k) {
@@ -581,19 +603,19 @@ static CORNER *setcorner(PROCESS *process, int i, int j, int k)
 		}
 	}
 
-	c = BLI_memarena_alloc(process->pgn_elements, sizeof(CORNER));
+	c = BLI_memarena_alloc(chunk->mem, sizeof(CORNER));
 
 	c->i = i;
-	c->co[0] = ((float)i - 0.5f) * process->size;
+	c->co[0] = ((float)i - 0.5f) * chunk->process->size;
 	c->j = j;
-	c->co[1] = ((float)j - 0.5f) * process->size;
+	c->co[1] = ((float)j - 0.5f) * chunk->process->size;
 	c->k = k;
-	c->co[2] = ((float)k - 0.5f) * process->size;
+	c->co[2] = ((float)k - 0.5f) * chunk->process->size;
 
-	c->value = metaball(process, c->co[0], c->co[1], c->co[2]);
+	c->value = metaball(chunk, c->co[0], c->co[1], c->co[2]);
 
-	c->next = process->corners[index];
-	process->corners[index] = c;
+	c->next = chunk->corners[index];
+	chunk->corners[index] = c;
 
 	return c;
 }
@@ -732,7 +754,7 @@ void BKE_mball_cubeTable_free(void)
 /**
  * Inserts cube at lattice i, j, k into hash table, marking it as "done"
  */
-static int setcenter(PROCESS *process, CENTERLIST *table[], const int i, const int j, const int k)
+static int setcenter(CHUNK *chunk, CENTERLIST *table[], const int i, const int j, const int k)
 {
 	int index;
 	CENTERLIST *newc, *l, *q;
@@ -744,7 +766,7 @@ static int setcenter(PROCESS *process, CENTERLIST *table[], const int i, const i
 		if (l->i == i && l->j == j && l->k == k) return 1;
 	}
 
-	newc = BLI_memarena_alloc(process->pgn_elements, sizeof(CENTERLIST));
+	newc = BLI_memarena_alloc(chunk->mem, sizeof(CENTERLIST));
 	newc->i = i;
 	newc->j = j;
 	newc->k = k;
@@ -778,6 +800,7 @@ static void setedge(
 		k2 = t;
 	}
 	index = HASH(i1, j1, k1) + HASH(i2, j2, k2);
+
 	newe = BLI_memarena_alloc(process->pgn_elements, sizeof(EDGELIST));
 
 	newe->i1 = i1;
@@ -811,14 +834,16 @@ static int getedge(EDGELIST *table[],
 		k1 = k2;
 		k2 = t;
 	}
+
 	q = table[HASH(i1, j1, k1) + HASH(i2, j2, k2)];
 	for (; q != NULL; q = q->next) {
 		if (q->i1 == i1 && q->j1 == j1 && q->k1 == k1 &&
-		    q->i2 == i2 && q->j2 == j2 && q->k2 == k2)
+			q->i2 == i2 && q->j2 == j2 && q->k2 == k2)
 		{
 			return q->vid;
 		}
 	}
+
 	return -1;
 }
 
@@ -844,14 +869,14 @@ static void addtovertices(PROCESS *process, const float v[3], const float no[3])
  *
  * \note Doesn't do normalization!
  */
-static void vnormal(PROCESS *process, const float point[3], float r_no[3])
+static void vnormal(CHUNK *chunk, const float point[3], float r_no[3])
 {
-	const float delta = process->delta;
-	const float f = metaball(process, point[0], point[1], point[2]);
+	const float delta = chunk->process->delta;
+	const float f = metaball(chunk, point[0], point[1], point[2]);
 
-	r_no[0] = metaball(process, point[0] + delta, point[1], point[2]) - f;
-	r_no[1] = metaball(process, point[0], point[1] + delta, point[2]) - f;
-	r_no[2] = metaball(process, point[0], point[1], point[2] + delta) - f;
+	r_no[0] = metaball(chunk, point[0] + delta, point[1], point[2]) - f;
+	r_no[1] = metaball(chunk, point[0], point[1] + delta, point[2]) - f;
+	r_no[2] = metaball(chunk, point[0], point[1], point[2] + delta) - f;
 
 #if 0
 	f = normalize_v3(r_no);
@@ -880,24 +905,32 @@ static void vnormal(PROCESS *process, const float point[3], float r_no[3])
  *
  * If it wasn't previously computed, does #converge() and adds vertex to process.
  */
-static int vertid(PROCESS *process, const CORNER *c1, const CORNER *c2)
+static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 {
 	float v[3], no[3];
-	int vid = getedge(process->edges, c1->i, c1->j, c1->k, c2->i, c2->j, c2->k);
+	int vid;
+
+#pragma omp critical
+	{
+		vid = getedge(chunk->process->edges, c1->i, c1->j, c1->k, c2->i, c2->j, c2->k);
+	}
 
 	if (vid != -1) return vid;  /* previously computed */
 
-	converge(process, c1, c2, v);  /* position */
+	converge(chunk, c1, c2, v);  /* position */
 
 #ifdef MB_ACCUM_NORMAL
 	no[0] = no[1] = no[2] = 0.0f;
 #else
-	vnormal(process, v, no);
+	vnormal(chunk, v, no);
 #endif
 
-	addtovertices(process, v, no);            /* save vertex */
-	vid = (int)process->curvertex - 1;
-	setedge(process, c1->i, c1->j, c1->k, c2->i, c2->j, c2->k, vid);
+#pragma omp critical
+	{
+		addtovertices(chunk->process, v, no);            /* save vertex */
+		vid = (int)chunk->process->curvertex - 1;
+		setedge(chunk->process, c1->i, c1->j, c1->k, c2->i, c2->j, c2->k, vid);
+	}
 
 	return vid;
 }
@@ -906,7 +939,7 @@ static int vertid(PROCESS *process, const CORNER *c1, const CORNER *c2)
  * Given two corners, computes approximation of surface intersection point between them.
  * In case of small threshold, do bisection.
  */
-static void converge(PROCESS *process, const CORNER *c1, const CORNER *c2, float r_p[3])
+static void converge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, float r_p[3])
 {
 	float tmp, dens;
 	unsigned int i;
@@ -927,9 +960,9 @@ static void converge(PROCESS *process, const CORNER *c1, const CORNER *c2, float
 	}
 
 
-	for (i = 0; i < process->converge_res; i++) {
+	for (i = 0; i < chunk->process->converge_res; i++) {
 		interp_v3_v3v3(r_p, c1_co, c2_co, 0.5f);
-		dens = metaball(process, r_p[0], r_p[1], r_p[2]);
+		dens = metaball(chunk, r_p[0], r_p[1], r_p[2]);
 
 		if (dens > 0.0f) {
 			c1_value = dens;
@@ -943,31 +976,6 @@ static void converge(PROCESS *process, const CORNER *c1, const CORNER *c2, float
 
 	tmp = -c1_value / (c2_value - c1_value);
 	interp_v3_v3v3(r_p, c1_co, c2_co, tmp);
-}
-
-/**
- * Adds cube at given lattice position to cube stack of process.
- */
-static void add_cube(PROCESS *process, int i, int j, int k)
-{
-	CUBES *ncube;
-	int n;
-
-	/* test if cube has been found before */
-	if (setcenter(process, process->centers, i, j, k) == 0) {
-		/* push cube on stack: */
-		ncube = BLI_memarena_alloc(process->pgn_elements, sizeof(CUBES));
-		ncube->next = process->cubes;
-		process->cubes = ncube;
-
-		ncube->cube.i = i;
-		ncube->cube.j = j;
-		ncube->cube.k = k;
-
-		/* set corners of initial cube: */
-		for (n = 0; n < 8; n++)
-			ncube->cube.corners[n] = setcorner(process, i + MB_BIT(n, 2), j + MB_BIT(n, 1), k + MB_BIT(n, 0));
-	}
 }
 
 static void next_lattice(int r[3], const float pos[3], const float size)
@@ -989,38 +997,101 @@ static void closest_latice(int r[3], const float pos[3], const float size)
 }
 
 /**
+ * Adds cube at given lattice position to cube stack of process.
+ */
+static void add_cube(CHUNK *chunk, int i, int j, int k)
+{
+	CUBES *ncube;
+	int n;
+
+	int max[3], min[3];
+	next_lattice(max, chunk->bb.max, chunk->process->size);
+	next_lattice(min, chunk->bb.min, chunk->process->size);
+
+	if (i < min[0] || i > max[0] ||
+		j < min[1] || j > max[1] ||
+		k < min[2] || k > max[2]) return;
+
+	/* test if cube has been found before */
+	if (setcenter(chunk, chunk->centers, i, j, k) == 0) {
+		/* push cube on stack: */
+		ncube = BLI_memarena_alloc(chunk->mem, sizeof(CUBES));
+		ncube->next = chunk->cubes;
+		chunk->cubes = ncube;
+
+		ncube->cube.i = i;
+		ncube->cube.j = j;
+		ncube->cube.k = k;
+
+		/* set corners of initial cube: */
+		for (n = 0; n < 8; n++)
+			ncube->cube.corners[n] = setcorner(chunk, i + MB_BIT(n, 2), j + MB_BIT(n, 1), k + MB_BIT(n, 0));
+	}
+}
+
+/**
  * Find at most 6 cubes to start polygonization from.
  * This may be too little only in very rare cases.
  * To make this algorithm equivalent to the previous one,
  * it would have to search for 26 cubes (not only along the axes,
  * but also on cube diagonals and through the middle of edges).
  */
-static void find_first_points(PROCESS *process, const unsigned int em)
+static void find_first_points(CHUNK *chunk, const unsigned int em)
 {
 	const MetaElem *ml;
 	int center[3], lbn[3], rtf[3], it[3], dir;
 	float tmp[3], a, b;
 
-	ml = process->mainb[em];
+	int max[3], min[3];
+	next_lattice(max, chunk->bb.max, chunk->process->size);
+	next_lattice(min, chunk->bb.min, chunk->process->size);
+
+	ml = chunk->process->mainb[em];
 
 	mid_v3_v3v3(tmp, ml->bb->vec[0], ml->bb->vec[6]);
-	closest_latice(center, tmp, process->size);
-	prev_lattice(lbn, ml->bb->vec[0], process->size);
-	next_lattice(rtf, ml->bb->vec[6], process->size);
+	closest_latice(center, tmp, chunk->process->size);
+	prev_lattice(lbn, ml->bb->vec[0], chunk->process->size);
+	next_lattice(rtf, ml->bb->vec[6], chunk->process->size);
+
+	DO_MIN(lbn, min);
+	DO_MAX(rtf, max);
 
 	for (dir = 0; dir < 3; dir++) {
 		copy_v3_v3_int(it, center);
 		it[dir] = lbn[dir];
 
-		b = setcorner(process, it[0], it[1], it[2])->value;
+		b = setcorner(chunk, it[0], it[1], it[2])->value;
 		for (it[dir]++; it[dir] <= rtf[dir]; it[dir]++) {
 			a = b;
-			b = setcorner(process, it[0], it[1], it[2])->value;
+			b = setcorner(chunk, it[0], it[1], it[2])->value;
 
 			if ((a < 0.0f && b >= 0.0f) || (b < 0.0f && a >= 0.0f)) {
-				add_cube(process, it[0] - 1, it[1] - 1, it[2] - 1);
+				add_cube(chunk, it[0] - 1, it[1] - 1, it[2] - 1);
 			}
 		}
+	}
+}
+
+static void polygonize_chunk(CHUNK *chunk)
+{
+	CUBE c;
+	unsigned int i;
+
+	chunk->centers = MEM_callocN(HASHSIZE * sizeof(CENTERLIST *), "mbproc->centers");
+	chunk->corners = MEM_callocN(HASHSIZE * sizeof(CORNER *), "mbproc->corners");
+	chunk->bvh_queue = MEM_callocN(sizeof(MetaballBVHNode *) * chunk->process->bvh_queue_size, "Metaball BVH Queue");
+	chunk->mem = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball chunk memarena");
+	chunk->cubes = NULL;
+
+	for (i = 0; i < chunk->process->totelem; i++) {
+		find_first_points(chunk, i);
+	}
+
+	while (chunk->cubes != NULL) {
+		c = chunk->cubes->cube;
+		chunk->cubes = chunk->cubes->next;
+
+		docube(chunk, &c);
 	}
 }
 
@@ -1032,25 +1103,37 @@ static void find_first_points(PROCESS *process, const unsigned int em)
  */
 static void polygonize(PROCESS *process)
 {
-	CUBE c;
-	unsigned int i;
+	CHUNK chunks[4];
 
-	process->centers = MEM_callocN(HASHSIZE * sizeof(CENTERLIST *), "mbproc->centers");
-	process->corners = MEM_callocN(HASHSIZE * sizeof(CORNER *), "mbproc->corners");
 	process->edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
-	process->bvh_queue = MEM_callocN(sizeof(MetaballBVHNode *) * process->bvh_queue_size, "Metaball BVH Queue");
-
 	makecubetable();
 
-	for (i = 0; i < process->totelem; i++) {
-		find_first_points(process, i);
-	}
+	copy_v3_v3(chunks[0].bb.min, process->allbb.min);
+	copy_v3_v3(chunks[0].bb.max, process->allbb.max);
+	chunks[0].bb.max[0] = (chunks[0].bb.max[0] + chunks[0].bb.min[0]) / 2.0f;
+	chunks[0].bb.max[1] = (chunks[0].bb.max[1] + chunks[0].bb.min[1]) / 2.0f;
+	copy_v3_v3(chunks[1].bb.min, process->allbb.min);
+	copy_v3_v3(chunks[1].bb.max, process->allbb.max);
+	chunks[1].bb.min[0] = (chunks[1].bb.max[0] + chunks[1].bb.min[0]) / 2.0f;
+	chunks[1].bb.max[1] = (chunks[1].bb.max[1] + chunks[1].bb.min[1]) / 2.0f;
 
-	while (process->cubes != NULL) {
-		c = process->cubes->cube;
-		process->cubes = process->cubes->next;
+	chunks[0].process = chunks[1].process = process;
 
-		docube(process, &c);
+	copy_v3_v3(chunks[2].bb.min, process->allbb.min);
+	copy_v3_v3(chunks[2].bb.max, process->allbb.max);
+	chunks[2].bb.max[0] = (chunks[2].bb.max[0] + chunks[2].bb.min[0]) / 2.0f;
+	chunks[2].bb.min[1] = (chunks[2].bb.max[1] + chunks[2].bb.min[1]) / 2.0f;
+	copy_v3_v3(chunks[3].bb.min, process->allbb.min);
+	copy_v3_v3(chunks[3].bb.max, process->allbb.max);
+	chunks[3].bb.min[0] = (chunks[3].bb.max[0] + chunks[3].bb.min[0]) / 2.0f;
+	chunks[3].bb.min[1] = (chunks[3].bb.max[1] + chunks[3].bb.min[1]) / 2.0f;
+
+	chunks[2].process = chunks[3].process = process;
+
+#pragma omp parallel num_threads(4)
+	{
+		polygonize_chunk(&chunks[omp_get_thread_num()]);
+		freechunk(&chunks[omp_get_thread_num()]);
 	}
 }
 
@@ -1307,5 +1390,5 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 		}
 	}
 
-	freepolygonize(&process);
+	freeprocess(&process);
 }
