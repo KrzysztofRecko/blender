@@ -431,16 +431,16 @@ static void make_face(PROCESS *process, int i1, int i2, int i3, int i4)
 
 #ifdef MB_ACCUM_NORMAL
 	if (i4 == 0) {
-		normal_tri_v3(n, &process->co[i1 * 3], &process->co[i2 * 3], &process->co[i3 * 3]);
+		normal_tri_v3(n, process->co[i1], process->co[i2], process->co[i3]);
 		accumulate_vertex_normals(
-		        &process->no[i1 * 3], &process->no[i2 * 3], &process->no[i3 * 3], NULL, n,
-		        &process->co[i1 * 3], &process->co[i2 * 3], &process->co[i3 * 3], NULL);
+		        process->no[i1], process->no[i2], process->no[i3], NULL, n,
+		        process->co[i1], process->co[i2], process->co[i3], NULL);
 	}
 	else {
-		normal_quad_v3(n, &process->co[i1 * 3], &process->co[i2 * 3], &process->co[i3 * 3], &process->co[i4 * 3]);
+		normal_quad_v3(n, process->co[i1], process->co[i2], process->co[i3], process->co[i4]);
 		accumulate_vertex_normals(
-		        &process->no[i1 * 3], &process->no[i2 * 3], &process->no[i3 * 3], &process->no[i4 * 3], n,
-		        &process->co[i1 * 3], &process->co[i2 * 3], &process->co[i3 * 3], &process->co[i4 * 3]);
+		        process->no[i1], process->no[i2], process->no[i3], process->no[i4], n,
+		        process->co[i1], process->co[i2], process->co[i3], process->co[i4]);
 	}
 #endif
 
@@ -536,7 +536,7 @@ static void docube(CHUNK *chunk, CUBE *cube)
 			count++;
 		}
 
-#pragma omp critical
+#pragma omp critical (AddFace)
 		{
 			/* Adds faces to output. */
 			if (count > 2) {
@@ -1053,8 +1053,8 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 	prev_lattice(lbn, ml->bb->vec[0], chunk->process->size);
 	next_lattice(rtf, ml->bb->vec[6], chunk->process->size);
 
-	DO_MIN(lbn, min);
-	DO_MAX(rtf, max);
+	DO_MAX(min, lbn);
+	DO_MIN(max, rtf);
 
 	for (dir = 0; dir < 3; dir++) {
 		copy_v3_v3_int(it, center);
@@ -1084,7 +1084,15 @@ static void polygonize_chunk(CHUNK *chunk)
 	chunk->cubes = NULL;
 
 	for (i = 0; i < chunk->process->totelem; i++) {
-		find_first_points(chunk, i);
+		if (chunk->process->mainb[i]->bb->vec[0][0] < chunk->bb.max[0] &&
+			chunk->process->mainb[i]->bb->vec[0][1] < chunk->bb.max[1] &&
+			chunk->process->mainb[i]->bb->vec[0][2] < chunk->bb.max[2] &&
+			chunk->process->mainb[i]->bb->vec[6][0] > chunk->bb.min[0] &&
+			chunk->process->mainb[i]->bb->vec[6][1] > chunk->bb.min[1] &&
+			chunk->process->mainb[i]->bb->vec[6][2] > chunk->bb.min[2])
+		{
+			find_first_points(chunk, i);
+		}
 	}
 
 	while (chunk->cubes != NULL) {
