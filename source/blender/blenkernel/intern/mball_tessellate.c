@@ -123,6 +123,7 @@ typedef struct process {        /* parameters, storage */
 	//CENTERLIST **centers;       /* cube center hash table */
 	//CORNER **corners;           /* corner value hash table */
 	EDGELIST **edges;           /* edge and vertex id hash table */
+	omp_lock_t *edgelocks;
 
 	int (*indices)[4];          /* output indices */
 	unsigned int totindex;		/* size of memory allocated for indices */
@@ -451,6 +452,7 @@ static void freeprocess(PROCESS *process)
 {
 	if (process->edges) MEM_freeN(process->edges);
 	if (process->mainb) MEM_freeN(process->mainb);
+	if (process->edgelocks) MEM_freeN(process->edgelocks);
 	if (process->pgn_elements) BLI_memarena_free(process->pgn_elements);
 }
 
@@ -536,7 +538,7 @@ static void docube(CHUNK *chunk, CUBE *cube)
 			count++;
 		}
 
-#pragma omp critical
+#pragma omp critical (AddFace)
 		{
 			/* Adds faces to output. */
 			if (count > 2) {
@@ -909,13 +911,31 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 {
 	float v[3], no[3];
 	int vid;
+	int index;
+	int first[3], second[3];
+	EDGELIST *q;
 
-#pragma omp critical
-	{
-		vid = getedge(chunk->process->edges, c1->i, c1->j, c1->k, c2->i, c2->j, c2->k);
+	first[0] = c1->i; first[1] = c1->j; first[2] = c1->k;
+	second[0] = c2->i; second[1] = c2->j; second[2] = c2->k;
+
+	if (first[0] > second[0] || (first[0] == second[0] && (first[1] > second[1] || (first[1] == second[1] && first[2] > second[2])))) {
+		SWAP(int, first[0], second[0]);
+		SWAP(int, first[1], second[1]);
+		SWAP(int, first[2], second[2]);
 	}
 
-	if (vid != -1) return vid;  /* previously computed */
+	index = HASH(first[0], first[1], first[2]) + HASH(second[0], second[1], second[2]);
+	omp_set_lock(&chunk->process->edgelocks[index]);
+
+	q = chunk->process->edges[index];
+	for (; q != NULL; q = q->next) {
+		if (q->i1 == first[0] && q->j1 == first[1] && q->k1 == first[2] &&
+			q->i2 == second[0] && q->j2 == second[1] && q->k2 == second[2])
+		{
+			omp_unset_lock(&chunk->process->edgelocks[index]);
+			return q->vid;
+		}
+	}
 
 	converge(chunk, c1, c2, v);  /* position */
 
@@ -925,12 +945,24 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 	vnormal(chunk, v, no);
 #endif
 
-#pragma omp critical
+#pragma omp critical (GetEdge)
 	{
 		addtovertices(chunk->process, v, no);            /* save vertex */
 		vid = (int)chunk->process->curvertex - 1;
-		setedge(chunk->process, c1->i, c1->j, c1->k, c2->i, c2->j, c2->k, vid);
+		q = BLI_memarena_alloc(chunk->process->pgn_elements, sizeof(EDGELIST));
 	}
+
+	q->i1 = first[0];
+	q->j1 = first[1];
+	q->k1 = first[2];
+	q->i2 = second[0];
+	q->j2 = second[1];
+	q->k2 = second[2];
+	q->vid = vid;
+	q->next = chunk->process->edges[index];
+	chunk->process->edges[index] = q;
+
+	omp_unset_lock(&chunk->process->edgelocks[index]);
 
 	return vid;
 }
@@ -1104,8 +1136,10 @@ static void polygonize_chunk(CHUNK *chunk)
 static void polygonize(PROCESS *process)
 {
 	CHUNK chunks[4];
+	int i;
 
 	process->edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
+	process->edgelocks = MEM_callocN(2 * HASHSIZE * sizeof(omp_lock_t), "edgelocks");
 	makecubetable();
 
 	copy_v3_v3(chunks[0].bb.min, process->allbb.min);
@@ -1130,11 +1164,15 @@ static void polygonize(PROCESS *process)
 
 	chunks[2].process = chunks[3].process = process;
 
+	for (i = 0; i < 2 * HASHSIZE; i++) omp_init_lock(&process->edgelocks[i]);
+
 #pragma omp parallel num_threads(4)
 	{
 		polygonize_chunk(&chunks[omp_get_thread_num()]);
 		freechunk(&chunks[omp_get_thread_num()]);
 	}
+
+	for (i = 0; i < 2 * HASHSIZE; i++) omp_destroy_lock(&process->edgelocks[i]);
 }
 
 /**
