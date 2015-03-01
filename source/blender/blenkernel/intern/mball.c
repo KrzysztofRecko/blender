@@ -364,27 +364,26 @@ Object *BKE_mball_basis_find(Scene *scene, Object *basis)
 	Object *ob, *bob = basis;
 	int basisnr, obnr;
 	char basisname[MAX_ID_NAME], obname[MAX_ID_NAME];
-	SceneBaseIter iter;
-	EvaluationContext *eval_ctx = G.main->eval_ctx;
 
 	BLI_split_name_num(basisname, &basisnr, basis->id.name + 2, '.');
 
-	BKE_scene_base_iter_next(eval_ctx, &iter, &sce_iter, 0, NULL, NULL);
-	while (BKE_scene_base_iter_next(eval_ctx, &iter, &sce_iter, 1, &base, &ob)) {
-		if ((ob->type == OB_MBALL) && !(base->flag & OB_FROMDUPLI)) {
-			if (ob != bob) {
-				BLI_split_name_num(obname, &obnr, ob->id.name + 2, '.');
+	for (sce_iter = scene; sce_iter; sce_iter = sce_iter->set)
+		for (base = sce_iter->base.first; base; base = base->next) {
+			ob = base->object;
+			if (ob && ob->type == OB_MBALL) {
+				if (ob != bob) {
+					BLI_split_name_num(obname, &obnr, ob->id.name + 2, '.');
 
-				/* object ob has to be in same "group" ... it means, that it has to have same base of its name */
-				if (STREQ(obname, basisname)) {
-					if (obnr < basisnr) {
-						basis = ob;
-						basisnr = obnr;
+					/* object ob has to be in same "group" ... it means, that it has to have same base of its name */
+					if (STREQ(obname, basisname)) {
+						if (obnr < basisnr) {
+							basis = ob;
+							basisnr = obnr;
+						}
 					}
 				}
 			}
 		}
-	}
 
 	return basis;
 }
