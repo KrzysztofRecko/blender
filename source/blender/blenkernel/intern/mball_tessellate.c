@@ -62,6 +62,8 @@
 
 /* Data types */
 
+//typedef struct Box Box;
+
 typedef struct corner {         /* corner of a cube */
 	int i, j, k;                /* (i, j, k) is index within lattice */
 	float co[3], value;       /* location and function value */
@@ -99,10 +101,19 @@ typedef struct intlists {       /* list of list of integers */
 	struct intlists *next;      /* remaining elements */
 } INTLISTS;
 
+typedef struct MLSmall MLSmall;
 typedef struct Box {			/* an AABB with pointer to metalelem */
 	float min[3], max[3];
-	const MetaElem *ml;
+	MLSmall *ml;
 } Box;
+
+typedef struct MLSmall {
+	float imat[4][4];
+	float rad2, s;
+	Box bb;
+	short type;
+	float expx, expy, expz;
+} MLSmall;
 
 typedef struct MetaballBVHNode {	/* BVH node */
 	Box bb[2];						/* AABB of children */
@@ -114,7 +125,7 @@ typedef struct process {        /* parameters, storage */
 	float delta;				/* small delta for calculating normals */
 	unsigned int converge_res;	/* converge procedure resolution (more = slower) */
 
-	MetaElem **mainb;			/* array of all metaelems */
+	MLSmall **mainb;			/* array of all metaelems */
 	unsigned int totelem, mem;	/* number of metaelems */
 
 	//MetaballBVHNode metaball_bvh; /* The simplest bvh */
@@ -143,7 +154,7 @@ typedef struct process {        /* parameters, storage */
 typedef struct chunk {
 	PROCESS *process;
 	Box bb;
-	MetaElem **mainb;
+	MLSmall **mainb;
 	unsigned int elem;
 
 	MetaballBVHNode **bvh_queue;
@@ -165,21 +176,32 @@ static void converge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, float r_p
 
 /* ******************* SIMPLE BVH ********************* */
 
-static void make_union(const BoundBox *a, const Box *b, Box *r_out)
-{
-	r_out->min[0] = min_ff(a->vec[0][0], b->min[0]);
-	r_out->min[1] = min_ff(a->vec[0][1], b->min[1]);
-	r_out->min[2] = min_ff(a->vec[0][2], b->min[2]);
+//static void make_union(const BoundBox *a, const Box *b, Box *r_out)
+//{
+//	r_out->min[0] = min_ff(a->vec[0][0], b->min[0]);
+//	r_out->min[1] = min_ff(a->vec[0][1], b->min[1]);
+//	r_out->min[2] = min_ff(a->vec[0][2], b->min[2]);
+//
+//	r_out->max[0] = max_ff(a->vec[6][0], b->max[0]);
+//	r_out->max[1] = max_ff(a->vec[6][1], b->max[1]);
+//	r_out->max[2] = max_ff(a->vec[6][2], b->max[2]);
+//}
 
-	r_out->max[0] = max_ff(a->vec[6][0], b->max[0]);
-	r_out->max[1] = max_ff(a->vec[6][1], b->max[1]);
-	r_out->max[2] = max_ff(a->vec[6][2], b->max[2]);
+static void make_union(const Box *a, const Box *b, Box *r_out)
+{
+	r_out->min[0] = min_ff(a->min[0], b->min[0]);
+	r_out->min[1] = min_ff(a->min[1], b->min[1]);
+	r_out->min[2] = min_ff(a->min[2], b->min[2]);
+
+	r_out->max[0] = max_ff(a->max[0], b->max[0]);
+	r_out->max[1] = max_ff(a->max[1], b->max[1]);
+	r_out->max[2] = max_ff(a->max[2], b->max[2]);
 }
 
-static void make_box_from_ml(Box *r, const MetaElem *ml)
+static void make_box_from_ml(Box *r, MLSmall *ml)
 {
-	copy_v3_v3(r->max, ml->bb->vec[6]);
-	copy_v3_v3(r->min, ml->bb->vec[0]);
+	copy_v3_v3(r->max, ml->bb.max);
+	copy_v3_v3(r->min, ml->bb.min);
 	r->ml = ml;
 }
 
@@ -188,19 +210,19 @@ static void make_box_from_ml(Box *r, const MetaElem *ml)
  * where centroids of elements in the [start, i) segment lie "on the right side" of div,
  * and elements in the [i, end) segment lie "on the left"
  */
-static unsigned int partition_mainb(MetaElem **mainb, unsigned int start, unsigned int end, unsigned int s, float div)
+static unsigned int partition_mainb(MLSmall **mainb, unsigned int start, unsigned int end, unsigned int s, float div)
 {
 	unsigned int i = start, j = end - 1;
 	div *= 2.0f;
 
 	while (1) {
-		while (i < j && div > (mainb[i]->bb->vec[6][s] + mainb[i]->bb->vec[0][s])) i++;
-		while (j > i && div < (mainb[j]->bb->vec[6][s] + mainb[j]->bb->vec[0][s])) j--;
+		while (i < j && div > (mainb[i]->bb.max[s] + mainb[i]->bb.min[s])) i++;
+		while (j > i && div < (mainb[j]->bb.max[s] + mainb[j]->bb.min[s])) j--;
 
 		if (i >= j)
 			break;
 
-		SWAP(MetaElem *, mainb[i], mainb[j]);
+		SWAP(MLSmall *, mainb[i], mainb[j]);
 		i++;
 		j--;
 	}
@@ -242,7 +264,7 @@ static void build_bvh_spatial(
 
 	if (part > start + 1) {
 		for (j = start; j < part; j++)
-			make_union(chunk->mainb[j]->bb, &node->bb[0], &node->bb[0]);
+			make_union(&chunk->mainb[j]->bb, &node->bb[0], &node->bb[0]);
 
 		node->child[0] = BLI_memarena_alloc(chunk->mem, sizeof(MetaballBVHNode));
 		build_bvh_spatial(chunk, node->child[0], start, part, &node->bb[0]);
@@ -254,7 +276,7 @@ static void build_bvh_spatial(
 
 		if (part < end - 1) {
 			for (j = part; j < end; j++)
-				make_union(chunk->mainb[j]->bb, &node->bb[1], &node->bb[1]);
+				make_union(&chunk->mainb[j]->bb, &node->bb[1], &node->bb[1]);
 
 			node->child[1] = BLI_memarena_alloc(chunk->mem, sizeof(MetaballBVHNode));
 			build_bvh_spatial(chunk, node->child[1], part, end, &node->bb[1]);
@@ -318,12 +340,12 @@ static void build_bvh_spatial(
  * R = metaball radius
  * s - metaball stiffness
  */
-static float densfunc(const MetaElem *ball, float x, float y, float z)
+static float densfunc(MLSmall *ball, float x, float y, float z)
 {
 	float dist2;
 	float dvec[3] = {x, y, z};
 
-	mul_m4_v3((float (*)[4])ball->imat, dvec);
+	mul_m4_v3(ball->imat, dvec);
 
 	switch (ball->type) {
 		case MB_BALL:
@@ -349,7 +371,7 @@ static float densfunc(const MetaElem *ball, float x, float y, float z)
 			dvec[1] /= ball->expy;
 			dvec[2] /= ball->expz;
 			break;
-
+#if 0
 		/* *** deprecated, could be removed?, do-versioned at least *** */
 		case MB_TUBEX:
 			if      (dvec[0] >  ball->len) dvec[0] -= ball->len;
@@ -367,6 +389,7 @@ static float densfunc(const MetaElem *ball, float x, float y, float z)
 			else                           dvec[2] = 0.0;
 			break;
 			/* *** end deprecated *** */
+#endif
 	}
 
 	/* ball->rad2 is inverse of squared rad */
@@ -1048,7 +1071,7 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
  */
 static void find_first_points(CHUNK *chunk, const unsigned int em)
 {
-	const MetaElem *ml;
+	const MLSmall *ml;
 	int center[3], lbn[3], rtf[3], it[3], dir;
 	float tmp[3], a, b;
 
@@ -1058,10 +1081,10 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 
 	ml = chunk->mainb[em];
 
-	mid_v3_v3v3(tmp, ml->bb->vec[0], ml->bb->vec[6]);
+	mid_v3_v3v3(tmp, ml->bb.min, ml->bb.max);
 	closest_latice(center, tmp, chunk->process->size);
-	prev_lattice(lbn, ml->bb->vec[0], chunk->process->size);
-	next_lattice(rtf, ml->bb->vec[6], chunk->process->size);
+	prev_lattice(lbn, ml->bb.min, chunk->process->size);
+	next_lattice(rtf, ml->bb.max, chunk->process->size);
 
 	DO_MAX(min, lbn);
 	DO_MIN(max, rtf);
@@ -1112,26 +1135,26 @@ static void init_chunk(CHUNK *chunk, PROCESS *process)
 	chunk->process = process;
 	chunk->bvh_queue_size = 0;
 	chunk->elem = 0;
-	chunk->mainb = MEM_mallocN(sizeof(MetaElem *) * process->totelem, "chunk's metaballs");
+	chunk->mainb = MEM_mallocN(sizeof(MLSmall *) * process->totelem, "chunk's metaballs");
 	chunk->mem = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball chunk memarena");
 
 	for (i = 0; i < process->totelem; i++) {
-		if (process->mainb[i]->bb->vec[0][0] < chunk->bb.max[0] &&
-			process->mainb[i]->bb->vec[0][1] < chunk->bb.max[1] &&
-			process->mainb[i]->bb->vec[0][2] < chunk->bb.max[2] &&
-			process->mainb[i]->bb->vec[6][0] > chunk->bb.min[0] &&
-			process->mainb[i]->bb->vec[6][1] > chunk->bb.min[1] &&
-			process->mainb[i]->bb->vec[6][2] > chunk->bb.min[2])
+		if (process->mainb[i]->bb.min[0] < chunk->bb.max[0] &&
+			process->mainb[i]->bb.min[1] < chunk->bb.max[1] &&
+			process->mainb[i]->bb.min[2] < chunk->bb.max[2] &&
+			process->mainb[i]->bb.max[0] > chunk->bb.min[0] &&
+			process->mainb[i]->bb.max[1] > chunk->bb.min[1] &&
+			process->mainb[i]->bb.max[2] > chunk->bb.min[2])
 		{
 			chunk->mainb[chunk->elem++] = process->mainb[i];
 		}
 	}
 
 	if (chunk->elem > 0) {
-		copy_v3_v3(allbb.min, chunk->mainb[0]->bb->vec[0]);
-		copy_v3_v3(allbb.max, chunk->mainb[0]->bb->vec[6]);
+		copy_v3_v3(allbb.min, chunk->mainb[0]->bb.min);
+		copy_v3_v3(allbb.max, chunk->mainb[0]->bb.max);
 		for (i = 1; i < chunk->elem; i++)
-			make_union(chunk->mainb[i]->bb, &allbb, &allbb);
+			make_union(&chunk->mainb[i]->bb, &allbb, &allbb);
 
 		build_bvh_spatial(chunk, &chunk->bvh, 0, chunk->elem, &allbb);
 	}
@@ -1243,18 +1266,23 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 			else {
 				while (ml) {
 					if (!(ml->flag & MB_HIDE)) {
-						float pos[4][4], rot[4][4];
+						float pos[4][4], rot[4][4], mat[4][4];
 						float expx, expy, expz;
 						float tempmin[3], tempmax[3];
 
-						MetaElem *new_ml;
+						BoundBox bb;
+						MLSmall *new_ml;
 
 						/* make a copy because of duplicates */
-						new_ml = BLI_memarena_alloc(process->pgn_elements, sizeof(MetaElem));
-						*(new_ml) = *ml;
-						new_ml->bb = BLI_memarena_alloc(process->pgn_elements, sizeof(BoundBox));
-						new_ml->mat = BLI_memarena_alloc(process->pgn_elements, 4 * 4 * sizeof(float));
-						new_ml->imat = BLI_memarena_alloc(process->pgn_elements, 4 * 4 * sizeof(float));
+						new_ml = BLI_memarena_alloc(process->pgn_elements, sizeof(MLSmall));
+						new_ml->expx = ml->expx;
+						new_ml->expy = ml->expy;
+						new_ml->expz = ml->expz;
+						new_ml->type = ml->type;
+						//*(new_ml) = *ml;
+						//new_ml->bb = BLI_memarena_alloc(process->pgn_elements, sizeof(BoundBox));
+						//new_ml->mat = BLI_memarena_alloc(process->pgn_elements, 4 * 4 * sizeof(float));
+						//new_ml->imat = BLI_memarena_alloc(process->pgn_elements, 4 * 4 * sizeof(float));
 
 						/* too big stiffness seems only ugly due to linear interpolation
 						* no need to have possibility for too big stiffness */
@@ -1262,7 +1290,7 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 						else new_ml->s = ml->s;
 
 						/* if metaball is negative, set stiffness negative */
-						if (new_ml->flag & MB_NEGATIVE) new_ml->s = -new_ml->s;
+						if (ml->flag & MB_NEGATIVE) new_ml->s = -new_ml->s;
 
 						/* Translation of MetaElem */
 						unit_m4(pos);
@@ -1274,9 +1302,9 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 						quat_to_mat4(rot, ml->quat);
 
 						/* basis object space -> world -> ml object space -> position -> rotation -> ml local space */
-						mul_m4_series((float(*)[4])new_ml->mat, obinv, bob->obmat, pos, rot);
+						mul_m4_series(mat, obinv, bob->obmat, pos, rot);
 						/* ml local space -> basis object space */
-						invert_m4_m4((float(*)[4])new_ml->imat, (float(*)[4])new_ml->mat);
+						invert_m4_m4(new_ml->imat, mat);
 
 						/* rad2 is inverse of squared radius */
 						new_ml->rad2 = 1 / (ml->rad * ml->rad);
@@ -1307,38 +1335,33 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 
 						/* untransformed Bounding Box of MetaElem */
 						/* TODO, its possible the elem type has been changed and the exp* values can use a fallback */
-						copy_v3_fl3(new_ml->bb->vec[0], -expx, -expy, -expz);  /* 0 */
-						copy_v3_fl3(new_ml->bb->vec[1], +expx, -expy, -expz);  /* 1 */
-						copy_v3_fl3(new_ml->bb->vec[2], +expx, +expy, -expz);  /* 2 */
-						copy_v3_fl3(new_ml->bb->vec[3], -expx, +expy, -expz);  /* 3 */
-						copy_v3_fl3(new_ml->bb->vec[4], -expx, -expy, +expz);  /* 4 */
-						copy_v3_fl3(new_ml->bb->vec[5], +expx, -expy, +expz);  /* 5 */
-						copy_v3_fl3(new_ml->bb->vec[6], +expx, +expy, +expz);  /* 6 */
-						copy_v3_fl3(new_ml->bb->vec[7], -expx, +expy, +expz);  /* 7 */
+						copy_v3_fl3(bb.vec[0], -expx, -expy, -expz);  /* 0 */
+						copy_v3_fl3(bb.vec[1], +expx, -expy, -expz);  /* 1 */
+						copy_v3_fl3(bb.vec[2], +expx, +expy, -expz);  /* 2 */
+						copy_v3_fl3(bb.vec[3], -expx, +expy, -expz);  /* 3 */
+						copy_v3_fl3(bb.vec[4], -expx, -expy, +expz);  /* 4 */
+						copy_v3_fl3(bb.vec[5], +expx, -expy, +expz);  /* 5 */
+						copy_v3_fl3(bb.vec[6], +expx, +expy, +expz);  /* 6 */
+						copy_v3_fl3(bb.vec[7], -expx, +expy, +expz);  /* 7 */
 
 						/* transformation of Metalem bb */
 						for (i = 0; i < 8; i++)
-							mul_m4_v3((float(*)[4])new_ml->mat, new_ml->bb->vec[i]);
+							mul_m4_v3(mat, bb.vec[i]);
 
 						/* find max and min of transformed bb */
 						INIT_MINMAX(tempmin, tempmax);
 						for (i = 0; i < 8; i++) {
-							DO_MINMAX(new_ml->bb->vec[i], tempmin, tempmax);
+							DO_MINMAX(bb.vec[i], tempmin, tempmax);
 						}
 
 						/* set only point 0 and 6 - AABB of Metaelem */
-						copy_v3_v3(new_ml->bb->vec[0], tempmin);
-						copy_v3_v3(new_ml->bb->vec[6], tempmax);
+						copy_v3_v3(new_ml->bb.min, tempmin);
+						copy_v3_v3(new_ml->bb.max, tempmax);
 
 						/* add new_ml to mainb[] */
 						if (process->totelem == process->mem) {
-							MetaElem **newelem;
 							process->mem = process->mem * 2 + 10;
-							newelem = MEM_mallocN(sizeof(MetaElem *) * process->mem, "metaballs");
-
-							memcpy(newelem, process->mainb, sizeof(MetaElem *) * process->totelem);
-							if (process->mainb) MEM_freeN(process->mainb);
-							process->mainb = newelem;
+							MEM_reallocN(process->mainb, sizeof(MLSmall *) * process->mem);
 						}
 						process->mainb[process->totelem++] = new_ml;
 					}
@@ -1350,10 +1373,10 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 
 	/* compute AABB of all Metaelems */
 	if (process->totelem > 0) {
-		copy_v3_v3(process->allbb.min, process->mainb[0]->bb->vec[0]);
-		copy_v3_v3(process->allbb.max, process->mainb[0]->bb->vec[6]);
+		copy_v3_v3(process->allbb.min, process->mainb[0]->bb.min);
+		copy_v3_v3(process->allbb.max, process->mainb[0]->bb.max);
 		for (i = 1; i < process->totelem; i++)
-			make_union(process->mainb[i]->bb, &process->allbb, &process->allbb);
+			make_union(&process->mainb[i]->bb, &process->allbb, &process->allbb);
 	}
 }
 
