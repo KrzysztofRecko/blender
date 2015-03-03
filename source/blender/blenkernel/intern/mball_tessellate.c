@@ -112,7 +112,7 @@ typedef struct MLSmall {
 	short type;
 	float expx, expy, expz;
 	float rad2, s;
-	Box bb;
+	Box *bb;
 } MLSmall;
 
 typedef struct MetaballBVHNode {	/* BVH node */
@@ -149,6 +149,7 @@ typedef struct process {        /* parameters, storage */
 
 	/* memory allocation from common pool */
 	MemArena *pgn_elements;
+	MemArena *metaballs;
 } PROCESS;
 
 typedef struct chunk {
@@ -200,8 +201,8 @@ static void make_union(const Box *a, const Box *b, Box *r_out)
 
 static void make_box_from_ml(Box *r, MLSmall *ml)
 {
-	copy_v3_v3(r->max, ml->bb.max);
-	copy_v3_v3(r->min, ml->bb.min);
+	copy_v3_v3(r->max, ml->bb->max);
+	copy_v3_v3(r->min, ml->bb->min);
 	r->ml = ml;
 }
 
@@ -216,8 +217,8 @@ static unsigned int partition_mainb(MLSmall **mainb, unsigned int start, unsigne
 	div *= 2.0f;
 
 	while (1) {
-		while (i < j && div > (mainb[i]->bb.max[s] + mainb[i]->bb.min[s])) i++;
-		while (j > i && div < (mainb[j]->bb.max[s] + mainb[j]->bb.min[s])) j--;
+		while (i < j && div > (mainb[i]->bb->max[s] + mainb[i]->bb->min[s])) i++;
+		while (j > i && div < (mainb[j]->bb->max[s] + mainb[j]->bb->min[s])) j--;
 
 		if (i >= j)
 			break;
@@ -264,7 +265,7 @@ static void build_bvh_spatial(
 
 	if (part > start + 1) {
 		for (j = start; j < part; j++)
-			make_union(&chunk->mainb[j]->bb, &node->bb[0], &node->bb[0]);
+			make_union(chunk->mainb[j]->bb, &node->bb[0], &node->bb[0]);
 
 		node->child[0] = BLI_memarena_alloc(chunk->mem, sizeof(MetaballBVHNode));
 		build_bvh_spatial(chunk, node->child[0], start, part, &node->bb[0]);
@@ -276,7 +277,7 @@ static void build_bvh_spatial(
 
 		if (part < end - 1) {
 			for (j = part; j < end; j++)
-				make_union(&chunk->mainb[j]->bb, &node->bb[1], &node->bb[1]);
+				make_union(chunk->mainb[j]->bb, &node->bb[1], &node->bb[1]);
 
 			node->child[1] = BLI_memarena_alloc(chunk->mem, sizeof(MetaballBVHNode));
 			build_bvh_spatial(chunk, node->child[1], part, end, &node->bb[1]);
@@ -483,6 +484,7 @@ static void freeprocess(PROCESS *process)
 	if (process->edges) MEM_freeN(process->edges);
 	if (process->mainb) MEM_freeN(process->mainb);
 	if (process->pgn_elements) BLI_memarena_free(process->pgn_elements);
+	if (process->metaballs) BLI_memarena_free(process->metaballs);
 }
 
 static void freechunk(CHUNK *chunk)
@@ -1081,10 +1083,10 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 
 	ml = chunk->mainb[em];
 
-	mid_v3_v3v3(tmp, ml->bb.min, ml->bb.max);
+	mid_v3_v3v3(tmp, ml->bb->min, ml->bb->max);
 	closest_latice(center, tmp, chunk->process->size);
-	prev_lattice(lbn, ml->bb.min, chunk->process->size);
-	next_lattice(rtf, ml->bb.max, chunk->process->size);
+	prev_lattice(lbn, ml->bb->min, chunk->process->size);
+	next_lattice(rtf, ml->bb->max, chunk->process->size);
 
 	DO_MAX(min, lbn);
 	DO_MIN(max, rtf);
@@ -1139,22 +1141,22 @@ static void init_chunk(CHUNK *chunk, PROCESS *process)
 	chunk->mem = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball chunk memarena");
 
 	for (i = 0; i < process->totelem; i++) {
-		if (process->mainb[i]->bb.min[0] < chunk->bb.max[0] &&
-			process->mainb[i]->bb.min[1] < chunk->bb.max[1] &&
-			process->mainb[i]->bb.min[2] < chunk->bb.max[2] &&
-			process->mainb[i]->bb.max[0] > chunk->bb.min[0] &&
-			process->mainb[i]->bb.max[1] > chunk->bb.min[1] &&
-			process->mainb[i]->bb.max[2] > chunk->bb.min[2])
+		if (process->mainb[i]->bb->min[0] < chunk->bb.max[0] &&
+			process->mainb[i]->bb->min[1] < chunk->bb.max[1] &&
+			process->mainb[i]->bb->min[2] < chunk->bb.max[2] &&
+			process->mainb[i]->bb->max[0] > chunk->bb.min[0] &&
+			process->mainb[i]->bb->max[1] > chunk->bb.min[1] &&
+			process->mainb[i]->bb->max[2] > chunk->bb.min[2])
 		{
 			chunk->mainb[chunk->elem++] = process->mainb[i];
 		}
 	}
 
 	if (chunk->elem > 0) {
-		copy_v3_v3(allbb.min, chunk->mainb[0]->bb.min);
-		copy_v3_v3(allbb.max, chunk->mainb[0]->bb.max);
+		copy_v3_v3(allbb.min, chunk->mainb[0]->bb->min);
+		copy_v3_v3(allbb.max, chunk->mainb[0]->bb->max);
 		for (i = 1; i < chunk->elem; i++)
-			make_union(&chunk->mainb[i]->bb, &allbb, &allbb);
+			make_union(chunk->mainb[i]->bb, &allbb, &allbb);
 
 		build_bvh_spatial(chunk, &chunk->bvh, 0, chunk->elem, &allbb);
 	}
@@ -1274,7 +1276,8 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 						MLSmall *new_ml;
 
 						/* make a copy because of duplicates */
-						new_ml = BLI_memarena_alloc(process->pgn_elements, sizeof(MLSmall));
+						new_ml = BLI_memarena_alloc(process->metaballs, sizeof(MLSmall));
+						new_ml->bb = BLI_memarena_alloc(process->pgn_elements, sizeof(Box));
 						new_ml->expx = ml->expx;
 						new_ml->expy = ml->expy;
 						new_ml->expz = ml->expz;
@@ -1355,8 +1358,8 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 						}
 
 						/* set only point 0 and 6 - AABB of Metaelem */
-						copy_v3_v3(new_ml->bb.min, tempmin);
-						copy_v3_v3(new_ml->bb.max, tempmax);
+						copy_v3_v3(new_ml->bb->min, tempmin);
+						copy_v3_v3(new_ml->bb->max, tempmax);
 
 						/* add new_ml to mainb[] */
 						if (process->totelem == process->mem) {
@@ -1373,10 +1376,10 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 
 	/* compute AABB of all Metaelems */
 	if (process->totelem > 0) {
-		copy_v3_v3(process->allbb.min, process->mainb[0]->bb.min);
-		copy_v3_v3(process->allbb.max, process->mainb[0]->bb.max);
+		copy_v3_v3(process->allbb.min, process->mainb[0]->bb->min);
+		copy_v3_v3(process->allbb.max, process->mainb[0]->bb->max);
 		for (i = 1; i < process->totelem; i++)
-			make_union(&process->mainb[i]->bb, &process->allbb, &process->allbb);
+			make_union(process->mainb[i]->bb, &process->allbb, &process->allbb);
 	}
 }
 
@@ -1416,6 +1419,7 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 	process.delta = process.size * 0.001f;
 
 	process.pgn_elements = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball memarena");
+	process.metaballs = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaballs memarena");
 
 	/* initialize all mainb (MetaElems) */
 	init_meta(eval_ctx, &process, scene, ob);
