@@ -924,7 +924,6 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 	int first[3], second[3];
 	EDGELIST *q;
 
-<<<<<<< HEAD
 	first[0] = c1->i; first[1] = c1->j; first[2] = c1->k;
 	second[0] = c2->i; second[1] = c2->j; second[2] = c2->k;
 
@@ -932,11 +931,6 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 		SWAP(int, first[0], second[0]);
 		SWAP(int, first[1], second[1]);
 		SWAP(int, first[2], second[2]);
-=======
-#pragma omp critical (Vertid)
-	{
-		vid = getedge(chunk->process->edges, c1->i, c1->j, c1->k, c2->i, c2->j, c2->k);
->>>>>>> mball-multithread
 	}
 
 	index = HASH(first[0], first[1], first[2]) + HASH(second[0], second[1], second[2]);
@@ -960,11 +954,7 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 	vnormal(chunk, v, no);
 #endif
 
-<<<<<<< HEAD
 #pragma omp critical (GetEdge)
-=======
-#pragma omp critical (Vertid)
->>>>>>> mball-multithread
 	{
 		addtovertices(chunk->process, v, no);            /* save vertex */
 		vid = (int)chunk->process->curvertex - 1;
@@ -1188,49 +1178,15 @@ static void init_chunk(CHUNK *chunk, PROCESS *process)
  */
 static void polygonize(PROCESS *process)
 {
-<<<<<<< HEAD
-	CHUNK chunks[4];
-	int i;
-=======
 	CHUNK chunks[NUM_CHUNKS];
 	int i;
 	float step;
->>>>>>> mball-multithread
 
 	process->edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
 	process->edgelocks = MEM_callocN(2 * HASHSIZE * sizeof(omp_lock_t), "edgelocks");
 	makecubetable();
 
-<<<<<<< HEAD
-	copy_v3_v3(chunks[0].bb.min, process->allbb.min);
-	copy_v3_v3(chunks[0].bb.max, process->allbb.max);
-	chunks[0].bb.max[0] = (chunks[0].bb.max[0] + chunks[0].bb.min[0]) / 2.0f;
-	chunks[0].bb.max[1] = (chunks[0].bb.max[1] + chunks[0].bb.min[1]) / 2.0f;
-	copy_v3_v3(chunks[1].bb.min, process->allbb.min);
-	copy_v3_v3(chunks[1].bb.max, process->allbb.max);
-	chunks[1].bb.min[0] = (chunks[1].bb.max[0] + chunks[1].bb.min[0]) / 2.0f;
-	chunks[1].bb.max[1] = (chunks[1].bb.max[1] + chunks[1].bb.min[1]) / 2.0f;
-
-	chunks[0].process = chunks[1].process = process;
-
-	copy_v3_v3(chunks[2].bb.min, process->allbb.min);
-	copy_v3_v3(chunks[2].bb.max, process->allbb.max);
-	chunks[2].bb.max[0] = (chunks[2].bb.max[0] + chunks[2].bb.min[0]) / 2.0f;
-	chunks[2].bb.min[1] = (chunks[2].bb.max[1] + chunks[2].bb.min[1]) / 2.0f;
-	copy_v3_v3(chunks[3].bb.min, process->allbb.min);
-	copy_v3_v3(chunks[3].bb.max, process->allbb.max);
-	chunks[3].bb.min[0] = (chunks[3].bb.max[0] + chunks[3].bb.min[0]) / 2.0f;
-	chunks[3].bb.min[1] = (chunks[3].bb.max[1] + chunks[3].bb.min[1]) / 2.0f;
-
-	chunks[2].process = chunks[3].process = process;
-
 	for (i = 0; i < 2 * HASHSIZE; i++) omp_init_lock(&process->edgelocks[i]);
-
-#pragma omp parallel num_threads(4)
-	{
-		polygonize_chunk(&chunks[omp_get_thread_num()]);
-		freechunk(&chunks[omp_get_thread_num()]);
-=======
 	step = (process->allbb.max[1] - process->allbb.min[1]) / (float)NUM_CHUNKS;
 
 	for (i = 0; i < NUM_CHUNKS; i++) {
@@ -1246,7 +1202,6 @@ static void polygonize(PROCESS *process)
 		init_chunk(&chunks[i], process);
 		polygonize_chunk(&chunks[i]);
 		freechunk(&chunks[i]);
->>>>>>> mball-multithread
 	}
 
 	for (i = 0; i < 2 * HASHSIZE; i++) omp_destroy_lock(&process->edgelocks[i]);
