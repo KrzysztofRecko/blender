@@ -57,8 +57,8 @@
 
 #include "BLI_strict_flags.h"
 
-#define MB_ACCUM_NORMAL
-#define MB_LINEAR_CONVERGE
+//#define MB_ACCUM_NORMAL
+//#define MB_LINEAR_CONVERGE
 
 /* Data types */
 
@@ -109,10 +109,10 @@ typedef struct Box {			/* an AABB with pointer to metalelem */
 
 typedef struct MLSmall {
 	float imat[4][4];
-	float rad2, s;
-	Box bb;
 	short type;
 	float expx, expy, expz;
+	float rad2, s;
+	Box bb;
 } MLSmall;
 
 typedef struct MetaballBVHNode {	/* BVH node */
