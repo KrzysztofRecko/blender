@@ -1190,6 +1190,14 @@ static void polygonize(PROCESS *process)
 
 		prev_lattice(chunks[i].max_lat, chunks[i].bb.max, process->size);
 		next_lattice(chunks[i].min_lat, chunks[i].bb.min, process->size);
+
+		chunks[i].bb.max[0] = (chunks[i].max_lat[0] + 0.5f) * process->size + process->delta * 2.0f;
+		chunks[i].bb.max[1] = (chunks[i].max_lat[1] + 0.5f) * process->size + process->delta * 2.0f;
+		chunks[i].bb.max[2] = (chunks[i].max_lat[2] + 0.5f) * process->size + process->delta * 2.0f;
+
+		chunks[i].bb.min[0] = (chunks[i].min_lat[0] - 0.5f) * process->size - process->delta * 2.0f;
+		chunks[i].bb.min[1] = (chunks[i].min_lat[1] - 0.5f) * process->size - process->delta * 2.0f;
+		chunks[i].bb.min[2] = (chunks[i].min_lat[2] - 0.5f) * process->size - process->delta * 2.0f;
 	}
 	
 #pragma omp parallel for
