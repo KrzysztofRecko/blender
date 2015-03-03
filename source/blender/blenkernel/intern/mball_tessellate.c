@@ -957,21 +957,20 @@ static int vertid(PROCESS *process, CHUNK *chunk, const CORNER *c1, const CORNER
 	}
 
 	index = HASH(first[0], first[1], first[2]) + HASH(second[0], second[1], second[2]);
-	//omp_set_lock(&process->edgelocks[index / 2048]);
+	omp_set_lock(&process->edgelocks[index / 512]);
 
 	q = process->edges[index];
 	for (; q != NULL; q = q->next) {
 		if (q->i1 == first[0] && q->j1 == first[1] && q->k1 == first[2] &&
 			q->i2 == second[0] && q->j2 == second[1] && q->k2 == second[2])
 		{
-			//omp_unset_lock(&process->edgelocks[index / 2048]);
+			omp_unset_lock(&process->edgelocks[index / 512]);
 			return q->vid;
 		}
 	}
 
-	omp_set_lock(&process->vertex_lock);
-	vid = addtovertices(process);
-	omp_unset_lock(&process->vertex_lock);
+	//omp_set_lock(&process->vertex_lock);
+	//omp_unset_lock(&process->vertex_lock);
 
 	omp_set_lock(&process->pgn_lock);
 	q = BLI_memarena_alloc(process->pgn_elements, sizeof(EDGELIST));
@@ -983,11 +982,9 @@ static int vertid(PROCESS *process, CHUNK *chunk, const CORNER *c1, const CORNER
 	q->i2 = second[0];
 	q->j2 = second[1];
 	q->k2 = second[2];
-	q->vid = vid;
+	
 	q->next = chunk->process->edges[index];
 	chunk->process->edges[index] = q;
-
-	//omp_unset_lock(&process->edgelocks[index / 2048]);
 
 	converge(chunk, c1, c2, v);  /* position */
 
@@ -998,9 +995,13 @@ static int vertid(PROCESS *process, CHUNK *chunk, const CORNER *c1, const CORNER
 #endif
 
 	omp_set_lock(&process->vertex_lock);
+	vid = addtovertices(process);
 	copy_v3_v3(chunk->process->co[vid], v);
 	copy_v3_v3(chunk->process->no[vid], no);
 	omp_unset_lock(&process->vertex_lock);
+
+	q->vid = vid;
+	omp_unset_lock(&process->edgelocks[index / 512]);
 
 	return vid;
 }
@@ -1210,10 +1211,10 @@ static void polygonize(PROCESS *process)
 	float step;
 
 	process->edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
-	process->edgelocks = MEM_callocN(32 * sizeof(omp_lock_t), "edgelocks");
+	process->edgelocks = MEM_callocN(128 * sizeof(omp_lock_t), "edgelocks");
 	makecubetable();
 
-	for (i = 0; i < 32; i++) omp_init_lock(&process->edgelocks[i]);
+	for (i = 0; i < 128; i++) omp_init_lock(&process->edgelocks[i]);
 	omp_init_lock(&process->vertex_lock);
 	omp_init_lock(&process->index_lock);
 	omp_init_lock(&process->pgn_lock);
@@ -1245,7 +1246,7 @@ static void polygonize(PROCESS *process)
 		freechunk(&chunks[i]);
 	}
 
-	for (i = 0; i < 32; i++) omp_destroy_lock(&process->edgelocks[i]);
+	for (i = 0; i < 128; i++) omp_destroy_lock(&process->edgelocks[i]);
 	omp_destroy_lock(&process->vertex_lock);
 	omp_destroy_lock(&process->index_lock);
 	omp_destroy_lock(&process->pgn_lock);
