@@ -1361,7 +1361,7 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 						/* add new_ml to mainb[] */
 						if (process->totelem == process->mem) {
 							process->mem = process->mem * 2 + 10;
-							MEM_reallocN(process->mainb, sizeof(MLSmall *) * process->mem);
+							process->mainb = MEM_reallocN(process->mainb, sizeof(MLSmall *) * process->mem);
 						}
 						process->mainb[process->totelem++] = new_ml;
 					}
