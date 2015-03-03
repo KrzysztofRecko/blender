@@ -57,8 +57,8 @@
 
 #include "BLI_strict_flags.h"
 
-#define MB_ACCUM_NORMAL
-#define MB_LINEAR_CONVERGE
+//#define MB_ACCUM_NORMAL
+//#define MB_LINEAR_CONVERGE
 
 /* Data types */
 
@@ -861,16 +861,13 @@ static int getedge(EDGELIST *table[],
 /**
  * Adds a vertex, expands memory if needed.
  */
-static void addtovertices(PROCESS *process, const float v[3], const float no[3])
+static void addtovertices(PROCESS *process)
 {
 	if (process->curvertex == process->totvertex) {
 		process->totvertex += 4096;
 		process->co = MEM_reallocN(process->co, process->totvertex * sizeof(float[3]));
 		process->no = MEM_reallocN(process->no, process->totvertex * sizeof(float[3]));
 	}
-
-	copy_v3_v3(process->co[process->curvertex], v);
-	copy_v3_v3(process->no[process->curvertex], no);
 
 	process->curvertex++;
 }
@@ -946,17 +943,9 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 		}
 	}
 
-	converge(chunk, c1, c2, v);  /* position */
-
-#ifdef MB_ACCUM_NORMAL
-	no[0] = no[1] = no[2] = 0.0f;
-#else
-	vnormal(chunk, v, no);
-#endif
-
 #pragma omp critical (GetEdge)
 	{
-		addtovertices(chunk->process, v, no);            /* save vertex */
+		addtovertices(chunk->process);            /* save vertex */
 		vid = (int)chunk->process->curvertex - 1;
 		q = BLI_memarena_alloc(chunk->process->pgn_elements, sizeof(EDGELIST));
 	}
@@ -972,6 +961,17 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 	chunk->process->edges[index] = q;
 
 	omp_unset_lock(&chunk->process->edgelocks[index % 32]);
+
+	converge(chunk, c1, c2, v);  /* position */
+
+#ifdef MB_ACCUM_NORMAL
+	no[0] = no[1] = no[2] = 0.0f;
+#else
+	vnormal(chunk, v, no);
+#endif
+
+	copy_v3_v3(chunk->process->co[vid], v);
+	copy_v3_v3(chunk->process->no[vid], no);
 
 	return vid;
 }
