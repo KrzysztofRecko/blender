@@ -1136,55 +1136,6 @@ static void init_chunk(CHUNK *chunk, PROCESS *process)
 	}
 }
 
-static void draw_box(PROCESS *process, Box *box)
-{
-	if (!box) return;
-	float n[3] = { 0.0f, 0.0f, 0.0f };
-
-	float v[8][3];
-	v[0][0] = box->min[0];
-	v[0][1] = box->min[1];
-	v[0][2] = box->min[2];
-
-	v[1][0] = box->max[0];
-	v[1][1] = box->min[1];
-	v[1][2] = box->min[2];
-
-	v[2][0] = box->min[0];
-	v[2][1] = box->max[1];
-	v[2][2] = box->min[2];
-
-	v[3][0] = box->min[0];
-	v[3][1] = box->min[1];
-	v[3][2] = box->max[2];
-
-	v[4][0] = box->max[0];
-	v[4][1] = box->max[1];
-	v[4][2] = box->min[2];
-
-	v[5][0] = box->min[0];
-	v[5][1] = box->max[1];
-	v[5][2] = box->max[2];
-
-	v[6][0] = box->max[0];
-	v[6][1] = box->min[1];
-	v[6][2] = box->max[2];
-
-	v[7][0] = box->max[0];
-	v[7][1] = box->max[1];
-	v[7][2] = box->max[2];
-
-	for (int i = 0; i < 8; i++)
-		addtovertices(process, v[i], n);
-
-	make_face(process, process->curvertex - 8, process->curvertex - 6, process->curvertex - 4, process->curvertex - 7);
-	make_face(process, process->curvertex - 8, process->curvertex - 5, process->curvertex - 3, process->curvertex - 6);
-	make_face(process, process->curvertex - 8, process->curvertex - 7, process->curvertex - 2, process->curvertex - 5);
-	make_face(process, process->curvertex - 7, process->curvertex - 4, process->curvertex - 1, process->curvertex - 2);
-	make_face(process, process->curvertex - 6, process->curvertex - 3, process->curvertex - 1, process->curvertex - 4);
-	make_face(process, process->curvertex - 5, process->curvertex - 2, process->curvertex - 1, process->curvertex - 3);
-}
-
 #define NUM_CHUNKS 4
 /**
  * The main polygonization proc.
@@ -1213,15 +1164,13 @@ static void polygonize(PROCESS *process)
 		prev_lattice(chunks[i].max_lat, chunks[i].bb.max, process->size);
 		next_lattice(chunks[i].min_lat, chunks[i].bb.min, process->size);
 
-		/*chunks[i].bb.max[0] = (chunks[i].max_lat[0] + 0.5f) * process->size + process->delta * 2.0f;
+		chunks[i].bb.max[0] = (chunks[i].max_lat[0] + 0.5f) * process->size + process->delta * 2.0f;
 		chunks[i].bb.max[1] = (chunks[i].max_lat[1] + 0.5f) * process->size + process->delta * 2.0f;
 		chunks[i].bb.max[2] = (chunks[i].max_lat[2] + 0.5f) * process->size + process->delta * 2.0f;
 
 		chunks[i].bb.min[0] = (chunks[i].min_lat[0] - 0.5f) * process->size - process->delta * 2.0f;
 		chunks[i].bb.min[1] = (chunks[i].min_lat[1] - 0.5f) * process->size - process->delta * 2.0f;
-		chunks[i].bb.min[2] = (chunks[i].min_lat[2] - 0.5f) * process->size - process->delta * 2.0f;*/
-
-		draw_box(process, &chunks[i].bb);
+		chunks[i].bb.min[2] = (chunks[i].min_lat[2] - 0.5f) * process->size - process->delta * 2.0f;
 	}
 	
 #pragma omp parallel for
