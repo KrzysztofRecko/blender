@@ -57,8 +57,8 @@
 
 #include "BLI_strict_flags.h"
 
-#define MB_ACCUM_NORMAL
-#define MB_LINEAR_CONVERGE
+//#define MB_ACCUM_NORMAL
+//#define MB_LINEAR_CONVERGE
 
 /* Data types */
 
@@ -143,13 +143,16 @@ typedef struct process {        /* parameters, storage */
 	int (*indices)[4];          /* output indices */
 	unsigned int totindex;		/* size of memory allocated for indices */
 	unsigned int curindex;		/* number of currently added indices */
+	omp_lock_t index_lock;
 
 	float (*co)[3], (*no)[3];   /* surface vertices - positions and normals */
 	unsigned int totvertex;		/* memory size */
 	unsigned int curvertex;		/* currently added vertices */
+	omp_lock_t vertex_lock;
 
 	/* memory allocation from common pool */
 	MemArena *pgn_elements;
+	omp_lock_t pgn_lock;
 	MemArena *metaballs;
 } PROCESS;
 
@@ -174,7 +177,7 @@ typedef struct chunk {
 } CHUNK;
 
 /* Forward declarations */
-static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2);
+static int vertid(PROCESS *process, CHUNK *chunk, const CORNER *c1, const CORNER *c2);
 static void add_cube(CHUNK *chunk, int i, int j, int k);
 static void make_face(PROCESS *process, int i1, int i2, int i3, int i4);
 static void converge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, float r_p[3]);
@@ -434,15 +437,14 @@ static void make_face(PROCESS *process, int i1, int i2, int i3, int i4)
 	float n[3];
 #endif
 
-#pragma omp critical (MakeFace)
-	{
-		if (UNLIKELY(process->totindex == process->curindex)) {
-			process->totindex += 4096;
-			process->indices = MEM_reallocN(process->indices, sizeof(int[4]) * process->totindex);
-		}
+	omp_set_lock(&process->index_lock);
 
-		cur = process->indices[process->curindex++];
+	if (UNLIKELY(process->totindex == process->curindex)) {
+		process->totindex += 4096;
+		process->indices = MEM_reallocN(process->indices, sizeof(int[4]) * process->totindex);
 	}
+
+	cur = process->indices[process->curindex++];
 
 	/* displists now support array drawing, we treat tri's as fake quad */
 
@@ -457,21 +459,24 @@ static void make_face(PROCESS *process, int i1, int i2, int i3, int i4)
 		cur[3] = i4;
 	}
 
+	omp_unset_lock(&process->index_lock);
+
 #ifdef MB_ACCUM_NORMAL
+	omp_set_lock(&process->vertex_lock);
 	if (i4 == 0) {
 		normal_tri_v3(n, process->co[i1], process->co[i2], process->co[i3]);
 		accumulate_vertex_normals(
-		        process->no[i1], process->no[i2], process->no[i3], NULL, n,
-		        process->co[i1], process->co[i2], process->co[i3], NULL);
+			process->no[i1], process->no[i2], process->no[i3], NULL, n,
+			process->co[i1], process->co[i2], process->co[i3], NULL);
 	}
 	else {
 		normal_quad_v3(n, process->co[i1], process->co[i2], process->co[i3], process->co[i4]);
 		accumulate_vertex_normals(
-		        process->no[i1], process->no[i2], process->no[i3], process->no[i4], n,
-		        process->co[i1], process->co[i2], process->co[i3], process->co[i4]);
+			process->no[i1], process->no[i2], process->no[i3], process->no[i4], n,
+			process->co[i1], process->co[i2], process->co[i3], process->co[i4]);
 	}
+	omp_unset_lock(&process->vertex_lock);
 #endif
-
 }
 
 /* Frees allocated memory */
@@ -563,7 +568,7 @@ static void docube(CHUNK *chunk, CUBE *cube)
 			c1 = cube->corners[corner1[edges->i]];
 			c2 = cube->corners[corner2[edges->i]];
 
-			indexar[count] = vertid(chunk, c1, c2);
+			indexar[count] = vertid(chunk->process, chunk, c1, c2);
 			count++;
 		}
 
@@ -878,15 +883,19 @@ static int getedge(EDGELIST *table[],
 /**
  * Adds a vertex, expands memory if needed.
  */
-static void addtovertices(PROCESS *process)
+static int addtovertices(PROCESS *process)
 {
+	int ret;
+	
 	if (process->curvertex == process->totvertex) {
 		process->totvertex += 4096;
 		process->co = MEM_reallocN(process->co, process->totvertex * sizeof(float[3]));
 		process->no = MEM_reallocN(process->no, process->totvertex * sizeof(float[3]));
 	}
 
-	process->curvertex++;
+	ret = process->curvertex++;
+	
+	return ret;
 }
 
 /**
@@ -930,7 +939,7 @@ static void vnormal(CHUNK *chunk, const float point[3], float r_no[3])
  *
  * If it wasn't previously computed, does #converge() and adds vertex to process.
  */
-static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
+static int vertid(PROCESS *process, CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 {
 	float v[3], no[3];
 	int vid;
@@ -948,24 +957,25 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 	}
 
 	index = HASH(first[0], first[1], first[2]) + HASH(second[0], second[1], second[2]);
-	omp_set_lock(&chunk->process->edgelocks[index % 32]);
+	//omp_set_lock(&process->edgelocks[index / 2048]);
 
-	q = chunk->process->edges[index];
+	q = process->edges[index];
 	for (; q != NULL; q = q->next) {
 		if (q->i1 == first[0] && q->j1 == first[1] && q->k1 == first[2] &&
 			q->i2 == second[0] && q->j2 == second[1] && q->k2 == second[2])
 		{
-			omp_unset_lock(&chunk->process->edgelocks[index % 32]);
+			//omp_unset_lock(&process->edgelocks[index / 2048]);
 			return q->vid;
 		}
 	}
 
-#pragma omp critical (GetEdge)
-	{
-		addtovertices(chunk->process);            /* save vertex */
-		vid = (int)chunk->process->curvertex - 1;
-		q = BLI_memarena_alloc(chunk->process->pgn_elements, sizeof(EDGELIST));
-	}
+	omp_set_lock(&process->vertex_lock);
+	vid = addtovertices(process);
+	omp_unset_lock(&process->vertex_lock);
+
+	omp_set_lock(&process->pgn_lock);
+	q = BLI_memarena_alloc(process->pgn_elements, sizeof(EDGELIST));
+	omp_unset_lock(&process->pgn_lock);
 
 	q->i1 = first[0];
 	q->j1 = first[1];
@@ -977,18 +987,20 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 	q->next = chunk->process->edges[index];
 	chunk->process->edges[index] = q;
 
-	omp_unset_lock(&chunk->process->edgelocks[index % 32]);
+	//omp_unset_lock(&process->edgelocks[index / 2048]);
 
 	converge(chunk, c1, c2, v);  /* position */
 
 #ifdef MB_ACCUM_NORMAL
 	no[0] = no[1] = no[2] = 0.0f;
 #else
-	vnormal(chunk, v, no);
+	vnormal(chunk, v, no); /* normal */
 #endif
 
+	omp_set_lock(&process->vertex_lock);
 	copy_v3_v3(chunk->process->co[vid], v);
 	copy_v3_v3(chunk->process->no[vid], no);
+	omp_unset_lock(&process->vertex_lock);
 
 	return vid;
 }
@@ -1202,6 +1214,9 @@ static void polygonize(PROCESS *process)
 	makecubetable();
 
 	for (i = 0; i < 32; i++) omp_init_lock(&process->edgelocks[i]);
+	omp_init_lock(&process->vertex_lock);
+	omp_init_lock(&process->index_lock);
+	omp_init_lock(&process->pgn_lock);
 	step = (process->allbb.max[1] - process->allbb.min[1]) / (float)NUM_CHUNKS;
 
 	for (i = 0; i < NUM_CHUNKS; i++) {
@@ -1231,6 +1246,9 @@ static void polygonize(PROCESS *process)
 	}
 
 	for (i = 0; i < 32; i++) omp_destroy_lock(&process->edgelocks[i]);
+	omp_destroy_lock(&process->vertex_lock);
+	omp_destroy_lock(&process->index_lock);
+	omp_destroy_lock(&process->pgn_lock);
 }
 
 /**
