@@ -154,7 +154,10 @@ typedef struct process {        /* parameters, storage */
 
 typedef struct chunk {
 	PROCESS *process;
+
 	Box bb;
+	int min_lat[3], max_lat[3];
+
 	MLSmall **mainb;
 	unsigned int elem;
 
@@ -1039,13 +1042,9 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
 	CUBES *ncube;
 	int n;
 
-	int max[3], min[3];
-	next_lattice(max, chunk->bb.max, chunk->process->size);
-	next_lattice(min, chunk->bb.min, chunk->process->size);
-
-	if (i < min[0] || i > max[0] ||
-		j < min[1] || j > max[1] ||
-		k < min[2] || k > max[2]) return;
+	if (i < chunk->min_lat[0] || i > chunk->max_lat[0] ||
+		j < chunk->min_lat[1] || j > chunk->max_lat[1] ||
+		k < chunk->min_lat[2] || k > chunk->max_lat[2]) return;
 
 	/* test if cube has been found before */
 	if (setcenter(chunk, chunk->centers, i, j, k) == 0) {
@@ -1137,6 +1136,7 @@ static void init_chunk(CHUNK *chunk, PROCESS *process)
 	chunk->process = process;
 	chunk->bvh_queue_size = 0;
 	chunk->elem = 0;
+
 	chunk->mainb = MEM_mallocN(sizeof(MLSmall *) * process->totelem, "chunk's metaballs");
 	chunk->mem = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball chunk memarena");
 
@@ -1155,6 +1155,7 @@ static void init_chunk(CHUNK *chunk, PROCESS *process)
 	if (chunk->elem > 0) {
 		copy_v3_v3(allbb.min, chunk->mainb[0]->bb->min);
 		copy_v3_v3(allbb.max, chunk->mainb[0]->bb->max);
+
 		for (i = 1; i < chunk->elem; i++)
 			make_union(chunk->mainb[i]->bb, &allbb, &allbb);
 
@@ -1186,6 +1187,9 @@ static void polygonize(PROCESS *process)
 
 		chunks[i].bb.max[1] = process->allbb.min[1] + step * (i + 1);
 		chunks[i].bb.min[1] = process->allbb.min[1] + step * i;
+
+		prev_lattice(chunks[i].max_lat, chunks[i].bb.max, process->size);
+		next_lattice(chunks[i].min_lat, chunks[i].bb.min, process->size);
 	}
 	
 #pragma omp parallel for
