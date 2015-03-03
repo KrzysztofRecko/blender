@@ -57,8 +57,8 @@
 
 #include "BLI_strict_flags.h"
 
-//#define MB_ACCUM_NORMAL
-//#define MB_LINEAR_CONVERGE
+#define MB_ACCUM_NORMAL
+#define MB_LINEAR_CONVERGE
 
 /* Data types */
 
@@ -179,17 +179,6 @@ static void make_face(PROCESS *process, int i1, int i2, int i3, int i4);
 static void converge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, float r_p[3]);
 
 /* ******************* SIMPLE BVH ********************* */
-
-//static void make_union(const BoundBox *a, const Box *b, Box *r_out)
-//{
-//	r_out->min[0] = min_ff(a->vec[0][0], b->min[0]);
-//	r_out->min[1] = min_ff(a->vec[0][1], b->min[1]);
-//	r_out->min[2] = min_ff(a->vec[0][2], b->min[2]);
-//
-//	r_out->max[0] = max_ff(a->vec[6][0], b->max[0]);
-//	r_out->max[1] = max_ff(a->vec[6][1], b->max[1]);
-//	r_out->max[2] = max_ff(a->vec[6][2], b->max[2]);
-//}
 
 static void make_union(const Box *a, const Box *b, Box *r_out)
 {
@@ -444,12 +433,15 @@ static void make_face(PROCESS *process, int i1, int i2, int i3, int i4)
 	float n[3];
 #endif
 
-	if (UNLIKELY(process->totindex == process->curindex)) {
-		process->totindex += 4096;
-		process->indices = MEM_reallocN(process->indices, sizeof(int[4]) * process->totindex);
-	}
+#pragma omp critical (MakeFace)
+	{
+		if (UNLIKELY(process->totindex == process->curindex)) {
+			process->totindex += 4096;
+			process->indices = MEM_reallocN(process->indices, sizeof(int[4]) * process->totindex);
+		}
 
-	cur = process->indices[process->curindex++];
+		cur = process->indices[process->curindex++];
+	}
 
 	/* displists now support array drawing, we treat tri's as fake quad */
 
@@ -573,48 +565,45 @@ static void docube(CHUNK *chunk, CUBE *cube)
 			count++;
 		}
 
-#pragma omp critical (AddFace)
-		{
-			/* Adds faces to output. */
-			if (count > 2) {
-				switch (count) {
-					case 3:
-						make_face(chunk->process, indexar[2], indexar[1], indexar[0], 0);
-						break;
-					case 4:
-						if (indexar[0] == 0) make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
-						else make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
-						break;
-					case 5:
-						if (indexar[0] == 0) make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
-						else make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
+		/* Adds faces to output. */
+		if (count > 2) {
+			switch (count) {
+				case 3:
+					make_face(chunk->process, indexar[2], indexar[1], indexar[0], 0);
+					break;
+				case 4:
+					if (indexar[0] == 0) make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
+					else make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
+					break;
+				case 5:
+					if (indexar[0] == 0) make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
+					else make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
 
-						make_face(chunk->process, indexar[4], indexar[3], indexar[0], 0);
-						break;
-					case 6:
-						if (indexar[0] == 0) {
-							make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
-							make_face(chunk->process, indexar[0], indexar[5], indexar[4], indexar[3]);
-						}
-						else {
-							make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
-							make_face(chunk->process, indexar[5], indexar[4], indexar[3], indexar[0]);
-						}
-						break;
-					case 7:
-						if (indexar[0] == 0) {
-							make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
-							make_face(chunk->process, indexar[0], indexar[5], indexar[4], indexar[3]);
-						}
-						else {
-							make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
-							make_face(chunk->process, indexar[5], indexar[4], indexar[3], indexar[0]);
-						}
+					make_face(chunk->process, indexar[4], indexar[3], indexar[0], 0);
+					break;
+				case 6:
+					if (indexar[0] == 0) {
+						make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
+						make_face(chunk->process, indexar[0], indexar[5], indexar[4], indexar[3]);
+					}
+					else {
+						make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
+						make_face(chunk->process, indexar[5], indexar[4], indexar[3], indexar[0]);
+					}
+					break;
+				case 7:
+					if (indexar[0] == 0) {
+						make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
+						make_face(chunk->process, indexar[0], indexar[5], indexar[4], indexar[3]);
+					}
+					else {
+						make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
+						make_face(chunk->process, indexar[5], indexar[4], indexar[3], indexar[0]);
+					}
 
-						make_face(chunk->process, indexar[6], indexar[5], indexar[0], 0);
+					make_face(chunk->process, indexar[6], indexar[5], indexar[0], 0);
 
-						break;
-				}
+					break;
 			}
 		}
 	}
