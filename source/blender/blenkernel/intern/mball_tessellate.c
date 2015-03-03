@@ -46,6 +46,7 @@
 #include "BLI_math.h"
 #include "BLI_utildefines.h"
 #include "BLI_memarena.h"
+#include "PIL_time.h"
 
 #include "BKE_global.h"
 
@@ -55,6 +56,9 @@
 #include "BKE_mball_tessellate.h"  /* own include */
 
 #include "BLI_strict_flags.h"
+
+#define MB_ACCUM_NORMAL
+#define MB_LINEAR_CONVERGE
 
 /* Data types */
 
@@ -113,11 +117,11 @@ typedef struct process {        /* parameters, storage */
 	MetaElem **mainb;			/* array of all metaelems */
 	unsigned int totelem, mem;	/* number of metaelems */
 
-	MetaballBVHNode metaball_bvh; /* The simplest bvh */
+	//MetaballBVHNode metaball_bvh; /* The simplest bvh */
 	Box allbb;                   /* Bounding box of all metaelems */
 
 	//MetaballBVHNode **bvh_queue; /* Queue used during bvh traversal */
-	unsigned int bvh_queue_size;
+	//unsigned int bvh_queue_size;
 
 	//CUBES *cubes;               /* stack of cubes waiting for polygonization */
 	//CENTERLIST **centers;       /* cube center hash table */
@@ -139,8 +143,12 @@ typedef struct process {        /* parameters, storage */
 typedef struct chunk {
 	PROCESS *process;
 	Box bb;
+	MetaElem **mainb;
+	unsigned int elem;
 
 	MetaballBVHNode **bvh_queue;
+	MetaballBVHNode bvh;
+	unsigned int bvh_queue_size;
 
 	CUBES *cubes;
 	CENTERLIST **centers;
@@ -208,14 +216,14 @@ static unsigned int partition_mainb(MetaElem **mainb, unsigned int start, unsign
  * Recursively builds a BVH, dividing elements along the middle of the longest axis of allbox.
  */
 static void build_bvh_spatial(
-        PROCESS *process, MetaballBVHNode *node,
+        CHUNK *chunk, MetaballBVHNode *node,
         unsigned int start, unsigned int end, const Box *allbox)
 {
 	unsigned int part, j, s;
 	float dim[3], div;
 
 	/* Maximum bvh queue size is number of nodes which are made, equals calls to this function. */
-	process->bvh_queue_size++;
+	chunk->bvh_queue_size++;
 
 	dim[0] = allbox->max[0] - allbox->min[0];
 	dim[1] = allbox->max[1] - allbox->min[1];
@@ -227,29 +235,29 @@ static void build_bvh_spatial(
 
 	div = allbox->min[s] + (dim[s] / 2.0f);
 
-	part = partition_mainb(process->mainb, start, end, s, div);
+	part = partition_mainb(chunk->mainb, start, end, s, div);
 
-	make_box_from_ml(&node->bb[0], process->mainb[start]);
+	make_box_from_ml(&node->bb[0], chunk->mainb[start]);
 	node->child[0] = NULL;
 
 	if (part > start + 1) {
 		for (j = start; j < part; j++)
-			make_union(process->mainb[j]->bb, &node->bb[0], &node->bb[0]);
+			make_union(chunk->mainb[j]->bb, &node->bb[0], &node->bb[0]);
 
-		node->child[0] = BLI_memarena_alloc(process->pgn_elements, sizeof(MetaballBVHNode));
-		build_bvh_spatial(process, node->child[0], start, part, &node->bb[0]);
+		node->child[0] = BLI_memarena_alloc(chunk->mem, sizeof(MetaballBVHNode));
+		build_bvh_spatial(chunk, node->child[0], start, part, &node->bb[0]);
 	}
 
 	node->child[1] = NULL;
 	if (part < end) {
-		make_box_from_ml(&node->bb[1], process->mainb[part]);
+		make_box_from_ml(&node->bb[1], chunk->mainb[part]);
 
 		if (part < end - 1) {
 			for (j = part; j < end; j++)
-				make_union(process->mainb[j]->bb, &node->bb[1], &node->bb[1]);
+				make_union(chunk->mainb[j]->bb, &node->bb[1], &node->bb[1]);
 
-			node->child[1] = BLI_memarena_alloc(process->pgn_elements, sizeof(MetaballBVHNode));
-			build_bvh_spatial(process, node->child[1], part, end, &node->bb[1]);
+			node->child[1] = BLI_memarena_alloc(chunk->mem, sizeof(MetaballBVHNode));
+			build_bvh_spatial(chunk, node->child[1], part, end, &node->bb[1]);
 		}
 	}
 	else {
@@ -379,7 +387,7 @@ static float metaball(CHUNK *chunk, float x, float y, float z)
 	unsigned int front = 0, back = 0;
 	MetaballBVHNode *node;
 
-	chunk->bvh_queue[front++] = &chunk->process->metaball_bvh;
+	chunk->bvh_queue[front++] = &chunk->bvh;
 
 	while (front != back) {
 		node = chunk->bvh_queue[back++];
@@ -458,6 +466,7 @@ static void freechunk(CHUNK *chunk)
 {
 	if (chunk->corners) MEM_freeN(chunk->corners);
 	if (chunk->centers) MEM_freeN(chunk->centers);
+	if (chunk->mainb) MEM_freeN(chunk->mainb);
 	if (chunk->bvh_queue) MEM_freeN(chunk->bvh_queue);
 	if (chunk->mem) BLI_memarena_free(chunk->mem);
 }
@@ -910,7 +919,7 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 	float v[3], no[3];
 	int vid;
 
-#pragma omp critical
+#pragma omp critical (Vertid)
 	{
 		vid = getedge(chunk->process->edges, c1->i, c1->j, c1->k, c2->i, c2->j, c2->k);
 	}
@@ -925,7 +934,7 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 	vnormal(chunk, v, no);
 #endif
 
-#pragma omp critical
+#pragma omp critical (Vertid)
 	{
 		addtovertices(chunk->process, v, no);            /* save vertex */
 		vid = (int)chunk->process->curvertex - 1;
@@ -959,7 +968,7 @@ static void converge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, float r_p
 		copy_v3_v3(c2_co, c2->co);
 	}
 
-
+#ifndef MB_LINEAR_CONVERGE
 	for (i = 0; i < chunk->process->converge_res; i++) {
 		interp_v3_v3v3(r_p, c1_co, c2_co, 0.5f);
 		dens = metaball(chunk, r_p[0], r_p[1], r_p[2]);
@@ -973,6 +982,7 @@ static void converge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, float r_p
 			copy_v3_v3(c2_co, r_p);
 		}
 	}
+#endif
 
 	tmp = -c1_value / (c2_value - c1_value);
 	interp_v3_v3v3(r_p, c1_co, c2_co, tmp);
@@ -1046,7 +1056,7 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 	next_lattice(max, chunk->bb.max, chunk->process->size);
 	next_lattice(min, chunk->bb.min, chunk->process->size);
 
-	ml = chunk->process->mainb[em];
+	ml = chunk->mainb[em];
 
 	mid_v3_v3v3(tmp, ml->bb->vec[0], ml->bb->vec[6]);
 	closest_latice(center, tmp, chunk->process->size);
@@ -1079,20 +1089,11 @@ static void polygonize_chunk(CHUNK *chunk)
 
 	chunk->centers = MEM_callocN(HASHSIZE * sizeof(CENTERLIST *), "mbproc->centers");
 	chunk->corners = MEM_callocN(HASHSIZE * sizeof(CORNER *), "mbproc->corners");
-	chunk->bvh_queue = MEM_callocN(sizeof(MetaballBVHNode *) * chunk->process->bvh_queue_size, "Metaball BVH Queue");
-	chunk->mem = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball chunk memarena");
+	chunk->bvh_queue = MEM_callocN(sizeof(MetaballBVHNode *) * chunk->bvh_queue_size, "Metaball BVH Queue");
 	chunk->cubes = NULL;
 
-	for (i = 0; i < chunk->process->totelem; i++) {
-		if (chunk->process->mainb[i]->bb->vec[0][0] < chunk->bb.max[0] &&
-			chunk->process->mainb[i]->bb->vec[0][1] < chunk->bb.max[1] &&
-			chunk->process->mainb[i]->bb->vec[0][2] < chunk->bb.max[2] &&
-			chunk->process->mainb[i]->bb->vec[6][0] > chunk->bb.min[0] &&
-			chunk->process->mainb[i]->bb->vec[6][1] > chunk->bb.min[1] &&
-			chunk->process->mainb[i]->bb->vec[6][2] > chunk->bb.min[2])
-		{
+	for (i = 0; i < chunk->elem; i++) {
 			find_first_points(chunk, i);
-		}
 	}
 
 	while (chunk->cubes != NULL) {
@@ -1103,6 +1104,40 @@ static void polygonize_chunk(CHUNK *chunk)
 	}
 }
 
+static void init_chunk(CHUNK *chunk, PROCESS *process)
+{
+	unsigned int i;
+	Box allbb;
+
+	chunk->process = process;
+	chunk->bvh_queue_size = 0;
+	chunk->elem = 0;
+	chunk->mainb = MEM_mallocN(sizeof(MetaElem *) * process->totelem, "chunk's metaballs");
+	chunk->mem = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball chunk memarena");
+
+	for (i = 0; i < process->totelem; i++) {
+		if (process->mainb[i]->bb->vec[0][0] < chunk->bb.max[0] &&
+			process->mainb[i]->bb->vec[0][1] < chunk->bb.max[1] &&
+			process->mainb[i]->bb->vec[0][2] < chunk->bb.max[2] &&
+			process->mainb[i]->bb->vec[6][0] > chunk->bb.min[0] &&
+			process->mainb[i]->bb->vec[6][1] > chunk->bb.min[1] &&
+			process->mainb[i]->bb->vec[6][2] > chunk->bb.min[2])
+		{
+			chunk->mainb[chunk->elem++] = process->mainb[i];
+		}
+	}
+
+	if (chunk->elem > 0) {
+		copy_v3_v3(allbb.min, chunk->mainb[0]->bb->vec[0]);
+		copy_v3_v3(allbb.max, chunk->mainb[0]->bb->vec[6]);
+		for (i = 1; i < chunk->elem; i++)
+			make_union(chunk->mainb[i]->bb, &allbb, &allbb);
+
+		build_bvh_spatial(chunk, &chunk->bvh, 0, chunk->elem, &allbb);
+	}
+}
+
+#define NUM_CHUNKS 4
 /**
  * The main polygonization proc.
  * Allocates memory, makes cubetable,
@@ -1111,37 +1146,28 @@ static void polygonize_chunk(CHUNK *chunk)
  */
 static void polygonize(PROCESS *process)
 {
-	CHUNK chunks[4];
+	CHUNK chunks[NUM_CHUNKS];
+	int i;
+	float step;
 
 	process->edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
 	makecubetable();
 
-	copy_v3_v3(chunks[0].bb.min, process->allbb.min);
-	copy_v3_v3(chunks[0].bb.max, process->allbb.max);
-	chunks[0].bb.max[0] = (chunks[0].bb.max[0] + chunks[0].bb.min[0]) / 2.0f;
-	chunks[0].bb.max[1] = (chunks[0].bb.max[1] + chunks[0].bb.min[1]) / 2.0f;
-	copy_v3_v3(chunks[1].bb.min, process->allbb.min);
-	copy_v3_v3(chunks[1].bb.max, process->allbb.max);
-	chunks[1].bb.min[0] = (chunks[1].bb.max[0] + chunks[1].bb.min[0]) / 2.0f;
-	chunks[1].bb.max[1] = (chunks[1].bb.max[1] + chunks[1].bb.min[1]) / 2.0f;
+	step = (process->allbb.max[1] - process->allbb.min[1]) / (float)NUM_CHUNKS;
 
-	chunks[0].process = chunks[1].process = process;
+	for (i = 0; i < NUM_CHUNKS; i++) {
+		copy_v3_v3(chunks[i].bb.min, process->allbb.min);
+		copy_v3_v3(chunks[i].bb.max, process->allbb.max);
 
-	copy_v3_v3(chunks[2].bb.min, process->allbb.min);
-	copy_v3_v3(chunks[2].bb.max, process->allbb.max);
-	chunks[2].bb.max[0] = (chunks[2].bb.max[0] + chunks[2].bb.min[0]) / 2.0f;
-	chunks[2].bb.min[1] = (chunks[2].bb.max[1] + chunks[2].bb.min[1]) / 2.0f;
-	copy_v3_v3(chunks[3].bb.min, process->allbb.min);
-	copy_v3_v3(chunks[3].bb.max, process->allbb.max);
-	chunks[3].bb.min[0] = (chunks[3].bb.max[0] + chunks[3].bb.min[0]) / 2.0f;
-	chunks[3].bb.min[1] = (chunks[3].bb.max[1] + chunks[3].bb.min[1]) / 2.0f;
-
-	chunks[2].process = chunks[3].process = process;
-
-#pragma omp parallel num_threads(4)
-	{
-		polygonize_chunk(&chunks[omp_get_thread_num()]);
-		freechunk(&chunks[omp_get_thread_num()]);
+		chunks[i].bb.max[1] = process->allbb.min[1] + step * (i + 1);
+		chunks[i].bb.min[1] = process->allbb.min[1] + step * i;
+	}
+	
+#pragma omp parallel for
+	for (i = 0; i < NUM_CHUNKS; i++) {
+		init_chunk(&chunks[i], process);
+		polygonize_chunk(&chunks[i]);
+		freechunk(&chunks[i]);
 	}
 }
 
@@ -1338,6 +1364,10 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 	unsigned int a;
 	PROCESS process = {0};
 
+	static double start, time, polygonize_time, last = 0.0f, rest;
+	rest = PIL_check_seconds_timer() - last;
+	start = PIL_check_seconds_timer();
+
 	mb = ob->data;
 
 	process.thresh = mb->thresh;
@@ -1367,9 +1397,8 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 	/* initialize all mainb (MetaElems) */
 	init_meta(eval_ctx, &process, scene, ob);
 
+	time = PIL_check_seconds_timer() - start;
 	if (process.totelem > 0) {
-		build_bvh_spatial(&process, &process.metaball_bvh, 0, process.totelem, &process.allbb);
-
 		/* don't polygonize metaballs with too high resolution (base mball to small)
 		* note: Eps was 0.0001f but this was giving problems for blood animation for durian, using 0.00001f */
 		if (ob->size[0] > 0.00001f * (process.allbb.max[0] - process.allbb.min[0]) ||
@@ -1398,5 +1427,8 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 		}
 	}
 
+	polygonize_time = PIL_check_seconds_timer() - start;
 	freeprocess(&process);
+
+	last = PIL_check_seconds_timer();
 }
