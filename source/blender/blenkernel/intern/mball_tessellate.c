@@ -57,8 +57,8 @@
 
 #include "BLI_strict_flags.h"
 
-#define MB_ACCUM_NORMAL
-#define MB_LINEAR_CONVERGE
+//#define MB_ACCUM_NORMAL
+//#define MB_LINEAR_CONVERGE
 
 /* Data types */
 
@@ -1017,9 +1017,9 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
 	CUBES *ncube;
 	int n;
 
-	if (i <= chunk->min_lat[0] || i >= chunk->max_lat[0] ||
-		j <= chunk->min_lat[1] || j >= chunk->max_lat[1] ||
-		k <= chunk->min_lat[2] || k >= chunk->max_lat[2]) return;
+	if (i < chunk->min_lat[0] || i > chunk->max_lat[0] ||
+		j < chunk->min_lat[1] || j > chunk->max_lat[1] ||
+		k < chunk->min_lat[2] || k > chunk->max_lat[2]) return;
 
 	/* test if cube has been found before */
 	if (setcenter(chunk, chunk->centers, i, j, k) == 0) {
@@ -1161,8 +1161,8 @@ static void polygonize(PROCESS *process)
 		chunks[i].bb.max[1] = process->allbb.min[1] + step * (i + 1);
 		chunks[i].bb.min[1] = process->allbb.min[1] + step * i;
 
-		next_lattice(chunks[i].max_lat, chunks[i].bb.max, process->size);
-		prev_lattice(chunks[i].min_lat, chunks[i].bb.min, process->size);
+		prev_lattice(chunks[i].max_lat, chunks[i].bb.max, process->size);
+		next_lattice(chunks[i].min_lat, chunks[i].bb.min, process->size);
 	}
 	
 #pragma omp parallel for
