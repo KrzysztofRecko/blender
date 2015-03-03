@@ -934,14 +934,14 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 	}
 
 	index = HASH(first[0], first[1], first[2]) + HASH(second[0], second[1], second[2]);
-	omp_set_lock(&chunk->process->edgelocks[index]);
+	omp_set_lock(&chunk->process->edgelocks[index % 32]);
 
 	q = chunk->process->edges[index];
 	for (; q != NULL; q = q->next) {
 		if (q->i1 == first[0] && q->j1 == first[1] && q->k1 == first[2] &&
 			q->i2 == second[0] && q->j2 == second[1] && q->k2 == second[2])
 		{
-			omp_unset_lock(&chunk->process->edgelocks[index]);
+			omp_unset_lock(&chunk->process->edgelocks[index % 32]);
 			return q->vid;
 		}
 	}
@@ -971,7 +971,7 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 	q->next = chunk->process->edges[index];
 	chunk->process->edges[index] = q;
 
-	omp_unset_lock(&chunk->process->edgelocks[index]);
+	omp_unset_lock(&chunk->process->edgelocks[index % 32]);
 
 	return vid;
 }
@@ -1183,10 +1183,10 @@ static void polygonize(PROCESS *process)
 	float step;
 
 	process->edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
-	process->edgelocks = MEM_callocN(2 * HASHSIZE * sizeof(omp_lock_t), "edgelocks");
+	process->edgelocks = MEM_callocN(32 * sizeof(omp_lock_t), "edgelocks");
 	makecubetable();
 
-	for (i = 0; i < 2 * HASHSIZE; i++) omp_init_lock(&process->edgelocks[i]);
+	for (i = 0; i < 32; i++) omp_init_lock(&process->edgelocks[i]);
 	step = (process->allbb.max[1] - process->allbb.min[1]) / (float)NUM_CHUNKS;
 
 	for (i = 0; i < NUM_CHUNKS; i++) {
@@ -1204,7 +1204,7 @@ static void polygonize(PROCESS *process)
 		freechunk(&chunks[i]);
 	}
 
-	for (i = 0; i < 2 * HASHSIZE; i++) omp_destroy_lock(&process->edgelocks[i]);
+	for (i = 0; i < 32; i++) omp_destroy_lock(&process->edgelocks[i]);
 }
 
 /**
