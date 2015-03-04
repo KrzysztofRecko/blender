@@ -128,17 +128,11 @@ typedef struct process {        /* parameters, storage */
 	MLSmall **mainb;			/* array of all metaelems */
 	unsigned int totelem, mem;	/* number of metaelems */
 
-	//MetaballBVHNode metaball_bvh; /* The simplest bvh */
 	Box allbb;                   /* Bounding box of all metaelems */
 
-	//MetaballBVHNode **bvh_queue; /* Queue used during bvh traversal */
-	//unsigned int bvh_queue_size;
-
-	//CUBES *cubes;               /* stack of cubes waiting for polygonization */
-	//CENTERLIST **centers;       /* cube center hash table */
-	//CORNER **corners;           /* corner value hash table */
 	EDGELIST **edges;           /* edge and vertex id hash table */
-	omp_lock_t *edgelocks;
+	MemArena *edge_mem[128];
+	omp_lock_t edgelocks[128];
 
 	int (*indices)[4];          /* output indices */
 	unsigned int totindex;		/* size of memory allocated for indices */
@@ -152,7 +146,6 @@ typedef struct process {        /* parameters, storage */
 
 	/* memory allocation from common pool */
 	MemArena *pgn_elements;
-	omp_lock_t pgn_lock;
 	MemArena *metaballs;
 } PROCESS;
 
@@ -484,7 +477,6 @@ static void freeprocess(PROCESS *process)
 {
 	if (process->edges) MEM_freeN(process->edges);
 	if (process->mainb) MEM_freeN(process->mainb);
-	if (process->edgelocks) MEM_freeN(process->edgelocks);
 	if (process->pgn_elements) BLI_memarena_free(process->pgn_elements);
 	if (process->metaballs) BLI_memarena_free(process->metaballs);
 }
@@ -810,77 +802,6 @@ static int setcenter(CHUNK *chunk, CENTERLIST *table[], const int i, const int j
 }
 
 /**
- * Sets vid of vertex lying on given edge.
- */
-static void setedge(
-        PROCESS *process,
-        int i1, int j1, int k1,
-        int i2, int j2, int k2,
-        int vid)
-{
-	int index;
-	EDGELIST *newe;
-
-	if (i1 > i2 || (i1 == i2 && (j1 > j2 || (j1 == j2 && k1 > k2)))) {
-		int t = i1;
-		i1 = i2;
-		i2 = t;
-		t = j1;
-		j1 = j2;
-		j2 = t;
-		t = k1;
-		k1 = k2;
-		k2 = t;
-	}
-	index = HASH(i1, j1, k1) + HASH(i2, j2, k2);
-
-	newe = BLI_memarena_alloc(process->pgn_elements, sizeof(EDGELIST));
-
-	newe->i1 = i1;
-	newe->j1 = j1;
-	newe->k1 = k1;
-	newe->i2 = i2;
-	newe->j2 = j2;
-	newe->k2 = k2;
-	newe->vid = vid;
-	newe->next = process->edges[index];
-	process->edges[index] = newe;
-}
-
-/**
- * \return vertex id for edge; return -1 if not set
- */
-static int getedge(EDGELIST *table[],
-                   int i1, int j1, int k1,
-                   int i2, int j2, int k2)
-{
-	EDGELIST *q;
-
-	if (i1 > i2 || (i1 == i2 && (j1 > j2 || (j1 == j2 && k1 > k2)))) {
-		int t = i1;
-		i1 = i2;
-		i2 = t;
-		t = j1;
-		j1 = j2;
-		j2 = t;
-		t = k1;
-		k1 = k2;
-		k2 = t;
-	}
-
-	q = table[HASH(i1, j1, k1) + HASH(i2, j2, k2)];
-	for (; q != NULL; q = q->next) {
-		if (q->i1 == i1 && q->j1 == j1 && q->k1 == k1 &&
-			q->i2 == i2 && q->j2 == j2 && q->k2 == k2)
-		{
-			return q->vid;
-		}
-	}
-
-	return -1;
-}
-
-/**
  * Adds a vertex, expands memory if needed.
  */
 static int addtovertices(PROCESS *process)
@@ -888,7 +809,7 @@ static int addtovertices(PROCESS *process)
 	int ret;
 	
 	if (process->curvertex == process->totvertex) {
-		process->totvertex += 4096;
+		process->totvertex += 16000;
 		process->co = MEM_reallocN(process->co, process->totvertex * sizeof(float[3]));
 		process->no = MEM_reallocN(process->no, process->totvertex * sizeof(float[3]));
 	}
@@ -969,22 +890,21 @@ static int vertid(PROCESS *process, CHUNK *chunk, const CORNER *c1, const CORNER
 		}
 	}
 
-	//omp_set_lock(&process->vertex_lock);
-	//omp_unset_lock(&process->vertex_lock);
+	omp_set_lock(&process->vertex_lock);
+	vid = addtovertices(process);
+	omp_unset_lock(&process->vertex_lock);
 
-	omp_set_lock(&process->pgn_lock);
-	q = BLI_memarena_alloc(process->pgn_elements, sizeof(EDGELIST));
-	omp_unset_lock(&process->pgn_lock);
-
+	q = BLI_memarena_alloc(process->edge_mem[index / 512], sizeof(EDGELIST));
 	q->i1 = first[0];
 	q->j1 = first[1];
 	q->k1 = first[2];
 	q->i2 = second[0];
 	q->j2 = second[1];
 	q->k2 = second[2];
-	
+	q->vid = vid;
 	q->next = chunk->process->edges[index];
 	chunk->process->edges[index] = q;
+	omp_unset_lock(&process->edgelocks[index / 512]);
 
 	converge(chunk, c1, c2, v);  /* position */
 
@@ -995,13 +915,9 @@ static int vertid(PROCESS *process, CHUNK *chunk, const CORNER *c1, const CORNER
 #endif
 
 	omp_set_lock(&process->vertex_lock);
-	vid = addtovertices(process);
 	copy_v3_v3(chunk->process->co[vid], v);
 	copy_v3_v3(chunk->process->no[vid], no);
 	omp_unset_lock(&process->vertex_lock);
-
-	q->vid = vid;
-	omp_unset_lock(&process->edgelocks[index / 512]);
 
 	return vid;
 }
@@ -1211,13 +1127,14 @@ static void polygonize(PROCESS *process)
 	float step;
 
 	process->edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
-	process->edgelocks = MEM_callocN(128 * sizeof(omp_lock_t), "edgelocks");
 	makecubetable();
 
-	for (i = 0; i < 128; i++) omp_init_lock(&process->edgelocks[i]);
+	for (i = 0; i < 128; i++) {
+		omp_init_lock(&process->edgelocks[i]);
+		process->edge_mem[i] = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball memarena");
+	}
 	omp_init_lock(&process->vertex_lock);
 	omp_init_lock(&process->index_lock);
-	omp_init_lock(&process->pgn_lock);
 	step = (process->allbb.max[1] - process->allbb.min[1]) / (float)NUM_CHUNKS;
 
 	for (i = 0; i < NUM_CHUNKS; i++) {
@@ -1246,10 +1163,12 @@ static void polygonize(PROCESS *process)
 		freechunk(&chunks[i]);
 	}
 
-	for (i = 0; i < 128; i++) omp_destroy_lock(&process->edgelocks[i]);
+	for (i = 0; i < 128; i++) {
+		omp_destroy_lock(&process->edgelocks[i]);
+		BLI_memarena_free(process->edge_mem[i]);
+	}
 	omp_destroy_lock(&process->vertex_lock);
 	omp_destroy_lock(&process->index_lock);
-	omp_destroy_lock(&process->pgn_lock);
 }
 
 /**
