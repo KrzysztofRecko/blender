@@ -124,6 +124,7 @@ typedef struct process {        /* parameters, storage */
 	float thresh, size;			/* mball threshold, single cube size */
 	float delta;				/* small delta for calculating normals */
 	unsigned int converge_res;	/* converge procedure resolution (more = slower) */
+	unsigned int chunk_res;
 
 	MLSmall **mainb;			/* array of all metaelems */
 	unsigned int totelem, mem;	/* number of metaelems */
@@ -809,7 +810,7 @@ static int addtovertices(PROCESS *process)
 	int ret;
 	
 	if (process->curvertex == process->totvertex) {
-		process->totvertex += 16000;
+		process->totvertex += 4096;
 		process->co = MEM_reallocN(process->co, process->totvertex * sizeof(float[3]));
 		process->no = MEM_reallocN(process->no, process->totvertex * sizeof(float[3]));
 	}
@@ -871,7 +872,7 @@ static int vertid(PROCESS *process, CHUNK *chunk, const CORNER *c1, const CORNER
 	first[0] = c1->i; first[1] = c1->j; first[2] = c1->k;
 	second[0] = c2->i; second[1] = c2->j; second[2] = c2->k;
 
-	if (first[0] > second[0] || (first[0] == second[0] && (first[1] > second[1] || (first[1] == second[1] && first[2] > second[2])))) {
+	if (first[0] > second[0] || first[1] > second[1] || first[2] > second[2]) {
 		SWAP(int, first[0], second[0]);
 		SWAP(int, first[1], second[1]);
 		SWAP(int, first[2], second[2]);
@@ -1078,10 +1079,92 @@ static void polygonize_chunk(CHUNK *chunk)
 	}
 }
 
-static void init_chunk(CHUNK *chunk, PROCESS *process)
+#if 0
+static void draw_box(PROCESS *process, Box *box)
 {
-	unsigned int i;
+	if (!box) return;
+
+	float v[8][3];
+	v[0][0] = box->min[0];
+	v[0][1] = box->min[1];
+	v[0][2] = box->min[2];
+
+	v[1][0] = box->max[0];
+	v[1][1] = box->min[1];
+	v[1][2] = box->min[2];
+
+	v[2][0] = box->min[0];
+	v[2][1] = box->max[1];
+	v[2][2] = box->min[2];
+
+	v[3][0] = box->min[0];
+	v[3][1] = box->min[1];
+	v[3][2] = box->max[2];
+
+	v[4][0] = box->max[0];
+	v[4][1] = box->max[1];
+	v[4][2] = box->min[2];
+
+	v[5][0] = box->min[0];
+	v[5][1] = box->max[1];
+	v[5][2] = box->max[2];
+
+	v[6][0] = box->max[0];
+	v[6][1] = box->min[1];
+	v[6][2] = box->max[2];
+
+	v[7][0] = box->max[0];
+	v[7][1] = box->max[1];
+	v[7][2] = box->max[2];
+
+	for (int i = 0; i < 8; i++) {
+		int vid = addtovertices(process);
+		copy_v3_v3(process->co[vid], v[i]);
+	}
+
+	make_face(process, process->curvertex - 8, process->curvertex - 6, process->curvertex - 4, process->curvertex - 7);
+	make_face(process, process->curvertex - 8, process->curvertex - 5, process->curvertex - 3, process->curvertex - 6);
+	make_face(process, process->curvertex - 8, process->curvertex - 7, process->curvertex - 2, process->curvertex - 5);
+	make_face(process, process->curvertex - 7, process->curvertex - 4, process->curvertex - 1, process->curvertex - 2);
+	make_face(process, process->curvertex - 6, process->curvertex - 3, process->curvertex - 1, process->curvertex - 4);
+	make_face(process, process->curvertex - 5, process->curvertex - 2, process->curvertex - 1, process->curvertex - 3);
+}
+#endif // 0
+
+static void init_chunk(CHUNK *chunk, PROCESS *process, int n)
+{
+	unsigned int i, j, k;
 	Box allbb;
+
+	float step_x = (process->allbb.max[0] - process->allbb.min[0]) / (float)process->chunk_res;
+	float step_y = (process->allbb.max[1] - process->allbb.min[1]) / (float)process->chunk_res;
+	float step_z = (process->allbb.max[2] - process->allbb.min[2]) / (float)process->chunk_res;
+
+	i = n % process->chunk_res;
+	j = (n / process->chunk_res) % process->chunk_res;
+	k = n / process->chunk_res / process->chunk_res;
+
+	chunk->bb.min[0] = process->allbb.min[0] + step_x * i;
+	chunk->bb.max[0] = process->allbb.min[0] + step_x * (i + 1);
+	chunk->bb.min[1] = process->allbb.min[1] + step_y * j;
+	chunk->bb.max[1] = process->allbb.min[1] + step_y * (j + 1);
+	chunk->bb.min[2] = process->allbb.min[2] + step_z * k;
+	chunk->bb.max[2] = process->allbb.min[2] + step_z * (k + 1);
+	
+	prev_lattice(chunk->max_lat, chunk->bb.max, process->size);
+	next_lattice(chunk->min_lat, chunk->bb.min, process->size);
+
+	if (i == 0) chunk->min_lat[0]--;
+	if (j == 0) chunk->min_lat[1]--;
+	if (k == 0) chunk->min_lat[2]--;
+
+	chunk->bb.max[0] = (chunk->max_lat[0] + 0.5f) * process->size + process->delta * 2.0f;
+	chunk->bb.max[1] = (chunk->max_lat[1] + 0.5f) * process->size + process->delta * 2.0f;
+	chunk->bb.max[2] = (chunk->max_lat[2] + 0.5f) * process->size + process->delta * 2.0f;
+
+	chunk->bb.min[0] = (chunk->min_lat[0] - 0.5f) * process->size - process->delta * 2.0f;
+	chunk->bb.min[1] = (chunk->min_lat[1] - 0.5f) * process->size - process->delta * 2.0f;
+	chunk->bb.min[2] = (chunk->min_lat[2] - 0.5f) * process->size - process->delta * 2.0f;
 
 	chunk->process = process;
 	chunk->bvh_queue_size = 0;
@@ -1113,7 +1196,6 @@ static void init_chunk(CHUNK *chunk, PROCESS *process)
 	}
 }
 
-#define NUM_CHUNKS 4
 /**
  * The main polygonization proc.
  * Allocates memory, makes cubetable,
@@ -1122,11 +1204,12 @@ static void init_chunk(CHUNK *chunk, PROCESS *process)
  */
 static void polygonize(PROCESS *process)
 {
-	CHUNK chunks[NUM_CHUNKS];
+	int num_chunks = (process->chunk_res * process->chunk_res * process->chunk_res);
+	CHUNK *chunks;
 	int i;
-	float step;
 
 	process->edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
+	chunks = MEM_callocN(sizeof(CHUNK) * num_chunks, "Chunks");
 	makecubetable();
 
 	for (i = 0; i < 128; i++) {
@@ -1135,30 +1218,10 @@ static void polygonize(PROCESS *process)
 	}
 	omp_init_lock(&process->vertex_lock);
 	omp_init_lock(&process->index_lock);
-	step = (process->allbb.max[1] - process->allbb.min[1]) / (float)NUM_CHUNKS;
-
-	for (i = 0; i < NUM_CHUNKS; i++) {
-		copy_v3_v3(chunks[i].bb.min, process->allbb.min);
-		copy_v3_v3(chunks[i].bb.max, process->allbb.max);
-
-		chunks[i].bb.max[1] = process->allbb.min[1] + step * (i + 1);
-		chunks[i].bb.min[1] = process->allbb.min[1] + step * i;
-
-		prev_lattice(chunks[i].max_lat, chunks[i].bb.max, process->size);
-		next_lattice(chunks[i].min_lat, chunks[i].bb.min, process->size);
-
-		chunks[i].bb.max[0] = (chunks[i].max_lat[0] + 0.5f) * process->size + process->delta * 2.0f;
-		chunks[i].bb.max[1] = (chunks[i].max_lat[1] + 0.5f) * process->size + process->delta * 2.0f;
-		chunks[i].bb.max[2] = (chunks[i].max_lat[2] + 0.5f) * process->size + process->delta * 2.0f;
-
-		chunks[i].bb.min[0] = (chunks[i].min_lat[0] - 0.5f) * process->size - process->delta * 2.0f;
-		chunks[i].bb.min[1] = (chunks[i].min_lat[1] - 0.5f) * process->size - process->delta * 2.0f;
-		chunks[i].bb.min[2] = (chunks[i].min_lat[2] - 0.5f) * process->size - process->delta * 2.0f;
-	}
 	
-#pragma omp parallel for
-	for (i = 0; i < NUM_CHUNKS; i++) {
-		init_chunk(&chunks[i], process);
+#pragma omp parallel for schedule(dynamic, 1)
+	for (i = 0; i < num_chunks; i++) {
+		init_chunk(&chunks[i], process, i);
 		polygonize_chunk(&chunks[i]);
 		freechunk(&chunks[i]);
 	}
@@ -1169,6 +1232,8 @@ static void polygonize(PROCESS *process)
 	}
 	omp_destroy_lock(&process->vertex_lock);
 	omp_destroy_lock(&process->index_lock);
+
+	MEM_freeN(chunks);
 }
 
 /**
@@ -1372,6 +1437,7 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 	start = PIL_check_seconds_timer();
 
 	mb = ob->data;
+	process.chunk_res = 3;
 
 	process.thresh = mb->thresh;
 
@@ -1434,10 +1500,10 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 	polygonize_time = PIL_check_seconds_timer() - start;
 	freeprocess(&process);
 
-	times[frame][0] = (int)((polygonize_time - time) * 1000.0f);
+	/*times[frame][0] = (int)((polygonize_time - time) * 1000.0f);
 	times[frame][1] = (int)(time * 1000.0f);
 	times[frame][2] = (int)(rest * 1000.0f);
-	frame++;
+	frame++;*/
 
 	last = PIL_check_seconds_timer();
 }
