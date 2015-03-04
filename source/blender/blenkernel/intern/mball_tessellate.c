@@ -989,16 +989,12 @@ static void closest_latice(int r[3], const float pos[3], const float size)
 }
 
 /**
- * Find at most 6 cubes to start polygonization from.
- * This may be too little only in very rare cases.
- * To make this algorithm equivalent to the previous one,
- * it would have to search for 26 cubes (not only along the axes,
- * but also on cube diagonals and through the middle of edges).
+ * Find at most 26 cubes to start polygonization from.
  */
 static void find_first_points(PROCESS *process, const unsigned int em)
 {
 	const MetaElem *ml;
-	int center[3], lbn[3], rtf[3], it[3], dir;
+	int center[3], lbn[3], rtf[3], it[3], dir[3], add[3];
 	float tmp[3], a, b;
 
 	ml = process->mainb[em];
@@ -1008,19 +1004,31 @@ static void find_first_points(PROCESS *process, const unsigned int em)
 	prev_lattice(lbn, ml->bb->vec[0], process->size);
 	next_lattice(rtf, ml->bb->vec[6], process->size);
 
-	for (dir = 0; dir < 3; dir++) {
-		copy_v3_v3_int(it, center);
-		it[dir] = lbn[dir];
+	for (dir[0] = -1; dir[0] <= 1; dir[0]++)
+		for (dir[1] = -1; dir[1] <= 1; dir[1]++)
+			for (dir[2] = -1; dir[2] <= 1; dir[2]++) {
+				if (dir[0] == 0 && dir[1] == 0 && dir[2] == 0) continue;
 
-		b = setcorner(process, it[0], it[1], it[2])->value;
-		for (it[dir]++; it[dir] <= rtf[dir]; it[dir]++) {
-			a = b;
-			b = setcorner(process, it[0], it[1], it[2])->value;
+				copy_v3_v3_int(it, center);
 
-			if ((a < 0.0f && b >= 0.0f) || (b < 0.0f && a >= 0.0f)) {
-				add_cube(process, it[0] - 1, it[1] - 1, it[2] - 1);
-			}
-		}
+				b = setcorner(process, it[0], it[1], it[2])->value;
+				do {
+					it[0] += dir[0];
+					it[1] += dir[1];
+					it[2] += dir[2];
+					a = b;
+					b = setcorner(process, it[0], it[1], it[2])->value;
+
+					if (a * b < 0.0f) {
+						add[0] = it[0] - dir[0];
+						add[1] = it[1] - dir[1];
+						add[2] = it[2] - dir[2];
+						DO_MIN(it, add);
+						add_cube(process, add[0], add[1], add[2]);
+						break;
+					} 
+				} while (it[0] > lbn[0] && it[1] > lbn[1] && it[2] > lbn[2] &&
+						 it[0] < rtf[0] && it[1] < rtf[1] && it[2] < rtf[2]);
 	}
 }
 
