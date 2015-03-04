@@ -1365,6 +1365,8 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 	unsigned int a;
 	PROCESS process = {0};
 
+	static int frame = 0;
+	static int times[500][3];
 	static double start, time, polygonize_time, last = 0.0f, rest;
 	rest = PIL_check_seconds_timer() - last;
 	start = PIL_check_seconds_timer();
@@ -1431,6 +1433,11 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 
 	polygonize_time = PIL_check_seconds_timer() - start;
 	freeprocess(&process);
+
+	times[frame][0] = (int)((polygonize_time - time) * 1000.0f);
+	times[frame][1] = (int)(time * 1000.0f);
+	times[frame][2] = (int)(rest * 1000.0f);
+	frame++;
 
 	last = PIL_check_seconds_timer();
 }
