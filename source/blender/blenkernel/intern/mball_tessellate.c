@@ -57,8 +57,8 @@
 
 #include "BLI_strict_flags.h"
 
-//#define MB_ACCUM_NORMAL
-//#define MB_LINEAR_CONVERGE
+#define MB_ACCUM_NORMAL
+#define MB_LINEAR_CONVERGE
 
 /* Data types */
 
@@ -1133,38 +1133,28 @@ static void draw_box(PROCESS *process, Box *box)
 
 static void init_chunk(CHUNK *chunk, PROCESS *process, int n)
 {
-	unsigned int i, j, k;
+	unsigned int pos[3], i;
+	float step[3];
 	Box allbb;
 
-	float step_x = (process->allbb.max[0] - process->allbb.min[0]) / (float)process->chunk_res;
-	float step_y = (process->allbb.max[1] - process->allbb.min[1]) / (float)process->chunk_res;
-	float step_z = (process->allbb.max[2] - process->allbb.min[2]) / (float)process->chunk_res;
+	pos[0] = n % process->chunk_res;
+	pos[1] = (n / process->chunk_res) % process->chunk_res;
+	pos[2] = n / process->chunk_res / process->chunk_res;
 
-	i = n % process->chunk_res;
-	j = (n / process->chunk_res) % process->chunk_res;
-	k = n / process->chunk_res / process->chunk_res;
-
-	chunk->bb.min[0] = process->allbb.min[0] + step_x * i;
-	chunk->bb.max[0] = process->allbb.min[0] + step_x * (i + 1);
-	chunk->bb.min[1] = process->allbb.min[1] + step_y * j;
-	chunk->bb.max[1] = process->allbb.min[1] + step_y * (j + 1);
-	chunk->bb.min[2] = process->allbb.min[2] + step_z * k;
-	chunk->bb.max[2] = process->allbb.min[2] + step_z * (k + 1);
+	for (i = 0; i < 3; i++) {
+		step[i] = (process->allbb.max[i] - process->allbb.min[i]) / (float)process->chunk_res;
+		chunk->bb.min[i] = process->allbb.min[i] + step[i] * pos[i];
+		chunk->bb.max[i] = process->allbb.min[i] + step[i] * (pos[i] + 1);
+	}
 	
 	prev_lattice(chunk->max_lat, chunk->bb.max, process->size);
 	next_lattice(chunk->min_lat, chunk->bb.min, process->size);
 
-	if (i == 0) chunk->min_lat[0]--;
-	if (j == 0) chunk->min_lat[1]--;
-	if (k == 0) chunk->min_lat[2]--;
-
-	chunk->bb.max[0] = (chunk->max_lat[0] + 0.5f) * process->size + process->delta * 2.0f;
-	chunk->bb.max[1] = (chunk->max_lat[1] + 0.5f) * process->size + process->delta * 2.0f;
-	chunk->bb.max[2] = (chunk->max_lat[2] + 0.5f) * process->size + process->delta * 2.0f;
-
-	chunk->bb.min[0] = (chunk->min_lat[0] - 0.5f) * process->size - process->delta * 2.0f;
-	chunk->bb.min[1] = (chunk->min_lat[1] - 0.5f) * process->size - process->delta * 2.0f;
-	chunk->bb.min[2] = (chunk->min_lat[2] - 0.5f) * process->size - process->delta * 2.0f;
+	for (i = 0; i < 3; i++) {
+		if (pos[i] == 0) chunk->min_lat[i]--;
+		chunk->bb.max[i] = (chunk->max_lat[i] + 0.5f) * process->size + process->delta * 2.0f;
+		chunk->bb.min[i] = (chunk->min_lat[i] - 0.5f) * process->size - process->delta * 2.0f;
+	}
 
 	chunk->process = process;
 	chunk->bvh_queue_size = 0;
@@ -1212,24 +1202,31 @@ static void polygonize(PROCESS *process)
 	chunks = MEM_callocN(sizeof(CHUNK) * num_chunks, "Chunks");
 	makecubetable();
 
-	for (i = 0; i < 128; i++) {
-		omp_init_lock(&process->edgelocks[i]);
-		process->edge_mem[i] = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball memarena");
-	}
 	omp_init_lock(&process->vertex_lock);
 	omp_init_lock(&process->index_lock);
-	
-#pragma omp parallel for schedule(dynamic, 1)
-	for (i = 0; i < num_chunks; i++) {
-		init_chunk(&chunks[i], process, i);
-		polygonize_chunk(&chunks[i]);
-		freechunk(&chunks[i]);
+
+#pragma omp parallel
+	{
+#pragma omp for
+		for (i = 0; i < 128; i++) {
+			omp_init_lock(&process->edgelocks[i]);
+			process->edge_mem[i] = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball memarena");
+		}
+
+#pragma omp for schedule(runtime, 1)
+		for (i = 0; i < num_chunks; i++) {
+			init_chunk(&chunks[i], process, i);
+			polygonize_chunk(&chunks[i]);
+			freechunk(&chunks[i]);
+		}
+
+#pragma omp for
+		for (i = 0; i < 128; i++) {
+			omp_destroy_lock(&process->edgelocks[i]);
+			BLI_memarena_free(process->edge_mem[i]);
+		}
 	}
 
-	for (i = 0; i < 128; i++) {
-		omp_destroy_lock(&process->edgelocks[i]);
-		BLI_memarena_free(process->edge_mem[i]);
-	}
 	omp_destroy_lock(&process->vertex_lock);
 	omp_destroy_lock(&process->index_lock);
 
@@ -1437,7 +1434,7 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 	start = PIL_check_seconds_timer();
 
 	mb = ob->data;
-	process.chunk_res = 3;
+	process.chunk_res = 2;
 
 	process.thresh = mb->thresh;
 
