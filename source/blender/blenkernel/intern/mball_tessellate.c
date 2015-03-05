@@ -1026,7 +1026,7 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
 static void find_first_points(CHUNK *chunk, const unsigned int em)
 {
 	const MLSmall *ml;
-	int center[3], lbn[3], rtf[3], l_lat[3], dir[3], r_lat[3], mid_lat[3], l, r, mid, t[3], i;
+	int center[3], lbn[3], rtf[3], l_lat[3], r_lat[3], mid_lat[3], dir[3], l, r, mid, t[3], i;
 	float tmp[3], a, b, c;
 
 	//int max[3], min[3];
@@ -1040,12 +1040,8 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 	prev_lattice(lbn, ml->bb->min, chunk->process->size);
 	next_lattice(rtf, ml->bb->max, chunk->process->size);
 
-	rtf[0] -= center[0];
-	rtf[1] -= center[1];
-	rtf[2] -= center[2];
-	lbn[0] = center[0] - lbn[0];
-	lbn[1] = center[1] - lbn[1];
-	lbn[2] = center[2] - lbn[2];
+	VECSUB(rtf, rtf, center);
+	VECSUB(lbn, center, lbn);
 	//DO_MAX(min, lbn);
 	//DO_MIN(max, rtf);
 
@@ -1062,36 +1058,25 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 				}
 				r = MIN3(t[0], t[1], t[2]);
 
-				l_lat[0] = center[0] + l * dir[0];
-				l_lat[1] = center[1] + l * dir[1];
-				l_lat[2] = center[2] + l * dir[2];
-
-				r_lat[0] = center[0] + r * dir[0];
-				r_lat[1] = center[1] + r * dir[1];
-				r_lat[2] = center[2] + r * dir[2];
+				VECADDFAC(l_lat, center, dir, l);
+				VECADDFAC(r_lat, center, dir, r);
 
 				a = setcorner(chunk, l_lat[0], l_lat[1], l_lat[2])->value;
 				b = setcorner(chunk, r_lat[0], r_lat[1], r_lat[2])->value;
 				if (a * b < 0.0f) {
 					while (r - l >= 2) {
 						mid = (r + l) / 2;
-						mid_lat[0] = center[0] + mid * dir[0];
-						mid_lat[1] = center[1] + mid * dir[1];
-						mid_lat[2] = center[2] + mid * dir[2];
+						VECADDFAC(mid_lat, center, dir, mid);
 						c = setcorner(chunk, mid_lat[0], mid_lat[1], mid_lat[2])->value;
 						if (a * c < 0.0f) {
 							b = c;
 							r = mid;
-							r_lat[0] = mid_lat[0];
-							r_lat[1] = mid_lat[1];
-							r_lat[2] = mid_lat[2];
+							VECCOPY(r_lat, mid_lat);
 						}
 						else {
 							a = c;
 							l = mid;
-							l_lat[0] = mid_lat[0];
-							l_lat[1] = mid_lat[1];
-							l_lat[2] = mid_lat[2];
+							VECCOPY(l_lat, mid_lat);
 						}
 					}
 					DO_MIN(l_lat, r_lat);
@@ -1284,13 +1269,6 @@ static void polygonize(PROCESS *process)
 
 	BLI_task_pool_work_and_wait(task_pool);
 	BLI_task_pool_free(task_pool);
-
-	/*for (i = 0; i < num_chunks; i++) {
-		pthread_create(&threads[i], NULL, polygonize_chunk, (void*)process);
-	}
-	for (i = 0; i < num_chunks; i++) {
-		pthread_join(threads[i], NULL);
-	}*/
 
 	for (i = 0; i < 128; i++) {
 		pthread_mutex_destroy(&process->edgelocks[i]);
