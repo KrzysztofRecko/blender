@@ -34,6 +34,7 @@
 #include <ctype.h>
 #include <float.h>
 #include <omp.h>
+#include <ittnotify.h>
 
 #include "MEM_guardedalloc.h"
 
@@ -1098,6 +1099,10 @@ static void polygonize_chunk(CHUNK *chunk)
 	CUBE c;
 	unsigned int i;
 
+	__itt_domain* thread_domain = __itt_domain_create("Chunk");;
+	__itt_string_handle* TTask = __itt_string_handle_create("Chunk");
+	__itt_task_begin(thread_domain, __itt_null, __itt_null, TTask);
+
 	chunk->centers = MEM_callocN(HASHSIZE * sizeof(CENTERLIST *), "mbproc->centers");
 	chunk->corners = MEM_callocN(HASHSIZE * sizeof(CORNER *), "mbproc->corners");
 	chunk->bvh_queue = MEM_callocN(sizeof(MetaballBVHNode *) * chunk->bvh_queue_size, "Metaball BVH Queue");
@@ -1113,6 +1118,8 @@ static void polygonize_chunk(CHUNK *chunk)
 
 		docube(chunk, &c);
 	}
+
+	__itt_task_end(thread_domain);
 }
 
 #if 0
@@ -1458,16 +1465,24 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 
 void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob, ListBase *dispbase)
 {
+	static bool created_domain = false;
+	static __itt_domain* domain; 
+	__itt_string_handle* RestTask = __itt_string_handle_create("Rest");
+	__itt_string_handle* InitTask = __itt_string_handle_create("Initialize");
+	__itt_string_handle* PolygonizeTask = __itt_string_handle_create("Polygonize");
+
+	if (!created_domain) {
+		domain = __itt_domain_create("Polygonization");
+		created_domain = true;
+	}
+	else {
+		__itt_task_end(domain);
+	}
+
 	MetaBall *mb;
 	DispList *dl;
 	unsigned int a;
 	PROCESS process = {0};
-
-	static int frame = 0;
-	static int times[500][3];
-	static double start, time, polygonize_time, last = 0.0f, rest;
-	rest = PIL_check_seconds_timer() - last;
-	start = PIL_check_seconds_timer();
 
 	mb = ob->data;
 	process.chunk_res = 2;
@@ -1497,10 +1512,11 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 	process.pgn_elements = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball memarena");
 	process.metaballs = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaballs memarena");
 
+	__itt_task_begin(domain, __itt_null, __itt_null, InitTask);
 	/* initialize all mainb (MetaElems) */
 	init_meta(eval_ctx, &process, scene, ob);
+	__itt_task_end(domain);
 
-	time = PIL_check_seconds_timer() - start;
 	if (process.totelem > 0) {
 		/* don't polygonize metaballs with too high resolution (base mball to small)
 		* note: Eps was 0.0001f but this was giving problems for blood animation for durian, using 0.00001f */
@@ -1508,6 +1524,7 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 		    ob->size[1] > 0.00001f * (process.allbb.max[1] - process.allbb.min[1]) ||
 		    ob->size[2] > 0.00001f * (process.allbb.max[2] - process.allbb.min[2]))
 		{
+			__itt_task_begin(domain, __itt_null, __itt_null, PolygonizeTask);
 			polygonize(&process);
 
 			/* add resulting surface to displist */
@@ -1527,16 +1544,10 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 				dl->verts = (float *)process.co;
 				dl->nors = (float *)process.no;
 			}
+			__itt_task_end(domain);
 		}
 	}
-
-	polygonize_time = PIL_check_seconds_timer() - start;
 	freeprocess(&process);
 
-	/*times[frame][0] = (int)((polygonize_time - time) * 1000.0f);
-	times[frame][1] = (int)(time * 1000.0f);
-	times[frame][2] = (int)(rest * 1000.0f);
-	frame++;*/
-
-	last = PIL_check_seconds_timer();
+	__itt_task_begin(domain, __itt_null, __itt_null, RestTask);
 }
