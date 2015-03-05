@@ -35,7 +35,7 @@
 #include <float.h>
 #include <pthread.h>
 
-#define TASK_PROFILE
+//#define TASK_PROFILE
 #ifdef TASK_PROFILE
 #include <ittnotify.h>
 #endif
@@ -51,6 +51,7 @@
 #include "BLI_math.h"
 #include "BLI_utildefines.h"
 #include "BLI_memarena.h"
+#include "BLI_task.h"
 #include "PIL_time.h"
 
 #include "BKE_global.h"
@@ -1154,13 +1155,12 @@ static void init_chunk(CHUNK *chunk, PROCESS *process, int n)
 	}
 }
 
-
-static void *polygonize_chunk(void *arg)
+static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
 {
 	CUBE c;
 	unsigned int i;
-	PROCESS *process = (PROCESS*)arg;
-	unsigned int n = process->chunks_taken++;
+	PROCESS *process;
+	unsigned int n;
 	CHUNK *chunk;
 
 #ifdef TASK_PROFILE
@@ -1169,7 +1169,8 @@ static void *polygonize_chunk(void *arg)
 	__itt_task_begin(thread_domain, __itt_null, __itt_null, TTask);
 #endif // TASK_PROFILE
 
-
+	process = (PROCESS*)BLI_task_pool_userdata(pool);
+	n = process->chunks_taken++;
 	chunk = MEM_callocN(sizeof(CHUNK), "Chunk");
 
 	init_chunk(chunk, process, n);
@@ -1196,8 +1197,6 @@ static void *polygonize_chunk(void *arg)
 #ifdef TASK_PROFILE
 	__itt_task_end(thread_domain);
 #endif // TASK_PROFILE
-
-	return NULL;
 }
 
 #if 0
@@ -1262,7 +1261,8 @@ static void polygonize(PROCESS *process)
 {
 	int num_chunks = (process->chunk_res * process->chunk_res * process->chunk_res);
 	int i;
-	static pthread_t threads[8];
+	TaskScheduler *task_scheduler = BLI_task_scheduler_get();
+	TaskPool *task_pool;
 
 	process->edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
 	makecubetable();
@@ -1276,12 +1276,21 @@ static void polygonize(PROCESS *process)
 		process->edge_mem[i] = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball memarena");
 	}
 
+	task_pool = BLI_task_pool_create(task_scheduler, process);
+
 	for (i = 0; i < num_chunks; i++) {
+		BLI_task_pool_push(task_pool, polygonize_chunk, NULL, false, TASK_PRIORITY_LOW);
+	}
+
+	BLI_task_pool_work_and_wait(task_pool);
+	BLI_task_pool_free(task_pool);
+
+	/*for (i = 0; i < num_chunks; i++) {
 		pthread_create(&threads[i], NULL, polygonize_chunk, (void*)process);
 	}
 	for (i = 0; i < num_chunks; i++) {
 		pthread_join(threads[i], NULL);
-	}
+	}*/
 
 	for (i = 0; i < 128; i++) {
 		pthread_mutex_destroy(&process->edgelocks[i]);
