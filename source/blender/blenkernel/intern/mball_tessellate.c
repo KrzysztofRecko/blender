@@ -57,21 +57,21 @@
 
 #include "BLI_strict_flags.h"
 
-#define MB_ACCUM_NORMAL
-#define MB_LINEAR_CONVERGE
+//#define MB_ACCUM_NORMAL
+//#define MB_LINEAR_CONVERGE
 
 /* Data types */
 
 //typedef struct Box Box;
 
 typedef struct corner {         /* corner of a cube */
-	int i, j, k;                /* (i, j, k) is index within lattice */
-	float co[3], value;       /* location and function value */
+	int lat[3];                 /* index within lattice */
+	float co[3], value;         /* location and function value */
 	struct corner *next;
 } CORNER;
 
 typedef struct cube {           /* partitioning cell (cube) */
-	int i, j, k;                /* lattice location of cube */
+	int lat[3];                 /* lattice location of cube */
 	CORNER *corners[8];         /* eight corners */
 } CUBE;
 
@@ -81,12 +81,12 @@ typedef struct cubes {          /* linked list of cubes acting as stack */
 } CUBES;
 
 typedef struct centerlist {     /* list of cube locations */
-	int i, j, k;                /* cube location */
+	int lat[3];                 /* cube location */
 	struct centerlist *next;    /* remaining elements */
 } CENTERLIST;
 
 typedef struct edgelist {       /* list of edges */
-	int i1, j1, k1, i2, j2, k2; /* edge corner ids */
+	int a[3], b[3];             /* edge corner ids */
 	int vid;                    /* vertex id */
 	struct edgelist *next;      /* remaining elements */
 } EDGELIST;
@@ -544,12 +544,12 @@ static void docube(CHUNK *chunk, CUBE *cube)
 	}
 
 	/* Using faces[] table, adds neighbouring cube if surface intersects face in this direction. */
-	if (MB_BIT(faces[index], 0)) add_cube(chunk, cube->i - 1, cube->j, cube->k);
-	if (MB_BIT(faces[index], 1)) add_cube(chunk, cube->i + 1, cube->j, cube->k);
-	if (MB_BIT(faces[index], 2)) add_cube(chunk, cube->i, cube->j - 1, cube->k);
-	if (MB_BIT(faces[index], 3)) add_cube(chunk, cube->i, cube->j + 1, cube->k);
-	if (MB_BIT(faces[index], 4)) add_cube(chunk, cube->i, cube->j, cube->k - 1);
-	if (MB_BIT(faces[index], 5)) add_cube(chunk, cube->i, cube->j, cube->k + 1);
+	if (MB_BIT(faces[index], 0)) add_cube(chunk, cube->lat[0] - 1, cube->lat[1], cube->lat[2]);
+	if (MB_BIT(faces[index], 1)) add_cube(chunk, cube->lat[0] + 1, cube->lat[1], cube->lat[2]);
+	if (MB_BIT(faces[index], 2)) add_cube(chunk, cube->lat[0], cube->lat[1] - 1, cube->lat[2]);
+	if (MB_BIT(faces[index], 3)) add_cube(chunk, cube->lat[0], cube->lat[1] + 1, cube->lat[2]);
+	if (MB_BIT(faces[index], 4)) add_cube(chunk, cube->lat[0], cube->lat[1], cube->lat[2] - 1);
+	if (MB_BIT(faces[index], 5)) add_cube(chunk, cube->lat[0], cube->lat[1], cube->lat[2] + 1);
 
 	/* Using cubetable[], determines polygons for output. */
 	for (polys = cubetable[index]; polys; polys = polys->next) {
@@ -624,18 +624,18 @@ static CORNER *setcorner(CHUNK *chunk, int i, int j, int k)
 	c = chunk->corners[index];
 
 	for (; c != NULL; c = c->next) {
-		if (c->i == i && c->j == j && c->k == k) {
+		if (c->lat[0] == i && c->lat[1] == j && c->lat[2] == k) {
 			return c;
 		}
 	}
 
 	c = BLI_memarena_alloc(chunk->mem, sizeof(CORNER));
 
-	c->i = i;
+	c->lat[0] = i;
 	c->co[0] = ((float)i - 0.5f) * chunk->process->size;
-	c->j = j;
+	c->lat[1] = j;
 	c->co[1] = ((float)j - 0.5f) * chunk->process->size;
-	c->k = k;
+	c->lat[2] = k;
 	c->co[2] = ((float)k - 0.5f) * chunk->process->size;
 
 	c->value = metaball(chunk, c->co[0], c->co[1], c->co[2]);
@@ -789,13 +789,13 @@ static int setcenter(CHUNK *chunk, CENTERLIST *table[], const int i, const int j
 	q = table[index];
 
 	for (l = q; l != NULL; l = l->next) {
-		if (l->i == i && l->j == j && l->k == k) return 1;
+		if (l->lat[0] == i && l->lat[1] == j && l->lat[2] == k) return 1;
 	}
 
 	newc = BLI_memarena_alloc(chunk->mem, sizeof(CENTERLIST));
-	newc->i = i;
-	newc->j = j;
-	newc->k = k;
+	newc->lat[0] = i;
+	newc->lat[1] = j;
+	newc->lat[2] = k;
 	newc->next = q;
 	table[index] = newc;
 
@@ -856,6 +856,15 @@ static void vnormal(CHUNK *chunk, const float point[3], float r_no[3])
 #endif
 }
 
+static void orient_edge(int a[3], int b[3])
+{
+	if (a[0] > b[0] || a[1] > b[1] || a[2] > b[2]) {
+		SWAP(int, a[0], b[0]);
+		SWAP(int, a[1], b[1]);
+		SWAP(int, a[2], b[2]);
+	}
+}
+
 /**
  * \return the id of vertex between two corners.
  *
@@ -869,22 +878,17 @@ static int vertid(PROCESS *process, CHUNK *chunk, const CORNER *c1, const CORNER
 	int first[3], second[3];
 	EDGELIST *q;
 
-	first[0] = c1->i; first[1] = c1->j; first[2] = c1->k;
-	second[0] = c2->i; second[1] = c2->j; second[2] = c2->k;
-
-	if (first[0] > second[0] || first[1] > second[1] || first[2] > second[2]) {
-		SWAP(int, first[0], second[0]);
-		SWAP(int, first[1], second[1]);
-		SWAP(int, first[2], second[2]);
-	}
+	first[0] = c1->lat[0]; first[1] = c1->lat[1]; first[2] = c1->lat[2];
+	second[0] = c2->lat[0]; second[1] = c2->lat[1]; second[2] = c2->lat[2];
+	orient_edge(first, second);
 
 	index = HASH(first[0], first[1], first[2]) + HASH(second[0], second[1], second[2]);
 	omp_set_lock(&process->edgelocks[index / 512]);
 
 	q = process->edges[index];
 	for (; q != NULL; q = q->next) {
-		if (q->i1 == first[0] && q->j1 == first[1] && q->k1 == first[2] &&
-			q->i2 == second[0] && q->j2 == second[1] && q->k2 == second[2])
+		if (q->a[0] == first[0] && q->a[1] == first[1] && q->a[2] == first[2] &&
+			q->b[0] == second[0] && q->b[1] == second[1] && q->b[2] == second[2])
 		{
 			omp_unset_lock(&process->edgelocks[index / 512]);
 			return q->vid;
@@ -896,12 +900,8 @@ static int vertid(PROCESS *process, CHUNK *chunk, const CORNER *c1, const CORNER
 	omp_unset_lock(&process->vertex_lock);
 
 	q = BLI_memarena_alloc(process->edge_mem[index / 512], sizeof(EDGELIST));
-	q->i1 = first[0];
-	q->j1 = first[1];
-	q->k1 = first[2];
-	q->i2 = second[0];
-	q->j2 = second[1];
-	q->k2 = second[2];
+	copy_v3_v3_int(q->a, first);
+	copy_v3_v3_int(q->b, second);
 	q->vid = vid;
 	q->next = chunk->process->edges[index];
 	chunk->process->edges[index] = q;
@@ -1004,9 +1004,9 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
 		ncube->next = chunk->cubes;
 		chunk->cubes = ncube;
 
-		ncube->cube.i = i;
-		ncube->cube.j = j;
-		ncube->cube.k = k;
+		ncube->cube.lat[0] = i;
+		ncube->cube.lat[1] = j;
+		ncube->cube.lat[2] = k;
 
 		/* set corners of initial cube: */
 		for (n = 0; n < 8; n++)
@@ -1015,16 +1015,12 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
 }
 
 /**
- * Find at most 6 cubes to start polygonization from.
- * This may be too little only in very rare cases.
- * To make this algorithm equivalent to the previous one,
- * it would have to search for 26 cubes (not only along the axes,
- * but also on cube diagonals and through the middle of edges).
+ * Find at most 26 cubes to start polygonization from.
  */
 static void find_first_points(CHUNK *chunk, const unsigned int em)
 {
 	const MLSmall *ml;
-	int center[3], lbn[3], rtf[3], it[3], dir;
+	int center[3], lbn[3], rtf[3], it[3], dir[3], add[3];
 	float tmp[3], a, b;
 
 	int max[3], min[3];
@@ -1041,19 +1037,31 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 	DO_MAX(min, lbn);
 	DO_MIN(max, rtf);
 
-	for (dir = 0; dir < 3; dir++) {
-		copy_v3_v3_int(it, center);
-		it[dir] = lbn[dir];
+	for (dir[0] = -1; dir[0] <= 1; dir[0]++)
+		for (dir[1] = -1; dir[1] <= 1; dir[1]++)
+			for (dir[2] = -1; dir[2] <= 1; dir[2]++) {
+				if (dir[0] == 0 && dir[1] == 0 && dir[2] == 0) continue;
 
-		b = setcorner(chunk, it[0], it[1], it[2])->value;
-		for (it[dir]++; it[dir] <= rtf[dir]; it[dir]++) {
-			a = b;
-			b = setcorner(chunk, it[0], it[1], it[2])->value;
+				copy_v3_v3_int(it, center);
 
-			if ((a < 0.0f && b >= 0.0f) || (b < 0.0f && a >= 0.0f)) {
-				add_cube(chunk, it[0] - 1, it[1] - 1, it[2] - 1);
-			}
-		}
+				b = setcorner(chunk, it[0], it[1], it[2])->value;
+				do {
+					it[0] += dir[0];
+					it[1] += dir[1];
+					it[2] += dir[2];
+					a = b;
+					b = setcorner(chunk, it[0], it[1], it[2])->value;
+
+					if (a * b < 0.0f) {
+						add[0] = it[0] - dir[0];
+						add[1] = it[1] - dir[1];
+						add[2] = it[2] - dir[2];
+						DO_MIN(it, add);
+						add_cube(chunk, add[0], add[1], add[2]);
+						break;
+					} 
+				} while (it[0] > lbn[0] && it[1] > lbn[1] && it[2] > lbn[2] &&
+						 it[0] < rtf[0] && it[1] < rtf[1] && it[2] < rtf[2]);
 	}
 }
 
@@ -1213,7 +1221,7 @@ static void polygonize(PROCESS *process)
 			process->edge_mem[i] = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball memarena");
 		}
 
-#pragma omp for schedule(runtime, 1)
+#pragma omp for schedule(dynamic, 1)
 		for (i = 0; i < num_chunks; i++) {
 			init_chunk(&chunks[i], process, i);
 			polygonize_chunk(&chunks[i]);
