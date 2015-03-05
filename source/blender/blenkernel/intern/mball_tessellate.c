@@ -827,12 +827,16 @@ static int addtovertices(PROCESS *process)
  */
 static void vnormal(CHUNK *chunk, const float point[3], float r_no[3])
 {
+#ifdef MB_ACCUM_NORMAL
+	r_no[0] = r_no[1] = r_no[2] = 0.0f;
+#else
 	const float delta = chunk->process->delta;
 	const float f = metaball(chunk, point[0], point[1], point[2]);
 
 	r_no[0] = metaball(chunk, point[0] + delta, point[1], point[2]) - f;
 	r_no[1] = metaball(chunk, point[0], point[1] + delta, point[2]) - f;
 	r_no[2] = metaball(chunk, point[0], point[1], point[2] + delta) - f;
+#endif
 
 #if 0
 	f = normalize_v3(r_no);
@@ -864,6 +868,10 @@ static void orient_edge(int a[3], int b[3])
 		SWAP(int, a[2], b[2]);
 	}
 }
+static bool equal_v3_v3_int(const int a[3], const int b[3])
+{
+	return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
+}
 
 /**
  * \return the id of vertex between two corners.
@@ -873,51 +881,42 @@ static void orient_edge(int a[3], int b[3])
 static int vertid(PROCESS *process, CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 {
 	float v[3], no[3];
-	int vid;
-	int index;
-	int first[3], second[3];
+	int one[3], two[3], index, vid;
 	EDGELIST *q;
 
-	first[0] = c1->lat[0]; first[1] = c1->lat[1]; first[2] = c1->lat[2];
-	second[0] = c2->lat[0]; second[1] = c2->lat[1]; second[2] = c2->lat[2];
-	orient_edge(first, second);
+	copy_v3_v3_int(one, c1->lat);
+	copy_v3_v3_int(two, c2->lat);
+	orient_edge(one, two);
 
-	index = HASH(first[0], first[1], first[2]) + HASH(second[0], second[1], second[2]);
+	index = HASH(one[0], one[1], one[2]) + HASH(two[0], two[1], two[2]);
+
 	omp_set_lock(&process->edgelocks[index / 512]);
-
-	q = process->edges[index];
-	for (; q != NULL; q = q->next) {
-		if (q->a[0] == first[0] && q->a[1] == first[1] && q->a[2] == first[2] &&
-			q->b[0] == second[0] && q->b[1] == second[1] && q->b[2] == second[2])
-		{
-			omp_unset_lock(&process->edgelocks[index / 512]);
-			return q->vid;
+		q = process->edges[index];
+		for (; q != NULL; q = q->next) {
+			if (equal_v3_v3_int(one, q->a) && equal_v3_v3_int(two, q->b)) {
+				omp_unset_lock(&process->edgelocks[index / 512]);
+				return q->vid;
+			}
 		}
-	}
 
-	omp_set_lock(&process->vertex_lock);
-	vid = addtovertices(process);
-	omp_unset_lock(&process->vertex_lock);
+		omp_set_lock(&process->vertex_lock);
+			vid = addtovertices(process);
+		omp_unset_lock(&process->vertex_lock);
 
-	q = BLI_memarena_alloc(process->edge_mem[index / 512], sizeof(EDGELIST));
-	copy_v3_v3_int(q->a, first);
-	copy_v3_v3_int(q->b, second);
-	q->vid = vid;
-	q->next = chunk->process->edges[index];
-	chunk->process->edges[index] = q;
+		q = BLI_memarena_alloc(process->edge_mem[index / 512], sizeof(EDGELIST));
+		copy_v3_v3_int(q->a, one);
+		copy_v3_v3_int(q->b, two);
+		q->vid = vid;
+		q->next = chunk->process->edges[index];
+		chunk->process->edges[index] = q;
 	omp_unset_lock(&process->edgelocks[index / 512]);
 
 	converge(chunk, c1, c2, v);  /* position */
-
-#ifdef MB_ACCUM_NORMAL
-	no[0] = no[1] = no[2] = 0.0f;
-#else
 	vnormal(chunk, v, no); /* normal */
-#endif
 
 	omp_set_lock(&process->vertex_lock);
-	copy_v3_v3(chunk->process->co[vid], v);
-	copy_v3_v3(chunk->process->no[vid], no);
+		copy_v3_v3(chunk->process->co[vid], v);
+		copy_v3_v3(chunk->process->no[vid], no);
 	omp_unset_lock(&process->vertex_lock);
 
 	return vid;
@@ -1020,12 +1019,12 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
 static void find_first_points(CHUNK *chunk, const unsigned int em)
 {
 	const MLSmall *ml;
-	int center[3], lbn[3], rtf[3], it[3], dir[3], add[3];
-	float tmp[3], a, b;
+	int center[3], lbn[3], rtf[3], l_lat[3], dir[3], r_lat[3], mid_lat[3], l, r, mid, t[3], i;
+	float tmp[3], a, b, c;
 
-	int max[3], min[3];
-	next_lattice(max, chunk->bb.max, chunk->process->size);
-	next_lattice(min, chunk->bb.min, chunk->process->size);
+	//int max[3], min[3];
+	//next_lattice(max, chunk->bb.max, chunk->process->size);
+	//next_lattice(min, chunk->bb.min, chunk->process->size);
 
 	ml = chunk->mainb[em];
 
@@ -1034,34 +1033,63 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 	prev_lattice(lbn, ml->bb->min, chunk->process->size);
 	next_lattice(rtf, ml->bb->max, chunk->process->size);
 
-	DO_MAX(min, lbn);
-	DO_MIN(max, rtf);
+	rtf[0] -= center[0];
+	rtf[1] -= center[1];
+	rtf[2] -= center[2];
+	lbn[0] = center[0] - lbn[0];
+	lbn[1] = center[1] - lbn[1];
+	lbn[2] = center[2] - lbn[2];
+	//DO_MAX(min, lbn);
+	//DO_MIN(max, rtf);
 
 	for (dir[0] = -1; dir[0] <= 1; dir[0]++)
 		for (dir[1] = -1; dir[1] <= 1; dir[1]++)
 			for (dir[2] = -1; dir[2] <= 1; dir[2]++) {
 				if (dir[0] == 0 && dir[1] == 0 && dir[2] == 0) continue;
 
-				copy_v3_v3_int(it, center);
+				l = 0;
+				for (i = 0; i < 3; i++) {
+					if (dir[i] == 0) t[i] = INT32_MAX;
+					else if (dir[i] > 0) t[i] = rtf[i];
+					else t[i] = lbn[i];
+				}
+				r = MIN3(t[0], t[1], t[2]);
 
-				b = setcorner(chunk, it[0], it[1], it[2])->value;
-				do {
-					it[0] += dir[0];
-					it[1] += dir[1];
-					it[2] += dir[2];
-					a = b;
-					b = setcorner(chunk, it[0], it[1], it[2])->value;
+				l_lat[0] = center[0] + l * dir[0];
+				l_lat[1] = center[1] + l * dir[1];
+				l_lat[2] = center[2] + l * dir[2];
 
-					if (a * b < 0.0f) {
-						add[0] = it[0] - dir[0];
-						add[1] = it[1] - dir[1];
-						add[2] = it[2] - dir[2];
-						DO_MIN(it, add);
-						add_cube(chunk, add[0], add[1], add[2]);
-						break;
-					} 
-				} while (it[0] > lbn[0] && it[1] > lbn[1] && it[2] > lbn[2] &&
-						 it[0] < rtf[0] && it[1] < rtf[1] && it[2] < rtf[2]);
+				r_lat[0] = center[0] + r * dir[0];
+				r_lat[1] = center[1] + r * dir[1];
+				r_lat[2] = center[2] + r * dir[2];
+
+				a = setcorner(chunk, l_lat[0], l_lat[1], l_lat[2])->value;
+				b = setcorner(chunk, r_lat[0], r_lat[1], r_lat[2])->value;
+				if (a * b < 0.0f) {
+					while (r - l >= 2) {
+						mid = (r + l) / 2;
+						mid_lat[0] = center[0] + mid * dir[0];
+						mid_lat[1] = center[1] + mid * dir[1];
+						mid_lat[2] = center[2] + mid * dir[2];
+						c = setcorner(chunk, mid_lat[0], mid_lat[1], mid_lat[2])->value;
+						if (a * c < 0.0f) {
+							b = c;
+							r = mid;
+							r_lat[0] = mid_lat[0];
+							r_lat[1] = mid_lat[1];
+							r_lat[2] = mid_lat[2];
+						}
+						else {
+							a = c;
+							l = mid;
+							l_lat[0] = mid_lat[0];
+							l_lat[1] = mid_lat[1];
+							l_lat[2] = mid_lat[2];
+						}
+					}
+					DO_MIN(l_lat, r_lat);
+					add_cube(chunk, r_lat[0], r_lat[1], r_lat[2]);
+				}
 	}
 }
 
