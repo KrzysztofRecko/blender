@@ -33,12 +33,6 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <float.h>
-#include <pthread.h>
-
-//#define TASK_PROFILE
-#ifdef TASK_PROFILE
-#include <ittnotify.h>
-#endif
 
 #include "MEM_guardedalloc.h"
 
@@ -52,7 +46,6 @@
 #include "BLI_utildefines.h"
 #include "BLI_memarena.h"
 #include "BLI_task.h"
-#include "PIL_time.h"
 
 #include "BKE_global.h"
 
@@ -63,8 +56,8 @@
 
 #include "BLI_strict_flags.h"
 
-#define MB_ACCUM_NORMAL
-#define MB_LINEAR_CONVERGE
+//#define MB_ACCUM_NORMAL
+//#define MB_LINEAR_CONVERGE
 
 /* Data types */
 
@@ -1171,12 +1164,6 @@ static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
 	PROCESS *process;
 	CHUNK *chunk;
 
-#ifdef TASK_PROFILE
-	__itt_domain* thread_domain = __itt_domain_create("Chunk");;
-	__itt_string_handle* TTask = __itt_string_handle_create("Chunk");
-	__itt_task_begin(thread_domain, __itt_null, __itt_null, TTask);
-#endif // TASK_PROFILE
-
 	process = (PROCESS*)BLI_task_pool_userdata(pool);
 	chunk = MEM_callocN(sizeof(CHUNK), "Chunk");
 
@@ -1207,10 +1194,6 @@ static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
 
 	freechunk(chunk);
 	MEM_freeN(chunk);
-
-#ifdef TASK_PROFILE
-	__itt_task_end(thread_domain);
-#endif // TASK_PROFILE
 }
 
 #if 0
@@ -1495,22 +1478,6 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 
 void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob, ListBase *dispbase)
 {
-#ifdef TASK_PROFILE
-	static bool created_domain = false;
-	static __itt_domain* domain;
-	__itt_string_handle* RestTask = __itt_string_handle_create("Rest");
-	__itt_string_handle* InitTask = __itt_string_handle_create("Initialize");
-	__itt_string_handle* PolygonizeTask = __itt_string_handle_create("Polygonize");
-
-	if (!created_domain) {
-		domain = __itt_domain_create("Polygonization");
-		created_domain = true;
-	}
-	else {
-		__itt_task_end(domain);
-	}
-#endif // TASK_PROFILE
-
 	MetaBall *mb;
 	DispList *dl;
 	unsigned int a;
@@ -1551,17 +1518,8 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 	process.pgn_elements = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball memarena");
 	process.metaballs = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaballs memarena");
 
-#ifdef TASK_PROFILE
-	__itt_task_begin(domain, __itt_null, __itt_null, InitTask);
-#endif // TASK_PROFILE
-
 	/* initialize all mainb (MetaElems) */
 	init_meta(eval_ctx, &process, scene, ob);
-
-#ifdef TASK_PROFILE
-	__itt_task_end(domain);
-#endif // TASK_PROFILE
-
 
 	if (process.totelem > 0) {
 		/* don't polygonize metaballs with too high resolution (base mball to small)
@@ -1570,9 +1528,6 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 		    ob->size[1] > 0.00001f * (process.allbb.max[1] - process.allbb.min[1]) ||
 		    ob->size[2] > 0.00001f * (process.allbb.max[2] - process.allbb.min[2]))
 		{
-#ifdef TASK_PROFILE
-			__itt_task_begin(domain, __itt_null, __itt_null, PolygonizeTask);
-#endif // TASK_PROFILE
 			polygonize(&process);
 
 			/* add resulting surface to displist */
@@ -1595,17 +1550,7 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 				last_facecount = process.curindex;
 				last_vertexcount = process.curvertex;
 			}
-
-#ifdef TASK_PROFILE
-			__itt_task_end(domain);
-#endif // TASK_PROFILE
-
 		}
 	}
 	freeprocess(&process);
-
-#ifdef TASK_PROFILE
-	__itt_task_begin(domain, __itt_null, __itt_null, RestTask);
-#endif // TASK_PROFILE
-
 }
