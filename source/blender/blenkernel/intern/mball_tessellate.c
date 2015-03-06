@@ -106,8 +106,8 @@ typedef struct Box {			/* an AABB with pointer to metalelem */
 	MLSmall *ml;
 } Box;
 
-typedef struct MLSmall {
-	float imat[4][4];
+typedef struct MLSmall {        /* a compact structure like this improves cache usage */
+	float imat[4][4];           /* this is only stuff needed for computing density and BVH build*/
 	short type;
 	float expx, expy, expz;
 	float rad2, s;
@@ -128,7 +128,7 @@ typedef struct process {        /* parameters, storage */
 	unsigned int chunk_res;
 
 	CHUNK **chunks;
-	unsigned int chunks_taken;
+	unsigned int chunks_taken;  /* tasks are queued, and then each thread asks for its own chunk number */
 	ThreadMutex chunks_lock;
 
 	MLSmall **mainb;			/* array of all metaelems */
@@ -136,9 +136,9 @@ typedef struct process {        /* parameters, storage */
 
 	Box allbb;                   /* Bounding box of all metaelems */
 
-	EDGELIST **edges;           /* edge and vertex id hash table */
-	MemArena *edge_mem[128];
-	ThreadMutex edgelocks[128];
+	EDGELIST **edges;           /* edge and vertex id hash table, common for all chunks */
+	MemArena *edge_mem[128];    /* each block of 512 entries to edge hash table gets */
+	ThreadMutex edgelocks[128];	/* its own lock and memarena for allocation */
 
 	int (*indices)[4];          /* output indices */
 	unsigned int totindex;		/* size of memory allocated for indices */
@@ -152,7 +152,7 @@ typedef struct process {        /* parameters, storage */
 
 	/* memory allocation from common pool */
 	MemArena *pgn_elements;
-	MemArena *metaballs;
+	MemArena *metaballs;        /* metaballs allocated from their own memarena to improve data locality */
 } PROCESS;
 
 typedef struct chunk {
@@ -161,14 +161,14 @@ typedef struct chunk {
 	Box bb;
 	int min_lat[3], max_lat[3];
 
-	MLSmall **mainb;
+	MLSmall **mainb;            /* each chunk gets its own list of mballs which intersect chunk's bb */
 	unsigned int elem;
 
 	MetaballBVHNode **bvh_queue;
-	MetaballBVHNode bvh;
+	MetaballBVHNode bvh;        /* also, each chunk makes its own BVH */
 	unsigned int bvh_queue_size;
 
-	CUBES *cubes;
+	CUBES *cubes;               /* cubes, centers and corners are local for a chunk */
 	CENTERLIST **centers;
 	CORNER **corners;
 
@@ -1157,6 +1157,11 @@ static void init_chunk(CHUNK *chunk, PROCESS *process, int n)
 	}
 }
 
+/**
+ * Polygonize chunk:
+ * Get a chunk number from process,
+ * Call init_chunk, and polygonize elems of the chunk.
+ */
 static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
 {
 	unsigned int i, n;
@@ -1196,63 +1201,10 @@ static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
 	MEM_freeN(chunk);
 }
 
-#if 0
-static void draw_box(PROCESS *process, Box *box)
-{
-	if (!box) return;
-
-	float v[8][3];
-	v[0][0] = box->min[0];
-	v[0][1] = box->min[1];
-	v[0][2] = box->min[2];
-
-	v[1][0] = box->max[0];
-	v[1][1] = box->min[1];
-	v[1][2] = box->min[2];
-
-	v[2][0] = box->min[0];
-	v[2][1] = box->max[1];
-	v[2][2] = box->min[2];
-
-	v[3][0] = box->min[0];
-	v[3][1] = box->min[1];
-	v[3][2] = box->max[2];
-
-	v[4][0] = box->max[0];
-	v[4][1] = box->max[1];
-	v[4][2] = box->min[2];
-
-	v[5][0] = box->min[0];
-	v[5][1] = box->max[1];
-	v[5][2] = box->max[2];
-
-	v[6][0] = box->max[0];
-	v[6][1] = box->min[1];
-	v[6][2] = box->max[2];
-
-	v[7][0] = box->max[0];
-	v[7][1] = box->max[1];
-	v[7][2] = box->max[2];
-
-	for (int i = 0; i < 8; i++) {
-		int vid = addtovertices(process);
-		copy_v3_v3(process->co[vid], v[i]);
-	}
-
-	make_face(process, process->curvertex - 8, process->curvertex - 6, process->curvertex - 4, process->curvertex - 7);
-	make_face(process, process->curvertex - 8, process->curvertex - 5, process->curvertex - 3, process->curvertex - 6);
-	make_face(process, process->curvertex - 8, process->curvertex - 7, process->curvertex - 2, process->curvertex - 5);
-	make_face(process, process->curvertex - 7, process->curvertex - 4, process->curvertex - 1, process->curvertex - 2);
-	make_face(process, process->curvertex - 6, process->curvertex - 3, process->curvertex - 1, process->curvertex - 4);
-	make_face(process, process->curvertex - 5, process->curvertex - 2, process->curvertex - 1, process->curvertex - 3);
-}
-#endif // 0
-
 /**
  * The main polygonization proc.
- * Allocates memory, makes cubetable,
- * finds starting surface points
- * and processes cubes on the stack until none left.
+ * Initializes process, mutexes, makes cubetable
+ * and queues num_chunks tasks.
  */
 static void polygonize(PROCESS *process)
 {
@@ -1485,6 +1437,8 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 	static unsigned int last_vertexcount = 10, last_facecount = 10;
 
 	mb = ob->data;
+
+	/* Total chunk number is chunk_res ^ 3 */
 	process.chunk_res = 2;
 
 	process.thresh = mb->thresh;
