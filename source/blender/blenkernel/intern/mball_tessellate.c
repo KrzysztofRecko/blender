@@ -1157,11 +1157,8 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
 static void find_first_points(CHUNK *chunk, const unsigned int em)
 {
 	const MLSmall *ml;
-	int center[3], lbn[3], rtf[3], 
-		l_lat[3], r_lat[3], mid_lat[3], 
-		dir[3], t[3], 
-		l, r, mid, i;
-	float tmp[3], a, b, c;
+	int center[3], lbn[3], rtf[3], it[3], dir[3], add[3];
+	float tmp[3], a, b;
 
 	ml = chunk->mainb[em];
 
@@ -1170,48 +1167,32 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 	prev_lattice(lbn, ml->bb->min, chunk->process->size);
 	next_lattice(rtf, ml->bb->max, chunk->process->size);
 
-	VECSUB(rtf, rtf, center);
-	VECSUB(lbn, center, lbn);
-
 	for (dir[0] = -1; dir[0] <= 1; dir[0]++)
 		for (dir[1] = -1; dir[1] <= 1; dir[1]++)
 			for (dir[2] = -1; dir[2] <= 1; dir[2]++) {
 				if (dir[0] == 0 && dir[1] == 0 && dir[2] == 0) continue;
 
-				l = 0;
-				for (i = 0; i < 3; i++) {
-					if (dir[i] == 0) t[i] = INT32_MAX;
-					else if (dir[i] > 0) t[i] = rtf[i];
-					else t[i] = lbn[i];
-				}
-				r = MIN3(t[0], t[1], t[2]);
+				copy_v3_v3_int(it, center);
 
-				VECADDFAC(l_lat, center, dir, l);
-				VECADDFAC(r_lat, center, dir, r);
+				b = setcorner(chunk, it[0], it[1], it[2])->value;
+				do {
+					it[0] += dir[0];
+					it[1] += dir[1];
+					it[2] += dir[2];
+					a = b;
+					b = setcorner(chunk, it[0], it[1], it[2])->value;
 
-				a = setcorner(chunk, l_lat[0], l_lat[1], l_lat[2])->value;
-				b = setcorner(chunk, r_lat[0], r_lat[1], r_lat[2])->value;
-				if (a * b < 0.0f) {
-					while (r - l >= 2) {
-						mid = (r + l) / 2;
-						VECADDFAC(mid_lat, center, dir, mid);
-						c = setcorner(chunk, mid_lat[0], mid_lat[1], mid_lat[2])->value;
-						if (a * c < 0.0f) {
-
-							b = c;
-							r = mid;
-							VECCOPY(r_lat, mid_lat);
-						}
-						else {
-							a = c;
-							l = mid;
-							VECCOPY(l_lat, mid_lat);
-						}
+					if (a * b < 0.0f) {
+						add[0] = it[0] - dir[0];
+						add[1] = it[1] - dir[1];
+						add[2] = it[2] - dir[2];
+						DO_MIN(it, add);
+						add_cube(chunk, add[0], add[1], add[2]);
+						break;
 					}
-					DO_MIN(l_lat, r_lat);
-					add_cube(chunk, r_lat[0], r_lat[1], r_lat[2]);
-				}
-	}
+				} while (it[0] > lbn[0] && it[1] > lbn[1] && it[2] > lbn[2] &&
+						 it[0] < rtf[0] && it[1] < rtf[1] && it[2] < rtf[2]);
+			}
 }
 
 static void init_chunk(CHUNK *chunk, PROCESS *process, int n)
