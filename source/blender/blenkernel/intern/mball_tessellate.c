@@ -126,7 +126,7 @@ typedef struct process {        /* parameters, storage */
 	float thresh, size;			/* mball threshold, single cube size */
 	float delta;				/* small delta for calculating normals */
 	unsigned int converge_res;	/* converge procedure resolution (more = slower) */
-	unsigned int chunk_res;
+	unsigned int chunk_res, num_chunks;
 
 	CHUNK **chunks;
 
@@ -1340,14 +1340,14 @@ static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
  */
 static void polygonize(PROCESS *process)
 {
-	int i, num_chunks = (process->chunk_res * process->chunk_res * process->chunk_res);
+	unsigned int i;
 	TaskScheduler *task_scheduler = BLI_task_scheduler_get();
 	TaskPool *task_pool;
 
-	process->chunks = MEM_callocN(sizeof(CHUNK *) * num_chunks, "mbproc->chunks");
+	process->chunks = MEM_callocN(sizeof(CHUNK *) * process->num_chunks, "mbproc->chunks");
 	makecubetable();
 
-	for (i = 0; i < num_chunks; i++) {
+	for (i = 0; i < process->num_chunks; i++) {
 		process->chunks[i] = MEM_callocN(sizeof(CHUNK), "Chunk");
 		process->chunks[i]->index = i;
 		process->chunks[i]->process = process;
@@ -1357,15 +1357,15 @@ static void polygonize(PROCESS *process)
 	
 	task_pool = BLI_task_pool_create(task_scheduler, process);
 
-	for (i = 0; i < num_chunks; i++) {
+	for (i = 0; i < process->num_chunks; i++) {
 		BLI_task_pool_push(task_pool, polygonize_chunk, (void*)process->chunks[i], false, TASK_PRIORITY_HIGH);
 	}
 	BLI_task_pool_work_and_wait(task_pool);
 
-	for (i = 0; i < num_chunks; i++) {
-		BLI_task_pool_push(task_pool, do_queued_cubes, (void*)process->chunks[i], false, TASK_PRIORITY_HIGH);
-	}
-	BLI_task_pool_work_and_wait(task_pool);
+	//for (i = 0; i < process->chunks_num; i++) {
+	//	BLI_task_pool_push(task_pool, do_queued_cubes, (void*)process->chunks[i], false, TASK_PRIORITY_HIGH);
+	//}
+	//BLI_task_pool_work_and_wait(task_pool);
 
 	BLI_task_pool_free(task_pool);
 }
@@ -1564,7 +1564,8 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 	mb = ob->data;
 
 	/* Total chunk number is chunk_res ^ 3 */
-	process.chunk_res = 2;
+	process.chunk_res = 1;
+	process.num_chunks = (process.chunk_res * process.chunk_res * process.chunk_res);
 
 	process.thresh = mb->thresh;
 
@@ -1604,7 +1605,7 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 			polygonize(&process);
 
 			/* add resulting surface to displist */
-			for (i = 0; i < 8; i++) {
+			for (i = 0; i < process.num_chunks; i++) {
 				if (process.chunks[i]->totindex) {
 					dl = MEM_callocN(sizeof(DispList), "mballdisp");
 					BLI_addtail(dispbase, dl);
