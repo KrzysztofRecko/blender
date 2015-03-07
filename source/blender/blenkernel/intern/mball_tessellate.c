@@ -56,8 +56,8 @@
 
 #include "BLI_strict_flags.h"
 
-//#define MB_ACCUM_NORMAL
-//#define MB_LINEAR_CONVERGE
+#define MB_ACCUM_NORMAL
+#define MB_LINEAR_CONVERGE
 //#define MB_DRAW_NORMALS
 
 /* Data types */
@@ -137,20 +137,6 @@ typedef struct process {        /* parameters, storage */
 
 	Box allbb;                   /* Bounding box of all metaelems */
 
-	EDGELIST **edges;           /* edge and vertex id hash table, common for all chunks */
-	MemArena *edge_mem[128];    /* each block of 512 entries to edge hash table gets */
-	ThreadMutex edgelocks[128];	/* its own lock and memarena for allocation */
-
-	int (*indices)[4];          /* output indices */
-	unsigned int totindex;		/* size of memory allocated for indices */
-	unsigned int curindex;		/* number of currently added indices */
-	ThreadMutex index_lock;
-
-	float (*co)[3], (*no)[3];   /* surface vertices - positions and normals */
-	unsigned int totvertex;		/* memory size */
-	unsigned int curvertex;		/* currently added vertices */
-	ThreadMutex vertex_lock;
-
 	/* memory allocation from common pool */
 	MemArena *pgn_elements;
 	MemArena *metaballs;        /* metaballs allocated from their own memarena to improve data locality */
@@ -172,14 +158,23 @@ typedef struct chunk {
 	CUBES *cubes;               /* cubes, centers and corners are local for a chunk */
 	CENTERLIST **centers;
 	CORNER **corners;
+	EDGELIST **edges;           /* edge and vertex id hash table, common for all chunks */
+
+	int(*indices)[4];           /* output indices */
+	unsigned int totindex;		/* size of memory allocated for indices */
+	unsigned int curindex;		/* number of currently added indices */
+
+	float(*co)[3], (*no)[3];    /* surface vertices - positions and normals */
+	unsigned int totvertex;		/* memory size */
+	unsigned int curvertex;		/* currently added vertices */
 
 	MemArena *mem;
 } CHUNK;
 
 /* Forward declarations */
-static int vertid(PROCESS *process, CHUNK *chunk, const CORNER *c1, const CORNER *c2);
+static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2);
 static void add_cube(CHUNK *chunk, int i, int j, int k);
-static void make_face(PROCESS *process, int i1, int i2, int i3, int i4);
+static void make_face(CHUNK *chunk, int i1, int i2, int i3, int i4);
 static void converge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, float r_p[3]);
 
 /* ******************* SIMPLE BVH ********************* */
@@ -429,7 +424,7 @@ static float metaball(CHUNK *chunk, float x, float y, float z)
 /**
  * Adds face to indices, expands memory if needed.
  */
-static void make_face(PROCESS *process, int i1, int i2, int i3, int i4)
+static void make_face(CHUNK *chunk, int i1, int i2, int i3, int i4)
 {
 	int *cur;
 
@@ -437,14 +432,13 @@ static void make_face(PROCESS *process, int i1, int i2, int i3, int i4)
 	float n[3];
 #endif
 
-	BLI_mutex_lock(&process->index_lock);
 
-	if (UNLIKELY(process->totindex == process->curindex)) {
-		process->totindex += 4096;
-		process->indices = MEM_reallocN(process->indices, sizeof(int[4]) * process->totindex);
+	if (UNLIKELY(chunk->totindex == chunk->curindex)) {
+		chunk->totindex += 4096;
+		chunk->indices = MEM_reallocN(chunk->indices, sizeof(int[4]) * chunk->totindex);
 	}
 
-	cur = process->indices[process->curindex++];
+	cur = chunk->indices[chunk->curindex++];
 
 	/* displists now support array drawing, we treat tri's as fake quad */
 
@@ -459,32 +453,28 @@ static void make_face(PROCESS *process, int i1, int i2, int i3, int i4)
 		cur[3] = i4;
 	}
 
-	BLI_mutex_unlock(&process->index_lock);
-
 #ifdef MB_ACCUM_NORMAL
-	BLI_mutex_lock(&process->vertex_lock);
 	if (i4 == -1) {
-		normal_tri_v3(n, process->co[i1], process->co[i2], process->co[i3]);
+		normal_tri_v3(n, chunk->co[i1], chunk->co[i2], chunk->co[i3]);
 		accumulate_vertex_normals(
-			process->no[i1], process->no[i2], process->no[i3], NULL, n,
-			process->co[i1], process->co[i2], process->co[i3], NULL);
+			chunk->no[i1], chunk->no[i2], chunk->no[i3], NULL, n,
+			chunk->co[i1], chunk->co[i2], chunk->co[i3], NULL);
 	}
 	else {
-		normal_quad_v3(n, process->co[i1], process->co[i2], process->co[i3], process->co[i4]);
+		normal_quad_v3(n, chunk->co[i1], chunk->co[i2], chunk->co[i3], chunk->co[i4]);
 		accumulate_vertex_normals(
-			process->no[i1], process->no[i2], process->no[i3], process->no[i4], n,
-			process->co[i1], process->co[i2], process->co[i3], process->co[i4]);
+			chunk->no[i1], chunk->no[i2], chunk->no[i3], chunk->no[i4], n,
+			chunk->co[i1], chunk->co[i2], chunk->co[i3], chunk->co[i4]);
 	}
-	BLI_mutex_unlock(&process->vertex_lock);
 #endif
 }
 
 /* Frees allocated memory */
 static void freeprocess(PROCESS *process)
 {
-	if (process->edges) MEM_freeN(process->edges);
 	if (process->mainb) MEM_freeN(process->mainb);
 	if (process->pgn_elements) BLI_memarena_free(process->pgn_elements);
+	if (process->chunks) MEM_freeN(process->chunks);
 	if (process->metaballs) BLI_memarena_free(process->metaballs);
 }
 
@@ -492,6 +482,7 @@ static void freechunk(CHUNK *chunk)
 {
 	if (chunk->corners) MEM_freeN(chunk->corners);
 	if (chunk->centers) MEM_freeN(chunk->centers);
+	if (chunk->edges) MEM_freeN(chunk->edges);
 	if (chunk->mainb) MEM_freeN(chunk->mainb);
 	if (chunk->bvh_queue) MEM_freeN(chunk->bvh_queue);
 	if (chunk->mem) BLI_memarena_free(chunk->mem);
@@ -567,7 +558,7 @@ static void docube(CHUNK *chunk, CUBE *cube)
 			c1 = cube->corners[corner1[edges->i]];
 			c2 = cube->corners[corner2[edges->i]];
 
-			indexar[count] = vertid(chunk->process, chunk, c1, c2);
+			indexar[count] = vertid(chunk, c1, c2);
 			count++;
 		}
 
@@ -575,24 +566,24 @@ static void docube(CHUNK *chunk, CUBE *cube)
 		if (count > 2) {
 			switch (count) {
 				case 3:
-					make_face(chunk->process, indexar[2], indexar[1], indexar[0], -1);
+					make_face(chunk, indexar[2], indexar[1], indexar[0], -1);
 					break;
 				case 4:
-					make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
+					make_face(chunk, indexar[3], indexar[2], indexar[1], indexar[0]);
 					break;
 				case 5:
-					make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
-					make_face(chunk->process, indexar[4], indexar[3], indexar[0], -1);
+					make_face(chunk, indexar[3], indexar[2], indexar[1], indexar[0]);
+					make_face(chunk, indexar[4], indexar[3], indexar[0], -1);
 					break;
 				case 6:
-					make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
-					make_face(chunk->process, indexar[5], indexar[4], indexar[3], indexar[0]);
+					make_face(chunk, indexar[3], indexar[2], indexar[1], indexar[0]);
+					make_face(chunk, indexar[5], indexar[4], indexar[3], indexar[0]);
 					break;
 				case 7:
-					make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
-					make_face(chunk->process, indexar[5], indexar[4], indexar[3], indexar[0]);
+					make_face(chunk, indexar[3], indexar[2], indexar[1], indexar[0]);
+					make_face(chunk, indexar[5], indexar[4], indexar[3], indexar[0]);
 					
-					make_face(chunk->process, indexar[6], indexar[5], indexar[0], -1);
+					make_face(chunk, indexar[6], indexar[5], indexar[0], -1);
 					break;
 			}
 		}
@@ -795,33 +786,25 @@ static int setcenter(CHUNK *chunk, CENTERLIST *table[], const int i, const int j
 /**
  * Adds a vertex, expands memory if needed.
  */
-static int addtovertices(PROCESS *process)
+static int addtovertices(CHUNK *chunk)
 {
 	int ret;
-
-	BLI_mutex_lock(&process->vertex_lock);
 	
-	if (UNLIKELY(process->curvertex == process->totvertex)) {
-		process->totvertex += 4096;
-		process->co = MEM_reallocN(process->co, process->totvertex * sizeof(float[3]));
-		process->no = MEM_reallocN(process->no, process->totvertex * sizeof(float[3]));
+	if (UNLIKELY(chunk->curvertex == chunk->totvertex)) {
+		chunk->totvertex += 4096;
+		chunk->co = MEM_reallocN(chunk->co, chunk->totvertex * sizeof(float[3]));
+		chunk->no = MEM_reallocN(chunk->no, chunk->totvertex * sizeof(float[3]));
 	}
 
-	ret = process->curvertex++;
-
-	BLI_mutex_unlock(&process->vertex_lock);
+	ret = chunk->curvertex++;
 	
 	return ret;
 }
 
-static void copytovertices(PROCESS *process, const float co[3], const float no[3], const unsigned int vid)
+static void copytovertices(CHUNK *chunk, const float co[3], const float no[3], const unsigned int vid)
 {
-	BLI_mutex_lock(&process->vertex_lock);
-
-	copy_v3_v3(process->co[vid], co);
-	copy_v3_v3(process->no[vid], no);
-
-	BLI_mutex_unlock(&process->vertex_lock);
+	copy_v3_v3(chunk->co[vid], co);
+	copy_v3_v3(chunk->no[vid], no);
 }
 
 /**
@@ -877,7 +860,7 @@ static bool equal_v3_v3_int(const int a[3], const int b[3])
 	return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
 }
 
-static bool setedge(PROCESS *process, const CORNER *c1, const CORNER *c2, int *r_vid)
+static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, int *r_vid)
 {
 	int one[3], two[3], index;
 	EDGELIST *q;
@@ -888,37 +871,32 @@ static bool setedge(PROCESS *process, const CORNER *c1, const CORNER *c2, int *r
 
 	index = HASH(one[0], one[1], one[2]) + HASH(two[0], two[1], two[2]);
 
-	BLI_mutex_lock(&process->edgelocks[index / 512]);
-
-	q = process->edges[index];
+	q = chunk->edges[index];
 	for (; q != NULL; q = q->next) {
 		if (equal_v3_v3_int(one, q->a) && equal_v3_v3_int(two, q->b)) {
-			BLI_mutex_unlock(&process->edgelocks[index / 512]);
 			*r_vid = q->vid;
 			return true;
 		}
 	}
 
-	*r_vid = addtovertices(process);
+	*r_vid = addtovertices(chunk);
 
-	q = BLI_memarena_alloc(process->edge_mem[index / 512], sizeof(EDGELIST));
+	q = BLI_memarena_alloc(chunk->mem, sizeof(EDGELIST));
 	copy_v3_v3_int(q->a, one);
 	copy_v3_v3_int(q->b, two);
 	q->vid = *r_vid;
-	q->next = process->edges[index];
-	process->edges[index] = q;
-
-	BLI_mutex_unlock(&process->edgelocks[index / 512]);
+	q->next = chunk->edges[index];
+	chunk->edges[index] = q;
 
 	return false;
 }
 
-static void draw_normal(PROCESS *process, float v[3], float no[3])
+static void draw_normal(CHUNK *chunk, float v[3], float no[3])
 {
 	int v1, v2;
 	float co1[3], co2[3], n[3];
-	v1 = addtovertices(process);
-	v2 = addtovertices(process);
+	v1 = addtovertices(chunk);
+	v2 = addtovertices(chunk);
 
 	zero_v3(n);
 	n[1] = 0.1f;
@@ -928,10 +906,10 @@ static void draw_normal(PROCESS *process, float v[3], float no[3])
 	mul_v3_fl(co2, 0.2f);
 	add_v3_v3(co2, co1);
 
-	copytovertices(process, co1, n, v1);
-	copytovertices(process, co2, n, v2);
+	copytovertices(chunk, co1, n, v1);
+	copytovertices(chunk, co2, n, v2);
 
-	make_face(process, v1, v2, v2, -1);
+	make_face(chunk, v1, v2, v2, -1);
 }
 
 /**
@@ -939,20 +917,20 @@ static void draw_normal(PROCESS *process, float v[3], float no[3])
  *
  * If it wasn't previously computed, does #converge() and adds vertex to process.
  */
-static int vertid(PROCESS *process, CHUNK *chunk, const CORNER *c1, const CORNER *c2)
+static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 {
 	float v[3], no[3];
 	int vid;
 	
-	if (setedge(process, c1, c2, &vid)) return vid;
+	if (setedge(chunk, c1, c2, &vid)) return vid;
 
 	converge(chunk, c1, c2, v);  /* position */
 	vnormal(chunk, v, no); /* normal */
 #ifdef MB_DRAW_NORMALS
-	draw_normal(process, v, no);
+	draw_normal(chunk, v, no);
 #endif
 
-	copytovertices(process, v, no, vid);
+	copytovertices(chunk, v, no, vid);
 
 	return vid;
 }
@@ -1019,6 +997,7 @@ static void closest_latice(int r[3], const float pos[3], const float size)
 	r[2] = (int)floorf(pos[2] / size + 1.0f);
 }
 
+#if 0
 static void draw_cube(PROCESS *process, int i, int j, int k)
 {
 	float n[3] = { 0.0f, 0.0f, 0.0f };
@@ -1119,6 +1098,8 @@ static void draw_box(PROCESS *process, Box *box)
 	make_face(process, vids[2], vids[5], vids[7], vids[4]);
 	make_face(process, vids[3], vids[6], vids[7], vids[5]);
 }
+
+#endif // 0
 
 /**
  * Adds cube at given lattice position to cube stack of process.
@@ -1277,6 +1258,7 @@ static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
 	if (chunk->elem > 0) {
 		chunk->centers = MEM_callocN(HASHSIZE * sizeof(CENTERLIST *), "mbproc->centers");
 		chunk->corners = MEM_callocN(HASHSIZE * sizeof(CORNER *), "mbproc->corners");
+		chunk->edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
 		chunk->bvh_queue = MEM_callocN(sizeof(MetaballBVHNode *) * chunk->bvh_queue_size, "Metaball BVH Queue");
 		chunk->cubes = NULL;
 
@@ -1291,9 +1273,6 @@ static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
 			docube(chunk, &c);
 		}
 	}
-
-	freechunk(chunk);
-	MEM_freeN(chunk);
 }
 
 /**
@@ -1307,19 +1286,11 @@ static void polygonize(PROCESS *process)
 	TaskScheduler *task_scheduler = BLI_task_scheduler_get();
 	TaskPool *task_pool;
 
-	process->edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
 	process->chunks = MEM_callocN(sizeof(CHUNK *) * num_chunks, "mbproc->chunks");
 	makecubetable();
 
-	BLI_mutex_init(&process->vertex_lock);
-	BLI_mutex_init(&process->index_lock);
 	BLI_mutex_init(&process->chunks_lock);
 	process->chunks_taken = 0;
-
-	for (i = 0; i < 128; i++) {
-		BLI_mutex_init(&process->edgelocks[i]);
-		process->edge_mem[i] = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball memarena");
-	}
 
 	task_pool = BLI_task_pool_create(task_scheduler, process);
 
@@ -1330,13 +1301,6 @@ static void polygonize(PROCESS *process)
 	BLI_task_pool_work_and_wait(task_pool);
 	BLI_task_pool_free(task_pool);
 
-	for (i = 0; i < 128; i++) {
-		BLI_mutex_end(&process->edgelocks[i]);
-		BLI_memarena_free(process->edge_mem[i]);
-	}
-
-	BLI_mutex_end(&process->vertex_lock);
-	BLI_mutex_end(&process->index_lock);
 	BLI_mutex_end(&process->chunks_lock);
 }
 
@@ -1527,7 +1491,7 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 {
 	MetaBall *mb;
 	DispList *dl;
-	unsigned int a;
+	unsigned int a, i;
 	PROCESS process = {0};
 	static unsigned int last_vertexcount = 10, last_facecount = 10;
 
@@ -1558,12 +1522,6 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 
 	process.delta = process.size * 0.001f;
 
-	process.totindex = (unsigned int)((float)last_facecount * 1.2f);
-	process.totvertex = (unsigned int)((float)last_vertexcount * 1.2f);
-
-	process.indices = MEM_callocN(sizeof(int[4]) * process.totindex, "Indices");
-	process.no = MEM_callocN(sizeof(float[3]) * process.totvertex, "Normals");
-	process.co = MEM_callocN(sizeof(float[3]) * process.totvertex, "Vertices");
 	process.pgn_elements = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball memarena");
 	process.metaballs = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaballs memarena");
 
@@ -1580,24 +1538,29 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 			polygonize(&process);
 
 			/* add resulting surface to displist */
-			if (process.totindex) {
-				dl = MEM_callocN(sizeof(DispList), "mballdisp");
-				BLI_addtail(dispbase, dl);
-				dl->type = DL_INDEX4;
-				dl->nr = (int)process.curvertex;
-				dl->parts = (int)process.curindex;
+			for (i = 0; i < 8; i++) {
+				if (process.chunks[i]->totindex) {
+					dl = MEM_callocN(sizeof(DispList), "mballdisp");
+					BLI_addtail(dispbase, dl);
+					dl->type = DL_INDEX4;
+					dl->nr = (int)process.chunks[i]->curvertex;
+					dl->parts = (int)process.chunks[i]->curindex;
 
-				dl->index = (int *)process.indices;
+					dl->index = (int *)process.chunks[i]->indices;
 
-				for (a = 0; a < process.curvertex; a++) {
-					normalize_v3(process.no[a]);
+					for (a = 0; a < process.chunks[i]->curvertex; a++) {
+						normalize_v3(process.chunks[i]->no[a]);
+					}
+
+					dl->verts = (float *)process.chunks[i]->co;
+					dl->nors = (float *)process.chunks[i]->no;
+
+					last_facecount = process.chunks[i]->curindex;
+					last_vertexcount = process.chunks[i]->curvertex;
+
+					freechunk(process.chunks[i]);
+					MEM_freeN(process.chunks[i]);
 				}
-
-				dl->verts = (float *)process.co;
-				dl->nors = (float *)process.no;
-
-				last_facecount = process.curindex;
-				last_vertexcount = process.curvertex;
 			}
 		}
 	}
