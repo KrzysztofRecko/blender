@@ -1176,11 +1176,10 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 			}
 }
 
-static void init_chunk(CHUNK *chunk, PROCESS *process, int n)
+static void init_chunk_bb(CHUNK *chunk, PROCESS *process, int n)
 {
 	unsigned int pos[3], i;
 	float step[3];
-	Box allbb;
 
 	pos[0] = n % process->chunk_res;
 	pos[1] = (n / process->chunk_res) % process->chunk_res;
@@ -1200,6 +1199,14 @@ static void init_chunk(CHUNK *chunk, PROCESS *process, int n)
 		chunk->bb.max[i] = (chunk->max_lat[i] + 0.5f) * process->size + process->delta * 2.0f;
 		chunk->bb.min[i] = (chunk->min_lat[i] - 0.5f) * process->size - process->delta * 2.0f;
 	}
+}
+
+static void init_chunk(CHUNK *chunk, PROCESS *process, int n)
+{
+	unsigned int i;
+	Box allbb;
+
+	init_chunk_bb(chunk, process, n);
 
 	chunk->process = process;
 	chunk->bvh_queue_size = 0;
