@@ -58,6 +58,7 @@
 
 //#define MB_ACCUM_NORMAL
 //#define MB_LINEAR_CONVERGE
+#define MB_DRAW_NORMALS
 
 /* Data types */
 
@@ -928,6 +929,27 @@ static bool setedge(PROCESS *process, const CORNER *c1, const CORNER *c2, int *r
 	return false;
 }
 
+static void draw_normal(PROCESS *process, float v[3], float no[3])
+{
+	int v1, v2, v3;
+	float co1[3], co2[3], n[3];
+	v1 = addtovertices(process);
+	v2 = addtovertices(process);
+
+	zero_v3(n);
+	n[1] = 0.1f;
+	copy_v3_v3(co1, v);
+	copy_v3_v3(co2, no);
+	normalize_v3(co2);
+	mul_v3_fl(co2, 0.2f);
+	add_v3_v3(co2, co1);
+
+	copytovertices(process, co1, n, v1);
+	copytovertices(process, co2, n, v2);
+
+	make_face(process, v1, v2, v2, 0);
+}
+
 /**
  * \return the id of vertex between two corners.
  *
@@ -942,6 +964,9 @@ static int vertid(PROCESS *process, CHUNK *chunk, const CORNER *c1, const CORNER
 
 	converge(chunk, c1, c2, v);  /* position */
 	vnormal(chunk, v, no); /* normal */
+#ifdef MB_DRAW_NORMALS
+	draw_normal(process, v, no);
+#endif
 
 	copytovertices(process, v, no, vid);
 
@@ -1010,6 +1035,56 @@ static void closest_latice(int r[3], const float pos[3], const float size)
 	r[2] = (int)floorf(pos[2] / size + 1.0f);
 }
 
+static void draw_cube(PROCESS *process, int i, int j, int k)
+{
+	float n[3] = { 0.0f, 0.0f, 0.0f };
+	float v[8][3];
+	int vids[8];
+	v[0][0] = ((float)i - 0.5f) * process->size;
+	v[0][1] = ((float)j - 0.5f) * process->size;
+	v[0][2] = ((float)k - 0.5f) * process->size;
+
+	v[1][0] = ((float)(i + 1) - 0.5f) * process->size;
+	v[1][1] = ((float)j - 0.5f) * process->size;
+	v[1][2] = ((float)k - 0.5f) * process->size;
+
+	v[2][0] = ((float)i - 0.5f) * process->size;
+	v[2][1] = ((float)(j + 1) - 0.5f) * process->size;
+	v[2][2] = ((float)k - 0.5f) * process->size;
+
+	v[3][0] = ((float)i - 0.5f) * process->size;
+	v[3][1] = ((float)j - 0.5f) * process->size;
+	v[3][2] = ((float)(k + 1) - 0.5f) * process->size;
+
+	v[4][0] = ((float)(i + 1) - 0.5f) * process->size;
+	v[4][1] = ((float)(j + 1) - 0.5f) * process->size;
+	v[4][2] = ((float)k - 0.5f) * process->size;
+
+	v[5][0] = ((float)i - 0.5f) * process->size;
+	v[5][1] = ((float)(j + 1) - 0.5f) * process->size;
+	v[5][2] = ((float)(k + 1) - 0.5f) * process->size;
+
+	v[6][0] = ((float)(i + 1) - 0.5f) * process->size;
+	v[6][1] = ((float)j - 0.5f) * process->size;
+	v[6][2] = ((float)(k + 1) - 0.5f) * process->size;
+
+	v[7][0] = ((float)(i + 1) - 0.5f) * process->size;
+	v[7][1] = ((float)(j + 1) - 0.5f) * process->size;
+	v[7][2] = ((float)(k + 1) - 0.5f) * process->size;
+
+	for (int i = 0; i < 8; i++) {
+		vids[i] = addtovertices(process);
+		copytovertices(process, v[i], n, vids[i]);
+	}
+
+	make_face(process, vids[0], vids[2], vids[4], vids[1]);
+	make_face(process, vids[0], vids[3], vids[5], vids[2]);
+	make_face(process, vids[0], vids[1], vids[6], vids[3]);
+	make_face(process, vids[1], vids[4], vids[7], vids[6]);
+	make_face(process, vids[2], vids[5], vids[7], vids[4]);
+	make_face(process, vids[3], vids[6], vids[7], vids[5]);
+}
+
 /**
  * Adds cube at given lattice position to cube stack of process.
  */
@@ -1036,6 +1111,8 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
 		/* set corners of initial cube: */
 		for (n = 0; n < 8; n++)
 			ncube->cube.corners[n] = setcorner(chunk, i + MB_BIT(n, 2), j + MB_BIT(n, 1), k + MB_BIT(n, 0));
+
+		//draw_cube(chunk->process, i, j, k);
 	}
 }
 
