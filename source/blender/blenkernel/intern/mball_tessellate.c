@@ -463,7 +463,7 @@ static void make_face(PROCESS *process, int i1, int i2, int i3, int i4)
 
 #ifdef MB_ACCUM_NORMAL
 	BLI_mutex_lock(&process->vertex_lock);
-	if (i4 == 0) {
+	if (i4 == -1) {
 		normal_tri_v3(n, process->co[i1], process->co[i2], process->co[i3]);
 		accumulate_vertex_normals(
 			process->no[i1], process->no[i2], process->no[i3], NULL, n,
@@ -578,37 +578,21 @@ static void docube(CHUNK *chunk, CUBE *cube)
 					make_face(chunk->process, indexar[2], indexar[1], indexar[0], -1);
 					break;
 				case 4:
-					if (indexar[0] == -1) make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
-					else make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
+					make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
 					break;
 				case 5:
-					if (indexar[0] == -1) make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
-					else make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
-
+					make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
 					make_face(chunk->process, indexar[4], indexar[3], indexar[0], -1);
 					break;
 				case 6:
-					if (indexar[0] == -1) {
-						make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
-						make_face(chunk->process, indexar[0], indexar[5], indexar[4], indexar[3]);
-					}
-					else {
-						make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
-						make_face(chunk->process, indexar[5], indexar[4], indexar[3], indexar[0]);
-					}
+					make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
+					make_face(chunk->process, indexar[5], indexar[4], indexar[3], indexar[0]);
 					break;
 				case 7:
-					if (indexar[0] == -1) {
-						make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
-						make_face(chunk->process, indexar[0], indexar[5], indexar[4], indexar[3]);
-					}
-					else {
-						make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
-						make_face(chunk->process, indexar[5], indexar[4], indexar[3], indexar[0]);
-					}
-
+					make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
+					make_face(chunk->process, indexar[5], indexar[4], indexar[3], indexar[0]);
+					
 					make_face(chunk->process, indexar[6], indexar[5], indexar[0], -1);
-
 					break;
 			}
 		}
@@ -947,7 +931,7 @@ static void draw_normal(PROCESS *process, float v[3], float no[3])
 	copytovertices(process, co1, n, v1);
 	copytovertices(process, co2, n, v2);
 
-	make_face(process, v1, v2, v2, 0);
+	make_face(process, v1, v2, v2, -1);
 }
 
 /**
