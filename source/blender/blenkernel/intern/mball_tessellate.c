@@ -168,6 +168,9 @@ typedef struct chunk {
 	unsigned int totvertex;		/* memory size */
 	unsigned int curvertex;		/* currently added vertices */
 
+	CENTERLIST *cubes2;
+	ThreadMutex cubes2_lock;
+
 	MemArena *mem;
 } CHUNK;
 
@@ -1201,16 +1204,23 @@ static void init_chunk_bb(CHUNK *chunk, PROCESS *process, int n)
 	}
 }
 
-static void init_chunk(CHUNK *chunk, PROCESS *process, int n)
+static void init_chunk(TaskPool *pool, void *data, int threadid)
 {
-	unsigned int i;
+	unsigned int i, n;
 	Box allbb;
+	PROCESS *process;
+	CHUNK *chunk;
+
+	process = (PROCESS*)BLI_task_pool_userdata(pool);
+
+	BLI_mutex_lock(&process->chunks_lock);
+	n = process->chunks_taken++;
+	chunk = process->chunks[n] = MEM_callocN(sizeof(CHUNK), "Chunk");
+	BLI_mutex_unlock(&process->chunks_lock);
 
 	init_chunk_bb(chunk, process, n);
 
 	chunk->process = process;
-	chunk->bvh_queue_size = 0;
-	chunk->elem = 0;
 
 	chunk->mainb = MEM_mallocN(sizeof(MLSmall *) * process->totelem, "chunk's metaballs");
 	chunk->mem = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball chunk memarena");
@@ -1247,20 +1257,9 @@ static void init_chunk(CHUNK *chunk, PROCESS *process, int n)
  */
 static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
 {
-	unsigned int i, n;
+	unsigned int i;
 	CUBE c;
-	PROCESS *process;
-	CHUNK *chunk;
-
-	process = (PROCESS*)BLI_task_pool_userdata(pool);
-	chunk = MEM_callocN(sizeof(CHUNK), "Chunk");
-
-	BLI_mutex_lock(&process->chunks_lock);
-	n = process->chunks_taken++;
-	process->chunks[n] = chunk;
-	BLI_mutex_unlock(&process->chunks_lock);
-
-	init_chunk(chunk, process, n);
+	CHUNK *chunk = (CHUNK *)data;
 
 	if (chunk->elem > 0) {
 		chunk->centers = MEM_callocN(HASHSIZE * sizeof(CENTERLIST *), "mbproc->centers");
@@ -1302,10 +1301,15 @@ static void polygonize(PROCESS *process)
 	task_pool = BLI_task_pool_create(task_scheduler, process);
 
 	for (i = 0; i < num_chunks; i++) {
-		BLI_task_pool_push(task_pool, polygonize_chunk, NULL, false, TASK_PRIORITY_LOW);
+		BLI_task_pool_push(task_pool, init_chunk, NULL, false, TASK_PRIORITY_HIGH);
 	}
-
 	BLI_task_pool_work_and_wait(task_pool);
+
+	for (i = 0; i < num_chunks; i++) {
+		BLI_task_pool_push(task_pool, polygonize_chunk, (void*)process->chunks[i], false, TASK_PRIORITY_HIGH);
+	}
+	BLI_task_pool_work_and_wait(task_pool);
+
 	BLI_task_pool_free(task_pool);
 
 	BLI_mutex_end(&process->chunks_lock);
