@@ -56,8 +56,8 @@
 
 #include "BLI_strict_flags.h"
 
-#define MB_ACCUM_NORMAL
-#define MB_LINEAR_CONVERGE
+//#define MB_ACCUM_NORMAL
+//#define MB_LINEAR_CONVERGE
 //#define MB_DRAW_NORMALS
 
 /* Data types */
@@ -168,6 +168,7 @@ typedef struct chunk {
 
 	CHUNK *neighbors[6];
 	CENTERLIST *cubes2;
+	MemArena *cubes2_mem;
 	ThreadMutex cubes2_lock;
 
 	MemArena *mem;
@@ -488,6 +489,8 @@ static void freechunk(CHUNK *chunk)
 	if (chunk->mainb) MEM_freeN(chunk->mainb);
 	if (chunk->bvh_queue) MEM_freeN(chunk->bvh_queue);
 	if (chunk->mem) BLI_memarena_free(chunk->mem);
+	if (chunk->cubes2_mem) BLI_memarena_free(chunk->cubes2_mem);
+	BLI_mutex_end(&chunk->cubes2_lock);
 }
 
 /* **************** POLYGONIZATION ************************ */
@@ -1103,6 +1106,24 @@ static void draw_box(PROCESS *process, Box *box)
 
 #endif // 0
 
+static void queue_cube(CHUNK *chunk, int i, int j, int k)
+{
+	CENTERLIST *newc;
+
+	if (chunk != NULL) {
+		BLI_mutex_lock(&chunk->cubes2_lock);
+
+		newc = BLI_memarena_alloc(chunk->cubes2_mem, sizeof(CENTERLIST));
+		newc->lat[0] = i;
+		newc->lat[1] = j;
+		newc->lat[2] = k;
+		newc->next = chunk->cubes2;
+		chunk->cubes2 = newc;
+
+		BLI_mutex_unlock(&chunk->cubes2_lock);
+	}
+}
+
 /**
  * Adds cube at given lattice position to cube stack of process.
  */
@@ -1111,26 +1132,48 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
 	CUBES *ncube;
 	int n;
 
-	if (i < chunk->min_lat[0] || i > chunk->max_lat[0] ||
-		j < chunk->min_lat[1] || j > chunk->max_lat[1] ||
-		k < chunk->min_lat[2] || k > chunk->max_lat[2]) return;
+	if      (i < chunk->min_lat[0]) queue_cube(chunk->neighbors[0], i, j, k);
+	else if (i > chunk->max_lat[0]) queue_cube(chunk->neighbors[1], i, j, k);
+	else if (j < chunk->min_lat[1]) queue_cube(chunk->neighbors[2], i, j, k);
+	else if (j > chunk->max_lat[1]) queue_cube(chunk->neighbors[3], i, j, k);
+	else if (k < chunk->min_lat[2]) queue_cube(chunk->neighbors[4], i, j, k);
+	else if (k > chunk->max_lat[2]) queue_cube(chunk->neighbors[5], i, j, k);
+	else {
+		/* test if cube has been found before */
+		if (setcenter(chunk, chunk->centers, i, j, k) == 0) {
+			/* push cube on stack: */
+			ncube = BLI_memarena_alloc(chunk->mem, sizeof(CUBES));
+			ncube->next = chunk->cubes;
+			chunk->cubes = ncube;
 
-	/* test if cube has been found before */
-	if (setcenter(chunk, chunk->centers, i, j, k) == 0) {
-		/* push cube on stack: */
-		ncube = BLI_memarena_alloc(chunk->mem, sizeof(CUBES));
-		ncube->next = chunk->cubes;
-		chunk->cubes = ncube;
+			ncube->cube.lat[0] = i;
+			ncube->cube.lat[1] = j;
+			ncube->cube.lat[2] = k;
 
-		ncube->cube.lat[0] = i;
-		ncube->cube.lat[1] = j;
-		ncube->cube.lat[2] = k;
+			/* set corners of initial cube: */
+			for (n = 0; n < 8; n++)
+				ncube->cube.corners[n] = setcorner(chunk, i + MB_BIT(n, 2), j + MB_BIT(n, 1), k + MB_BIT(n, 0));
 
-		/* set corners of initial cube: */
-		for (n = 0; n < 8; n++)
-			ncube->cube.corners[n] = setcorner(chunk, i + MB_BIT(n, 2), j + MB_BIT(n, 1), k + MB_BIT(n, 0));
+			//draw_cube(chunk->process, i, j, k);
+		}
+	}
+}
 
-		//draw_cube(chunk->process, i, j, k);
+static void do_queued_cubes(TaskPool *pool, void *data, int threadid)
+{
+	CHUNK *chunk = (CHUNK*)data;
+	CUBE c;
+
+	while (chunk->cubes2 != NULL) {
+		add_cube(chunk, chunk->cubes2->lat[0], chunk->cubes2->lat[1], chunk->cubes2->lat[2]);
+		chunk->cubes2 = chunk->cubes2->next;
+	}
+
+	while (chunk->cubes != NULL) {
+		c = chunk->cubes->cube;
+		chunk->cubes = chunk->cubes->next;
+
+		docube(chunk, &c);
 	}
 }
 
@@ -1308,12 +1351,19 @@ static void polygonize(PROCESS *process)
 		process->chunks[i] = MEM_callocN(sizeof(CHUNK), "Chunk");
 		process->chunks[i]->index = i;
 		process->chunks[i]->process = process;
+		BLI_mutex_init(&process->chunks[i]->cubes2_lock);
+		process->chunks[i]->cubes2_mem = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Chunk's memory for additional cubes");
 	}
 	
 	task_pool = BLI_task_pool_create(task_scheduler, process);
 
 	for (i = 0; i < num_chunks; i++) {
 		BLI_task_pool_push(task_pool, polygonize_chunk, (void*)process->chunks[i], false, TASK_PRIORITY_HIGH);
+	}
+	BLI_task_pool_work_and_wait(task_pool);
+
+	for (i = 0; i < num_chunks; i++) {
+		BLI_task_pool_push(task_pool, do_queued_cubes, (void*)process->chunks[i], false, TASK_PRIORITY_HIGH);
 	}
 	BLI_task_pool_work_and_wait(task_pool);
 
