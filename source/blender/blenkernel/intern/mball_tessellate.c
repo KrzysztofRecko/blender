@@ -58,7 +58,7 @@
 
 //#define MB_ACCUM_NORMAL
 //#define MB_LINEAR_CONVERGE
-#define MB_DRAW_NORMALS
+//#define MB_DRAW_NORMALS
 
 /* Data types */
 
@@ -452,7 +452,7 @@ static void make_face(PROCESS *process, int i1, int i2, int i3, int i4)
 	cur[1] = i2;
 	cur[2] = i3;
 
-	if (i4 == 0) {
+	if (i4 == -1) {
 		cur[3] = i3;
 	}
 	else {
@@ -575,20 +575,20 @@ static void docube(CHUNK *chunk, CUBE *cube)
 		if (count > 2) {
 			switch (count) {
 				case 3:
-					make_face(chunk->process, indexar[2], indexar[1], indexar[0], 0);
+					make_face(chunk->process, indexar[2], indexar[1], indexar[0], -1);
 					break;
 				case 4:
-					if (indexar[0] == 0) make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
+					if (indexar[0] == -1) make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
 					else make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
 					break;
 				case 5:
-					if (indexar[0] == 0) make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
+					if (indexar[0] == -1) make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
 					else make_face(chunk->process, indexar[3], indexar[2], indexar[1], indexar[0]);
 
-					make_face(chunk->process, indexar[4], indexar[3], indexar[0], 0);
+					make_face(chunk->process, indexar[4], indexar[3], indexar[0], -1);
 					break;
 				case 6:
-					if (indexar[0] == 0) {
+					if (indexar[0] == -1) {
 						make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
 						make_face(chunk->process, indexar[0], indexar[5], indexar[4], indexar[3]);
 					}
@@ -598,7 +598,7 @@ static void docube(CHUNK *chunk, CUBE *cube)
 					}
 					break;
 				case 7:
-					if (indexar[0] == 0) {
+					if (indexar[0] == -1) {
 						make_face(chunk->process, indexar[0], indexar[3], indexar[2], indexar[1]);
 						make_face(chunk->process, indexar[0], indexar[5], indexar[4], indexar[3]);
 					}
@@ -607,7 +607,7 @@ static void docube(CHUNK *chunk, CUBE *cube)
 						make_face(chunk->process, indexar[5], indexar[4], indexar[3], indexar[0]);
 					}
 
-					make_face(chunk->process, indexar[6], indexar[5], indexar[0], 0);
+					make_face(chunk->process, indexar[6], indexar[5], indexar[0], -1);
 
 					break;
 			}
@@ -931,7 +931,7 @@ static bool setedge(PROCESS *process, const CORNER *c1, const CORNER *c2, int *r
 
 static void draw_normal(PROCESS *process, float v[3], float no[3])
 {
-	int v1, v2, v3;
+	int v1, v2;
 	float co1[3], co2[3], n[3];
 	v1 = addtovertices(process);
 	v2 = addtovertices(process);
@@ -1071,6 +1071,57 @@ static void draw_cube(PROCESS *process, int i, int j, int k)
 	v[7][0] = ((float)(i + 1) - 0.5f) * process->size;
 	v[7][1] = ((float)(j + 1) - 0.5f) * process->size;
 	v[7][2] = ((float)(k + 1) - 0.5f) * process->size;
+
+	for (int i = 0; i < 8; i++) {
+		vids[i] = addtovertices(process);
+		copytovertices(process, v[i], n, vids[i]);
+	}
+
+	make_face(process, vids[0], vids[2], vids[4], vids[1]);
+	make_face(process, vids[0], vids[3], vids[5], vids[2]);
+	make_face(process, vids[0], vids[1], vids[6], vids[3]);
+	make_face(process, vids[1], vids[4], vids[7], vids[6]);
+	make_face(process, vids[2], vids[5], vids[7], vids[4]);
+	make_face(process, vids[3], vids[6], vids[7], vids[5]);
+}
+static void draw_box(PROCESS *process, Box *box)
+{
+	if (!box) return;
+
+	float n[3] = { 0.0f, 0.0f, 0.0f };
+	float v[8][3];
+	int vids[8];
+	v[0][0] = box->min[0];
+	v[0][1] = box->min[1];
+	v[0][2] = box->min[2];
+
+	v[1][0] = box->max[0];
+	v[1][1] = box->min[1];
+	v[1][2] = box->min[2];
+
+	v[2][0] = box->min[0];
+	v[2][1] = box->max[1];
+	v[2][2] = box->min[2];
+
+	v[3][0] = box->min[0];
+	v[3][1] = box->min[1];
+	v[3][2] = box->max[2];
+
+	v[4][0] = box->max[0];
+	v[4][1] = box->max[1];
+	v[4][2] = box->min[2];
+
+	v[5][0] = box->min[0];
+	v[5][1] = box->max[1];
+	v[5][2] = box->max[2];
+
+	v[6][0] = box->max[0];
+	v[6][1] = box->min[1];
+	v[6][2] = box->max[2];
+
+	v[7][0] = box->max[0];
+	v[7][1] = box->max[1];
+	v[7][2] = box->max[2];
 
 	for (int i = 0; i < 8; i++) {
 		vids[i] = addtovertices(process);
@@ -1232,6 +1283,8 @@ static void init_chunk(CHUNK *chunk, PROCESS *process, int n)
 
 		build_bvh_spatial(chunk, &chunk->bvh, 0, chunk->elem, &allbb);
 	}
+
+	//draw_box(process, &chunk->bb);
 }
 
 /**
