@@ -129,8 +129,6 @@ typedef struct process {        /* parameters, storage */
 	unsigned int chunk_res;
 
 	CHUNK **chunks;
-	unsigned int chunks_taken;  /* tasks are queued, and then each thread asks for its own chunk number */
-	ThreadMutex chunks_lock;
 
 	MLSmall **mainb;			/* array of all metaelems */
 	unsigned int totelem, mem;	/* number of metaelems */
@@ -146,7 +144,7 @@ typedef struct chunk {
 	PROCESS *process;
 
 	Box bb;
-	int min_lat[3], max_lat[3];
+	int index, lat_pos[3], min_lat[3], max_lat[3];
 
 	MLSmall **mainb;            /* each chunk gets its own list of mballs which intersect chunk's bb */
 	unsigned int elem;
@@ -168,6 +166,7 @@ typedef struct chunk {
 	unsigned int totvertex;		/* memory size */
 	unsigned int curvertex;		/* currently added vertices */
 
+	CHUNK *neighbors[6];
 	CENTERLIST *cubes2;
 	ThreadMutex cubes2_lock;
 
@@ -1179,48 +1178,74 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 			}
 }
 
-static void init_chunk_bb(CHUNK *chunk, PROCESS *process, int n)
+static void init_chunk_bb(CHUNK *chunk)
 {
-	unsigned int pos[3], i;
+	unsigned int i;
 	float step[3];
+	PROCESS *process = chunk->process;
 
-	pos[0] = n % process->chunk_res;
-	pos[1] = (n / process->chunk_res) % process->chunk_res;
-	pos[2] = n / process->chunk_res / process->chunk_res;
+	chunk->lat_pos[0] = chunk->index % process->chunk_res;
+	chunk->lat_pos[1] = (chunk->index / process->chunk_res) % process->chunk_res;
+	chunk->lat_pos[2] = chunk->index / process->chunk_res / process->chunk_res;
 
 	for (i = 0; i < 3; i++) {
 		step[i] = (process->allbb.max[i] - process->allbb.min[i]) / (float)process->chunk_res;
-		chunk->bb.min[i] = process->allbb.min[i] + step[i] * pos[i];
-		chunk->bb.max[i] = process->allbb.min[i] + step[i] * (pos[i] + 1);
+		chunk->bb.min[i] = process->allbb.min[i] + step[i] * chunk->lat_pos[i];
+		chunk->bb.max[i] = process->allbb.min[i] + step[i] * (chunk->lat_pos[i] + 1);
 	}
 
 	prev_lattice(chunk->max_lat, chunk->bb.max, process->size);
 	next_lattice(chunk->min_lat, chunk->bb.min, process->size);
 
 	for (i = 0; i < 3; i++) {
-		if (pos[i] == 0) chunk->min_lat[i]--;
+		if (chunk->lat_pos[i] == 0) chunk->min_lat[i]--;
 		chunk->bb.max[i] = (chunk->max_lat[i] + 0.5f) * process->size + process->delta * 2.0f;
 		chunk->bb.min[i] = (chunk->min_lat[i] - 0.5f) * process->size - process->delta * 2.0f;
 	}
 }
 
-static void init_chunk(TaskPool *pool, void *data, int threadid)
+static void set_chunk_neighbors(CHUNK *chunk)
 {
-	unsigned int i, n;
+	int i, index, res, ne_lat[6][3];
+	res = chunk->process->chunk_res;
+
+	for (i = 0; i < 6; i++) {
+		VECCOPY(ne_lat[i], chunk->lat_pos);
+	}
+	ne_lat[0][0]--;
+	ne_lat[1][0]++;
+	ne_lat[2][1]--;
+	ne_lat[3][1]++;
+	ne_lat[4][2]--;
+	ne_lat[5][2]++;
+
+	for (i = 0; i < 6; i++) {
+		if (ne_lat[i][0] < 0 || ne_lat[i][0] >= res ||
+			ne_lat[i][1] < 0 || ne_lat[i][1] >= res ||
+			ne_lat[i][2] < 0 || ne_lat[i][2] >= res)
+		{
+			chunk->neighbors[i] = NULL;
+		}
+		else {
+			index = ne_lat[i][0] + ne_lat[i][1] * res + ne_lat[i][2] * res * res;
+			chunk->neighbors[i] = chunk->process->chunks[index];
+		}
+	}
+}
+
+/**
+ * Polygonize chunk.
+ */
+static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
+{
+	unsigned int i;
+	CUBE c;
 	Box allbb;
-	PROCESS *process;
-	CHUNK *chunk;
+	CHUNK *chunk = (CHUNK *)data;
+	PROCESS *process = chunk->process;
 
-	process = (PROCESS*)BLI_task_pool_userdata(pool);
-
-	BLI_mutex_lock(&process->chunks_lock);
-	n = process->chunks_taken++;
-	chunk = process->chunks[n] = MEM_callocN(sizeof(CHUNK), "Chunk");
-	BLI_mutex_unlock(&process->chunks_lock);
-
-	init_chunk_bb(chunk, process, n);
-
-	chunk->process = process;
+	init_chunk_bb(chunk);
+	set_chunk_neighbors(chunk);
 
 	chunk->mainb = MEM_mallocN(sizeof(MLSmall *) * process->totelem, "chunk's metaballs");
 	chunk->mem = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball chunk memarena");
@@ -1245,23 +1270,7 @@ static void init_chunk(TaskPool *pool, void *data, int threadid)
 			make_union(chunk->mainb[i]->bb, &allbb, &allbb);
 
 		build_bvh_spatial(chunk, &chunk->bvh, 0, chunk->elem, &allbb);
-	}
 
-	//draw_box(process, &chunk->bb);
-}
-
-/**
- * Polygonize chunk:
- * Get a chunk number from process,
- * Call init_chunk, and polygonize elems of the chunk.
- */
-static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
-{
-	unsigned int i;
-	CUBE c;
-	CHUNK *chunk = (CHUNK *)data;
-
-	if (chunk->elem > 0) {
 		chunk->centers = MEM_callocN(HASHSIZE * sizeof(CENTERLIST *), "mbproc->centers");
 		chunk->corners = MEM_callocN(HASHSIZE * sizeof(CORNER *), "mbproc->corners");
 		chunk->edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
@@ -1295,15 +1304,13 @@ static void polygonize(PROCESS *process)
 	process->chunks = MEM_callocN(sizeof(CHUNK *) * num_chunks, "mbproc->chunks");
 	makecubetable();
 
-	BLI_mutex_init(&process->chunks_lock);
-	process->chunks_taken = 0;
-
-	task_pool = BLI_task_pool_create(task_scheduler, process);
-
 	for (i = 0; i < num_chunks; i++) {
-		BLI_task_pool_push(task_pool, init_chunk, NULL, false, TASK_PRIORITY_HIGH);
+		process->chunks[i] = MEM_callocN(sizeof(CHUNK), "Chunk");
+		process->chunks[i]->index = i;
+		process->chunks[i]->process = process;
 	}
-	BLI_task_pool_work_and_wait(task_pool);
+	
+	task_pool = BLI_task_pool_create(task_scheduler, process);
 
 	for (i = 0; i < num_chunks; i++) {
 		BLI_task_pool_push(task_pool, polygonize_chunk, (void*)process->chunks[i], false, TASK_PRIORITY_HIGH);
@@ -1311,8 +1318,6 @@ static void polygonize(PROCESS *process)
 	BLI_task_pool_work_and_wait(task_pool);
 
 	BLI_task_pool_free(task_pool);
-
-	BLI_mutex_end(&process->chunks_lock);
 }
 
 /**
