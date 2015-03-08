@@ -486,11 +486,17 @@ static void freechunk(CHUNK *chunk)
 	if (chunk->corners) MEM_freeN(chunk->corners);
 	if (chunk->centers) MEM_freeN(chunk->centers);
 	if (chunk->edges) MEM_freeN(chunk->edges);
-	if (chunk->mainb) MEM_freeN(chunk->mainb);
 	if (chunk->bvh_queue) MEM_freeN(chunk->bvh_queue);
+
+	if (chunk->mainb == chunk->process->mainb) {
+		chunk->process->mainb = NULL; /* To prevent freeing twice. */
+		chunk->process->pgn_elements = NULL;
+	}
+	if (chunk->mainb) MEM_freeN(chunk->mainb);
 	if (chunk->mem) BLI_memarena_free(chunk->mem);
 	if (chunk->cubes2_mem) BLI_memarena_free(chunk->cubes2_mem);
 	BLI_mutex_end(&chunk->cubes2_lock);
+	MEM_freeN(chunk);
 }
 
 /* **************** POLYGONIZATION ************************ */
@@ -1290,19 +1296,26 @@ static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
 	init_chunk_bb(chunk);
 	set_chunk_neighbors(chunk);
 
-	chunk->mainb = MEM_mallocN(sizeof(MLSmall *) * process->totelem, "chunk's metaballs");
-	chunk->mem = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball chunk memarena");
+	if (process->num_chunks > 1) {
+		chunk->mainb = MEM_mallocN(sizeof(MLSmall *) * process->totelem, "chunk's metaballs");
+		chunk->mem = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball chunk memarena");
 
-	for (i = 0; i < process->totelem; i++) {
-		if (process->mainb[i]->bb->min[0] < chunk->bb.max[0] &&
-			process->mainb[i]->bb->min[1] < chunk->bb.max[1] &&
-			process->mainb[i]->bb->min[2] < chunk->bb.max[2] &&
-			process->mainb[i]->bb->max[0] > chunk->bb.min[0] &&
-			process->mainb[i]->bb->max[1] > chunk->bb.min[1] &&
-			process->mainb[i]->bb->max[2] > chunk->bb.min[2])
-		{
-			chunk->mainb[chunk->elem++] = process->mainb[i];
+		for (i = 0; i < process->totelem; i++) {
+			if (process->mainb[i]->bb->min[0] < chunk->bb.max[0] &&
+				process->mainb[i]->bb->min[1] < chunk->bb.max[1] &&
+				process->mainb[i]->bb->min[2] < chunk->bb.max[2] &&
+				process->mainb[i]->bb->max[0] > chunk->bb.min[0] &&
+				process->mainb[i]->bb->max[1] > chunk->bb.min[1] &&
+				process->mainb[i]->bb->max[2] > chunk->bb.min[2])
+			{
+				chunk->mainb[chunk->elem++] = process->mainb[i];
+			}
 		}
+	}
+	else {
+		chunk->mainb = process->mainb;
+		chunk->mem = process->pgn_elements;
+		chunk->elem = process->totelem;
 	}
 
 	if (chunk->elem > 0) {
@@ -1362,10 +1375,10 @@ static void polygonize(PROCESS *process)
 	}
 	BLI_task_pool_work_and_wait(task_pool);
 
-	//for (i = 0; i < process->chunks_num; i++) {
-	//	BLI_task_pool_push(task_pool, do_queued_cubes, (void*)process->chunks[i], false, TASK_PRIORITY_HIGH);
-	//}
-	//BLI_task_pool_work_and_wait(task_pool);
+	for (i = 0; i < process->num_chunks; i++) {
+		BLI_task_pool_push(task_pool, do_queued_cubes, (void*)process->chunks[i], false, TASK_PRIORITY_HIGH);
+	}
+	BLI_task_pool_work_and_wait(task_pool);
 
 	BLI_task_pool_free(task_pool);
 }
@@ -1564,7 +1577,7 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 	mb = ob->data;
 
 	/* Total chunk number is chunk_res ^ 3 */
-	process.chunk_res = 1;
+	process.chunk_res = 2;
 	process.num_chunks = (process.chunk_res * process.chunk_res * process.chunk_res);
 
 	process.thresh = mb->thresh;
@@ -1626,7 +1639,6 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 					last_vertexcount = process.chunks[i]->curvertex;
 
 					freechunk(process.chunks[i]);
-					MEM_freeN(process.chunks[i]);
 				}
 			}
 		}
