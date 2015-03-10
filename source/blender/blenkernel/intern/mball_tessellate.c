@@ -62,8 +62,6 @@
 
 /* Data types */
 
-//typedef struct Box Box;
-
 typedef struct corner {         /* corner of a cube */
 	int lat[3];                 /* index within lattice */
 	float co[3], value;         /* location and function value */
@@ -101,10 +99,9 @@ typedef struct intlists {       /* list of list of integers */
 	struct intlists *next;      /* remaining elements */
 } INTLISTS;
 
-typedef struct MLSmall MLSmall;
 typedef struct Box {			/* an AABB with pointer to metalelem */
 	float min[3], max[3];
-	MLSmall *ml;
+	struct MLSmall *ml;
 } Box;
 
 typedef struct MLSmall {        /* a compact structure like this improves cache usage */
