@@ -1183,6 +1183,9 @@ static void do_queued_cubes(TaskPool *pool, void *data, int threadid)
 	}
 }
 
+#define INSIDE(a, lbn, rtf)	(a[0] >= lbn[0] && a[1] >= lbn[1] && a[2] >= lbn[2] && \
+                             a[0] <= rtf[0] && a[1] <= rtf[1] && a[2] <= rtf[2])
+
 /**
  * Find at most 26 cubes to start polygonization from.
  */
@@ -1196,8 +1199,13 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 
 	mid_v3_v3v3(tmp, ml->bb->min, ml->bb->max);
 	closest_latice(center, tmp, chunk->process->size);
-	prev_lattice(lbn, ml->bb->min, chunk->process->size);
-	next_lattice(rtf, ml->bb->max, chunk->process->size);
+	next_lattice(lbn, ml->bb->min, chunk->process->size);
+	prev_lattice(rtf, ml->bb->max, chunk->process->size);
+
+	if (!INSIDE(center, chunk->min_lat, chunk->max_lat)) return;
+
+	DO_MIN(chunk->max_lat, rtf);
+	DO_MAX(chunk->min_lat, lbn);
 
 	for (dir[0] = -1; dir[0] <= 1; dir[0]++)
 		for (dir[1] = -1; dir[1] <= 1; dir[1]++)
@@ -1208,22 +1216,17 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 
 				b = setcorner(chunk, it[0], it[1], it[2])->value;
 				do {
-					it[0] += dir[0];
-					it[1] += dir[1];
-					it[2] += dir[2];
+					VECADD(it, it, dir);
 					a = b;
 					b = setcorner(chunk, it[0], it[1], it[2])->value;
 
 					if (a * b < 0.0f) {
-						add[0] = it[0] - dir[0];
-						add[1] = it[1] - dir[1];
-						add[2] = it[2] - dir[2];
+						VECSUB(add, it, dir);
 						DO_MIN(it, add);
 						add_cube(chunk, add[0], add[1], add[2]);
 						break;
 					}
-				} while (it[0] > lbn[0] && it[1] > lbn[1] && it[2] > lbn[2] &&
-						 it[0] < rtf[0] && it[1] < rtf[1] && it[2] < rtf[2]);
+				} while (INSIDE(it, lbn, rtf));
 			}
 }
 
