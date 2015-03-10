@@ -1572,12 +1572,16 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 	DispList *dl;
 	unsigned int a, i;
 	PROCESS process = {0};
-	static unsigned int last_vertexcount = 10, last_facecount = 10;
 
 	mb = ob->data;
 
-	/* Total chunk number is chunk_res ^ 3 */
-	process.chunk_res = 2;
+	/* TODO: Test theese numbers experimentally. 
+	 * See what happens on a 64-core processor, maybe? */
+	int num_threads = BLI_system_thread_count();
+	if (num_threads < 2) process.chunk_res = 1;
+	else if (num_threads < 9) process.chunk_res = 2;
+	else process.chunk_res = 3;
+
 	process.num_chunks = (process.chunk_res * process.chunk_res * process.chunk_res);
 
 	process.thresh = mb->thresh;
@@ -1634,9 +1638,6 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 
 					dl->verts = (float *)process.chunks[i]->co;
 					dl->nors = (float *)process.chunks[i]->no;
-
-					last_facecount = process.chunks[i]->curindex;
-					last_vertexcount = process.chunks[i]->curvertex;
 
 					freechunk(process.chunks[i]);
 				}
