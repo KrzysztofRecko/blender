@@ -56,8 +56,8 @@
 
 #include "BLI_strict_flags.h"
 
-#define MB_ACCUM_NORMAL
-#define MB_LINEAR_CONVERGE
+//#define MB_ACCUM_NORMAL
+//#define MB_LINEAR_CONVERGE
 
 /* Data types */
 
@@ -171,9 +171,9 @@ typedef struct chunk {
 	unsigned int vertex_offset;
 
 	CHUNK *neighbors[6];
-	CENTERLIST *cubes2;
-	MemArena *cubes2_mem;
-	ThreadMutex cubes2_lock;
+	CENTERLIST *cube_queue;
+	MemArena *cube_queue_mem;
+	ThreadMutex cube_queue_lock;
 
 	MemArena *mem;
 } CHUNK;
@@ -456,41 +456,45 @@ static void make_face(CHUNK *chunk, int i1, int i2, int i3, int i4)
 	}
 }
 
+static void freechunk(CHUNK *chunk)
+{
+	if (chunk->corners)        MEM_freeN(chunk->corners);
+	if (chunk->centers)        MEM_freeN(chunk->centers);
+	if (chunk->edges)          MEM_freeN(chunk->edges);
+	if (chunk->bvh_queue)      MEM_freeN(chunk->bvh_queue);
+	if (chunk->mainb)          MEM_freeN(chunk->mainb);
+	if (chunk->co)             MEM_freeN(chunk->co);
+	if (chunk->no)             MEM_freeN(chunk->no);
+	if (chunk->indices)        MEM_freeN(chunk->indices);
+	if (chunk->mem)            BLI_memarena_free(chunk->mem);
+	if (chunk->cube_queue_mem) BLI_memarena_free(chunk->cube_queue_mem);
+
+	BLI_mutex_end(&chunk->cube_queue_lock);
+
+	MEM_freeN(chunk);
+}
+
 /* Frees allocated memory */
 static void freeprocess(PROCESS *process)
 {
-	if (process->mainb) MEM_freeN(process->mainb);
-	if (process->common_edges) MEM_freeN(process->common_edges);
-	if (process->pgn_elements) BLI_memarena_free(process->pgn_elements);
-	if (process->chunks) MEM_freeN(process->chunks);
-	if (process->metaballs) BLI_memarena_free(process->metaballs);
-	BLI_mutex_end(&process->edge_lock);
+	unsigned int i;
 
-	if (process->co) MEM_freeN(process->co);
-	if (process->no) MEM_freeN(process->no);
-}
-
-static void freechunk(CHUNK *chunk)
-{
-	if (chunk->corners) MEM_freeN(chunk->corners);
-	if (chunk->centers) MEM_freeN(chunk->centers);
-	if (chunk->edges) MEM_freeN(chunk->edges);
-	if (chunk->bvh_queue) MEM_freeN(chunk->bvh_queue);
-
-	if (chunk->mainb == chunk->process->mainb) {
-		chunk->process->mainb = NULL; /* To prevent freeing twice. */
-		chunk->process->pgn_elements = NULL;
+	if (process->chunks) {
+		for (i = 0; i < process->num_chunks; i++)
+			if (process->chunks[i]) freechunk(process->chunks[i]);
+		MEM_freeN(process->chunks);
 	}
-	if (chunk->mainb) MEM_freeN(chunk->mainb);
-	if (chunk->mem) BLI_memarena_free(chunk->mem);
-	if (chunk->cubes2_mem) BLI_memarena_free(chunk->cubes2_mem);
-	BLI_mutex_end(&chunk->cubes2_lock);
+	
+	if (process->num_chunks > 1) { /* These are shared if there is only 1 chunk. */
+		if (process->mainb)        MEM_freeN(process->mainb);
+		if (process->pgn_elements) BLI_memarena_free(process->pgn_elements);
+	}
+	if (process->common_edges) MEM_freeN(process->common_edges);
+	if (process->co)           MEM_freeN(process->co);
+	if (process->no)           MEM_freeN(process->no);
+	if (process->metaballs)    BLI_memarena_free(process->metaballs);
 
-	if (chunk->co) MEM_freeN(chunk->co);
-	if (chunk->no) MEM_freeN(chunk->no);
-	if (chunk->indices) MEM_freeN(chunk->indices);
-
-	MEM_freeN(chunk);
+	BLI_mutex_end(&process->edge_lock);
 }
 
 /* **************** POLYGONIZATION ************************ */
@@ -880,19 +884,19 @@ static bool equal_v3_v3_int(const int a[3], const int b[3])
 
 static bool is_boundary_edge(CHUNK *chunk, const int one[3], const int two[3])
 {
-	if (one[0] == chunk->min_lat[0] && two[0] == chunk->min_lat[0]) return true;
+	if (one[0] == chunk->min_lat[0]     && two[0] == chunk->min_lat[0])     return true;
 	if (one[0] == chunk->max_lat[0] + 1 && two[0] == chunk->max_lat[0] + 1) return true;
-	if (one[1] == chunk->min_lat[1] && two[1] == chunk->min_lat[1]) return true;
+	if (one[1] == chunk->min_lat[1]     && two[1] == chunk->min_lat[1])     return true;
 	if (one[1] == chunk->max_lat[1] + 1 && two[1] == chunk->max_lat[1] + 1) return true;
-	if (one[2] == chunk->min_lat[2] && two[2] == chunk->min_lat[2]) return true;
+	if (one[2] == chunk->min_lat[2]     && two[2] == chunk->min_lat[2])     return true;
 	if (one[2] == chunk->max_lat[2] + 1 && two[2] == chunk->max_lat[2] + 1) return true;
-	else return false;
+	return false;
 }
 
 static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, int *r_vid, bool *r_is_common)
 {
 	int one[3], two[3], index;
-	EDGELIST *q;
+	EDGELIST *q, **table;
 
 	copy_v3_v3_int(one, c1->lat);
 	copy_v3_v3_int(two, c2->lat);
@@ -903,48 +907,34 @@ static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, int *r_vid
 	*r_is_common = is_boundary_edge(chunk, one, two);
 
 	if (*r_is_common) {
-		PROCESS *process = chunk->process;
-
-		BLI_mutex_lock(&process->edge_lock);
-
-		q = process->common_edges[index];
-		for (; q != NULL; q = q->next) {
-			if (equal_v3_v3_int(one, q->a) && equal_v3_v3_int(two, q->b)) {
-				*r_vid = q->vid;
-				BLI_mutex_unlock(&process->edge_lock);
-				return true;
-			}
-		}
-
-		*r_vid = addtovertices(chunk, true);
-
-		q = BLI_memarena_alloc(process->pgn_elements, sizeof(EDGELIST));
-		copy_v3_v3_int(q->a, one);
-		copy_v3_v3_int(q->b, two);
-		q->vid = *r_vid;
-		q->next = process->common_edges[index];
-		process->common_edges[index] = q;
-
-		BLI_mutex_unlock(&process->edge_lock);
+		table = chunk->process->common_edges;
+		BLI_mutex_lock(&chunk->process->edge_lock);
 	}
-	else {
-		q = chunk->edges[index];
-		for (; q != NULL; q = q->next) {
-			if (equal_v3_v3_int(one, q->a) && equal_v3_v3_int(two, q->b)) {
-				*r_vid = q->vid;
-				return true;
-			}
+	else table = chunk->edges;
+
+	q = table[index];
+
+	for (; q != NULL; q = q->next) {
+		if (equal_v3_v3_int(one, q->a) && equal_v3_v3_int(two, q->b)) {
+			*r_vid = q->vid;
+			if (*r_is_common) BLI_mutex_unlock(&chunk->process->edge_lock);
+
+			return true;
 		}
-
-		*r_vid = addtovertices(chunk, false);
-
-		q = BLI_memarena_alloc(chunk->mem, sizeof(EDGELIST));
-		copy_v3_v3_int(q->a, one);
-		copy_v3_v3_int(q->b, two);
-		q->vid = *r_vid;
-		q->next = chunk->edges[index];
-		chunk->edges[index] = q;
 	}
+
+	*r_vid = addtovertices(chunk, *r_is_common);
+
+	if (*r_is_common) q = BLI_memarena_alloc(chunk->process->pgn_elements, sizeof(EDGELIST));
+	else              q = BLI_memarena_alloc(chunk->mem, sizeof(EDGELIST));
+
+	copy_v3_v3_int(q->a, one);
+	copy_v3_v3_int(q->b, two);
+	q->vid = *r_vid;
+	q->next = table[index];
+	table[index] = q;
+
+	if (*r_is_common) BLI_mutex_unlock(&chunk->process->edge_lock);
 
 	return false;
 }
@@ -1150,16 +1140,16 @@ static void enqueue_cube(CHUNK *chunk, int i, int j, int k)
 		//draw_cube(chunk, i, j, k);
 		chunk->process->cubes_left_to_process = true;
 
-		BLI_mutex_lock(&chunk->cubes2_lock);
+		BLI_mutex_lock(&chunk->cube_queue_lock);
 
-		newc = BLI_memarena_alloc(chunk->cubes2_mem, sizeof(CENTERLIST));
+		newc = BLI_memarena_alloc(chunk->cube_queue_mem, sizeof(CENTERLIST));
 		newc->lat[0] = i;
 		newc->lat[1] = j;
 		newc->lat[2] = k;
-		newc->next = chunk->cubes2;
-		chunk->cubes2 = newc;
+		newc->next = chunk->cube_queue;
+		chunk->cube_queue = newc;
 
-		BLI_mutex_unlock(&chunk->cubes2_lock);
+		BLI_mutex_unlock(&chunk->cube_queue_lock);
 	}
 }
 
@@ -1201,9 +1191,9 @@ static void do_queued_cubes(TaskPool *pool, void *data, int threadid)
 	CHUNK *chunk = (CHUNK*)data;
 	CUBE c;
 
-	while (chunk->cubes2 != NULL) {
-		add_cube(chunk, chunk->cubes2->lat[0], chunk->cubes2->lat[1], chunk->cubes2->lat[2]);
-		chunk->cubes2 = chunk->cubes2->next;
+	while (chunk->cube_queue != NULL) {
+		add_cube(chunk, UNPACK3(chunk->cube_queue->lat));
+		chunk->cube_queue = chunk->cube_queue->next;
 	}
 
 	while (chunk->cubes != NULL) {
@@ -1317,9 +1307,9 @@ static void set_chunk_neighbors(CHUNK *chunk)
 }
 
 /**
- * Polygonize chunk.
+ * Initialize chunk.
  */
-static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
+static void init_chunk(TaskPool *pool, void *data, int threadid)
 {
 	unsigned int i;
 	Box allbb;
@@ -1364,6 +1354,7 @@ static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
 		chunk->corners = MEM_callocN(HASHSIZE * sizeof(CORNER *), "mbproc->corners");
 		chunk->edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
 		chunk->bvh_queue = MEM_callocN(sizeof(MetaballBVHNode *) * chunk->bvh_queue_size, "Metaball BVH Queue");
+		chunk->cube_queue_mem = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Chunk's memory for additional cubes");
 		chunk->cubes = NULL;
 
 		for (i = 0; i < chunk->elem; i++) {
@@ -1392,14 +1383,13 @@ static void polygonize(PROCESS *process)
 		process->chunks[i] = MEM_callocN(sizeof(CHUNK), "Chunk");
 		process->chunks[i]->index = i;
 		process->chunks[i]->process = process;
-		BLI_mutex_init(&process->chunks[i]->cubes2_lock);
-		process->chunks[i]->cubes2_mem = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Chunk's memory for additional cubes");
+		BLI_mutex_init(&process->chunks[i]->cube_queue_lock);
 	}
 	
 	task_pool = BLI_task_pool_create(task_scheduler, process);
 
 	for (i = 0; i < process->num_chunks; i++) {
-		BLI_task_pool_push(task_pool, polygonize_chunk, (void*)process->chunks[i], false, TASK_PRIORITY_HIGH);
+		BLI_task_pool_push(task_pool, init_chunk, (void*)process->chunks[i], false, TASK_PRIORITY_HIGH);
 	}
 	BLI_task_pool_work_and_wait(task_pool);
 
@@ -1430,7 +1420,8 @@ static DispList* make_displist(PROCESS *process)
 		dl->parts += (int)process->chunks[i]->curindex;
 	}
 
-	dl->verts = MEM_callocN(sizeof(float) * 3 * dl->nr, "verts");
+	/* copy vertex coordinates - first common, and then from chunks */
+	dl->verts = MEM_callocN(sizeof(float[3]) * dl->nr, "verts");
 	for (i = 0; i < process->curvertex; i++) {
 		copy_v3_v3(&dl->verts[i * 3], process->co[i]);
 	}
@@ -1440,21 +1431,28 @@ static DispList* make_displist(PROCESS *process)
 		}
 	}
 
+	/* copy indices */
 	dl->index = MEM_callocN(sizeof(int[4]) * dl->parts, "indices");
 	for (i = 0, k = 0; i < process->num_chunks; i++) {
-		for (j = 0; j < process->chunks[i]->curindex; j++, k++) {
-			dl->index[k * 4] = process->chunks[i]->indices[j][0] < 0 ? -(process->chunks[i]->indices[j][0]) - 2 : process->chunks[i]->indices[j][0] + process->chunks[i]->vertex_offset;
-			dl->index[k * 4 + 1] = process->chunks[i]->indices[j][1] < 0 ? -(process->chunks[i]->indices[j][1]) - 2 : process->chunks[i]->indices[j][1] + process->chunks[i]->vertex_offset;
-			dl->index[k * 4 + 2] = process->chunks[i]->indices[j][2] < 0 ? -(process->chunks[i]->indices[j][2]) - 2 : process->chunks[i]->indices[j][2] + process->chunks[i]->vertex_offset;
-			dl->index[k * 4 + 3] = process->chunks[i]->indices[j][3] < 0 ? -(process->chunks[i]->indices[j][3]) - 2 : process->chunks[i]->indices[j][3] + process->chunks[i]->vertex_offset;
+		for (j = 0; j < process->chunks[i]->curindex; j++) {
+			const int *ind = process->chunks[i]->indices[j];
+			dl->index[k++] = ind[0] < 0 ? -(ind[0]) - 2 : ind[0] + process->chunks[i]->vertex_offset;
+			dl->index[k++] = ind[1] < 0 ? -(ind[1]) - 2 : ind[1] + process->chunks[i]->vertex_offset;
+			dl->index[k++] = ind[2] < 0 ? -(ind[2]) - 2 : ind[2] + process->chunks[i]->vertex_offset;
+			dl->index[k++] = ind[3] < 0 ? -(ind[3]) - 2 : ind[3] + process->chunks[i]->vertex_offset;
 		}
 	}
 
-	dl->nors = MEM_callocN(sizeof(float) * 3 * dl->nr, "nors");
+	/* copy or make normals */
+	dl->nors = MEM_callocN(sizeof(float[3]) * dl->nr, "nors");
 #ifdef MB_ACCUM_NORMAL
 	for (i = 0; i < (unsigned int)dl->parts; i++) {
 		float n[3];
-		normal_quad_v3(n, &dl->verts[dl->index[i * 4] * 3], &dl->verts[dl->index[i * 4 + 1] * 3], &dl->verts[dl->index[i * 4 + 2] * 3], &dl->verts[dl->index[i * 4 + 3] * 3]);
+		normal_quad_v3(n,
+					   &dl->verts[dl->index[i * 4] * 3],
+					   &dl->verts[dl->index[i * 4 + 1] * 3],
+					   &dl->verts[dl->index[i * 4 + 2] * 3],
+					   &dl->verts[dl->index[i * 4 + 3] * 3]);
 		add_v3_v3(&dl->nors[dl->index[i * 4] * 3], n);
 		add_v3_v3(&dl->nors[dl->index[i * 4 + 1] * 3], n);
 		add_v3_v3(&dl->nors[dl->index[i * 4 + 2] * 3], n);
@@ -1664,15 +1662,12 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 
 void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob, ListBase *dispbase)
 {
-	MetaBall *mb;
-	unsigned int i;
+	MetaBall *mb = ob->data;
 	PROCESS process = {0};
-
-	mb = ob->data;
+	int num_threads = BLI_system_thread_count();
 
 	/* TODO: Test these numbers experimentally. 
 	 * See what happens on a 64-core processor, maybe? */
-	int num_threads = BLI_system_thread_count();
 	if (num_threads < 2) process.chunk_res = 1;
 	else if (num_threads < 9) process.chunk_res = 2;
 	else process.chunk_res = 3;
@@ -1717,10 +1712,6 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 			polygonize(&process);
 
 			BLI_addtail(dispbase, make_displist(&process));
-
-			for (i = 0; i < process.num_chunks; i++) {
-				freechunk(process.chunks[i]);
-			}
 		}
 	}
 	freeprocess(&process);
