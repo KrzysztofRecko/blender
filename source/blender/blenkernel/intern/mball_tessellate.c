@@ -130,7 +130,13 @@ typedef struct process {        /* parameters, storage */
 	MLSmall **mainb;			/* array of all metaelems */
 	unsigned int totelem, mem;	/* number of metaelems */
 
-	Box allbb;                   /* Bounding box of all metaelems */
+	Box allbb;                  /* Bounding box of all metaelems */
+
+	EDGELIST **common_edges;    /* edge and vertex id hash table, common for all chunks */
+	ThreadMutex edge_lock;
+	float(*co)[3], (*no)[3];    /* surface vertices - positions and normals */
+	unsigned int totvertex;		/* memory size */
+	unsigned int curvertex;		/* currently added vertices */
 
 	/* memory allocation from common pool */
 	MemArena *pgn_elements;
@@ -162,6 +168,7 @@ typedef struct chunk {
 	float(*co)[3], (*no)[3];    /* surface vertices - positions and normals */
 	unsigned int totvertex;		/* memory size */
 	unsigned int curvertex;		/* currently added vertices */
+	unsigned int vertex_offset;
 
 	CHUNK *neighbors[6];
 	CENTERLIST *cubes2;
@@ -473,9 +480,14 @@ static void make_face(CHUNK *chunk, int i1, int i2, int i3, int i4)
 static void freeprocess(PROCESS *process)
 {
 	if (process->mainb) MEM_freeN(process->mainb);
+	if (process->common_edges) MEM_freeN(process->common_edges);
 	if (process->pgn_elements) BLI_memarena_free(process->pgn_elements);
 	if (process->chunks) MEM_freeN(process->chunks);
 	if (process->metaballs) BLI_memarena_free(process->metaballs);
+	BLI_mutex_end(&process->edge_lock);
+
+	if (process->co) MEM_freeN(process->co);
+	if (process->no) MEM_freeN(process->no);
 }
 
 static void freechunk(CHUNK *chunk)
@@ -493,6 +505,11 @@ static void freechunk(CHUNK *chunk)
 	if (chunk->mem) BLI_memarena_free(chunk->mem);
 	if (chunk->cubes2_mem) BLI_memarena_free(chunk->cubes2_mem);
 	BLI_mutex_end(&chunk->cubes2_lock);
+
+	if (chunk->co) MEM_freeN(chunk->co);
+	if (chunk->no) MEM_freeN(chunk->no);
+	if (chunk->indices) MEM_freeN(chunk->indices);
+
 	MEM_freeN(chunk);
 }
 
@@ -794,25 +811,38 @@ static int setcenter(CHUNK *chunk, CENTERLIST *table[], const int i, const int j
 /**
  * Adds a vertex, expands memory if needed.
  */
-static int addtovertices(CHUNK *chunk)
+static unsigned int addtovertices(CHUNK *chunk, bool is_common)
 {
-	int ret;
-	
-	if (UNLIKELY(chunk->curvertex == chunk->totvertex)) {
-		chunk->totvertex += 4096;
-		chunk->co = MEM_reallocN(chunk->co, chunk->totvertex * sizeof(float[3]));
-		chunk->no = MEM_reallocN(chunk->no, chunk->totvertex * sizeof(float[3]));
-	}
+	if (is_common) {
+		if (UNLIKELY(chunk->process->curvertex == chunk->process->totvertex)) {
+			chunk->process->totvertex += 4096;
+			chunk->process->co = MEM_reallocN(chunk->process->co, chunk->process->totvertex * sizeof(float[3]));
+			chunk->process->no = MEM_reallocN(chunk->process->no, chunk->process->totvertex * sizeof(float[3]));
+		}
 
-	ret = chunk->curvertex++;
-	
-	return ret;
+		return chunk->process->curvertex++;
+	}
+	else {
+		if (UNLIKELY(chunk->curvertex == chunk->totvertex)) {
+			chunk->totvertex += 4096;
+			chunk->co = MEM_reallocN(chunk->co, chunk->totvertex * sizeof(float[3]));
+			chunk->no = MEM_reallocN(chunk->no, chunk->totvertex * sizeof(float[3]));
+		}
+
+		return chunk->curvertex++;
+	}
 }
 
-static void copytovertices(CHUNK *chunk, const float co[3], const float no[3], const unsigned int vid)
+static void copytovertices(CHUNK *chunk, const float co[3], const float no[3], const unsigned int vid, bool is_common)
 {
-	copy_v3_v3(chunk->co[vid], co);
-	copy_v3_v3(chunk->no[vid], no);
+	if (is_common) {
+		copy_v3_v3(chunk->process->co[vid], co);
+		copy_v3_v3(chunk->process->no[vid], no);
+	}
+	else {
+		copy_v3_v3(chunk->co[vid], co);
+		copy_v3_v3(chunk->no[vid], no);
+	}
 }
 
 /**
@@ -868,7 +898,18 @@ static bool equal_v3_v3_int(const int a[3], const int b[3])
 	return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
 }
 
-static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, int *r_vid)
+static bool is_boundary_edge(CHUNK *chunk, const int one[3], const int two[3])
+{
+	if (one[0] == chunk->min_lat[0] && two[0] == chunk->min_lat[0]) return true;
+	if (one[0] == chunk->max_lat[0] + 1 && two[0] == chunk->max_lat[0] + 1) return true;
+	if (one[1] == chunk->min_lat[1] && two[1] == chunk->min_lat[1]) return true;
+	if (one[1] == chunk->max_lat[1] + 1 && two[1] == chunk->max_lat[1] + 1) return true;
+	if (one[2] == chunk->min_lat[2] && two[2] == chunk->min_lat[2]) return true;
+	if (one[2] == chunk->max_lat[2] + 1 && two[2] == chunk->max_lat[2] + 1) return true;
+	else return false;
+}
+
+static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, int *r_vid, bool *r_is_common)
 {
 	int one[3], two[3], index;
 	EDGELIST *q;
@@ -879,22 +920,51 @@ static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, int *r_vid
 
 	index = HASH(one[0], one[1], one[2]) + HASH(two[0], two[1], two[2]);
 
-	q = chunk->edges[index];
-	for (; q != NULL; q = q->next) {
-		if (equal_v3_v3_int(one, q->a) && equal_v3_v3_int(two, q->b)) {
-			*r_vid = q->vid;
-			return true;
+	*r_is_common = false;// is_boundary_edge(chunk, one, two);
+
+	if (*r_is_common) {
+		PROCESS *process = chunk->process;
+
+		BLI_mutex_lock(&process->edge_lock);
+
+		q = process->common_edges[index];
+		for (; q != NULL; q = q->next) {
+			if (equal_v3_v3_int(one, q->a) && equal_v3_v3_int(two, q->b)) {
+				*r_vid = q->vid;
+				BLI_mutex_unlock(&process->edge_lock);
+				return true;
+			}
 		}
+
+		*r_vid = addtovertices(chunk, true);
+
+		q = BLI_memarena_alloc(process->pgn_elements, sizeof(EDGELIST));
+		copy_v3_v3_int(q->a, one);
+		copy_v3_v3_int(q->b, two);
+		q->vid = *r_vid;
+		q->next = process->common_edges[index];
+		process->common_edges[index] = q;
+
+		BLI_mutex_unlock(&process->edge_lock);
 	}
+	else {
+		q = chunk->edges[index];
+		for (; q != NULL; q = q->next) {
+			if (equal_v3_v3_int(one, q->a) && equal_v3_v3_int(two, q->b)) {
+				*r_vid = q->vid;
+				return true;
+			}
+		}
 
-	*r_vid = addtovertices(chunk);
+		*r_vid = addtovertices(chunk, false);
 
-	q = BLI_memarena_alloc(chunk->mem, sizeof(EDGELIST));
-	copy_v3_v3_int(q->a, one);
-	copy_v3_v3_int(q->b, two);
-	q->vid = *r_vid;
-	q->next = chunk->edges[index];
-	chunk->edges[index] = q;
+		q = BLI_memarena_alloc(chunk->mem, sizeof(EDGELIST));
+		copy_v3_v3_int(q->a, one);
+		copy_v3_v3_int(q->b, two);
+		q->vid = *r_vid;
+		q->next = chunk->edges[index];
+		chunk->edges[index] = q;
+	}
 
 	return false;
 }
@@ -903,8 +973,8 @@ static void draw_normal(CHUNK *chunk, float v[3], float no[3])
 {
 	int v1, v2;
 	float co1[3], co2[3], n[3];
-	v1 = addtovertices(chunk);
-	v2 = addtovertices(chunk);
+	v1 = addtovertices(chunk, false);
+	v2 = addtovertices(chunk, false);
 
 	zero_v3(n);
 	n[1] = 0.1f;
@@ -914,8 +984,8 @@ static void draw_normal(CHUNK *chunk, float v[3], float no[3])
 	mul_v3_fl(co2, 0.2f);
 	add_v3_v3(co2, co1);
 
-	copytovertices(chunk, co1, n, v1);
-	copytovertices(chunk, co2, n, v2);
+	copytovertices(chunk, co1, n, v1, false);
+	copytovertices(chunk, co2, n, v2, false);
 
 	make_face(chunk, v1, v2, v2, -1);
 }
@@ -929,8 +999,12 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 {
 	float v[3], no[3];
 	int vid;
+	bool is_common;
 	
-	if (setedge(chunk, c1, c2, &vid)) return vid;
+	if (setedge(chunk, c1, c2, &vid, &is_common)) {
+		if (is_common) return -vid - 2; /* for common vertices */
+		else return vid;
+	}
 
 	converge(chunk, c1, c2, v);  /* position */
 	vnormal(chunk, v, no); /* normal */
@@ -938,9 +1012,10 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 	draw_normal(chunk, v, no);
 #endif
 
-	copytovertices(chunk, v, no, vid);
+	copytovertices(chunk, v, no, vid, is_common);
 
-	return vid;
+	if (is_common) return -vid - 2;
+	else return vid;
 }
 
 /**
@@ -1135,12 +1210,12 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
 	CUBES *ncube;
 	int n;
 
-	if      (i < chunk->min_lat[0]) queue_cube(chunk->neighbors[0], i, j, k);
-	else if (i > chunk->max_lat[0]) queue_cube(chunk->neighbors[1], i, j, k);
-	else if (j < chunk->min_lat[1]) queue_cube(chunk->neighbors[2], i, j, k);
-	else if (j > chunk->max_lat[1]) queue_cube(chunk->neighbors[3], i, j, k);
-	else if (k < chunk->min_lat[2]) queue_cube(chunk->neighbors[4], i, j, k);
-	else if (k > chunk->max_lat[2]) queue_cube(chunk->neighbors[5], i, j, k);
+	if      (i == chunk->min_lat[0] - 1) queue_cube(chunk->neighbors[0], i, j, k);
+	else if (i == chunk->max_lat[0] + 1) queue_cube(chunk->neighbors[1], i, j, k);
+	else if (j == chunk->min_lat[1] - 1) queue_cube(chunk->neighbors[2], i, j, k);
+	else if (j == chunk->max_lat[1] + 1) queue_cube(chunk->neighbors[3], i, j, k);
+	else if (k == chunk->min_lat[2] - 1) queue_cube(chunk->neighbors[4], i, j, k);
+	else if (k == chunk->max_lat[2] + 1) queue_cube(chunk->neighbors[5], i, j, k);
 	else {
 		/* test if cube has been found before */
 		if (setcenter(chunk, chunk->centers, i, j, k) == 0) {
@@ -1358,6 +1433,8 @@ static void polygonize(PROCESS *process)
 	TaskPool *task_pool;
 
 	process->chunks = MEM_callocN(sizeof(CHUNK *) * process->num_chunks, "mbproc->chunks");
+	process->common_edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
+	BLI_mutex_init(&process->edge_lock);
 	makecubetable();
 
 	for (i = 0; i < process->num_chunks; i++) {
@@ -1570,7 +1647,7 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 {
 	MetaBall *mb;
 	DispList *dl;
-	unsigned int a, i;
+	unsigned int i, j, k;
 	PROCESS process = {0};
 
 	mb = ob->data;
@@ -1621,26 +1698,45 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 		{
 			polygonize(&process);
 
-			/* add resulting surface to displist */
+			dl = MEM_callocN(sizeof(DispList), "mballdisp");
+			BLI_addtail(dispbase, dl);
+			dl->type = DL_INDEX4;
+			dl->nr = (int)process.curvertex;
+
+			/* count vertices from all chunks */
 			for (i = 0; i < process.num_chunks; i++) {
-				if (process.chunks[i]->totindex) {
-					dl = MEM_callocN(sizeof(DispList), "mballdisp");
-					BLI_addtail(dispbase, dl);
-					dl->type = DL_INDEX4;
-					dl->nr = (int)process.chunks[i]->curvertex;
-					dl->parts = (int)process.chunks[i]->curindex;
+				process.chunks[i]->vertex_offset = dl->nr;
+				dl->nr += (int)process.chunks[i]->curvertex;
+				dl->parts += (int)process.chunks[i]->curindex;
+			}
 
-					dl->index = (int *)process.chunks[i]->indices;
-
-					for (a = 0; a < process.chunks[i]->curvertex; a++) {
-						normalize_v3(process.chunks[i]->no[a]);
-					}
-
-					dl->verts = (float *)process.chunks[i]->co;
-					dl->nors = (float *)process.chunks[i]->no;
-
-					freechunk(process.chunks[i]);
+			dl->verts = MEM_callocN(sizeof(float) * 3 * dl->nr, "verts");
+			dl->nors = MEM_callocN(sizeof(float) * 3 * dl->nr, "nors");
+			for (i = 0; i < process.curvertex; i++) {
+				normalize_v3(process.no[i]);
+				copy_v3_v3(&dl->verts[i * 3], process.co[i]);
+				copy_v3_v3(&dl->nors[i * 3], process.no[i]);
+			}
+			for (i = 0; i < process.num_chunks; i++) {
+				for (j = 0, k = process.chunks[i]->vertex_offset; j < process.chunks[i]->curvertex; j++, k++) {
+					normalize_v3(process.chunks[i]->no[j]);
+					copy_v3_v3(&dl->verts[k * 3], process.chunks[i]->co[j]);
+					copy_v3_v3(&dl->nors[k * 3], process.chunks[i]->no[j]);
 				}
+			}
+
+			dl->index = MEM_callocN(sizeof(int[4]) * dl->parts, "indices");
+			for (i = 0, k = 0; i < process.num_chunks; i++) {
+				for (j = 0; j < process.chunks[i]->curindex; j++, k++) {
+					dl->index[k * 4] = process.chunks[i]->indices[j][0] < 0 ? -(process.chunks[i]->indices[j][0]) - 2 : process.chunks[i]->indices[j][0] + process.chunks[i]->vertex_offset;
+					dl->index[k * 4 + 1] = process.chunks[i]->indices[j][1] < 0 ? -(process.chunks[i]->indices[j][1]) - 2 : process.chunks[i]->indices[j][1] + process.chunks[i]->vertex_offset;
+					dl->index[k * 4 + 2] = process.chunks[i]->indices[j][2] < 0 ? -(process.chunks[i]->indices[j][2]) - 2 : process.chunks[i]->indices[j][2] + process.chunks[i]->vertex_offset;
+					dl->index[k * 4 + 3] = process.chunks[i]->indices[j][3] < 0 ? -(process.chunks[i]->indices[j][3]) - 2 : process.chunks[i]->indices[j][3] + process.chunks[i]->vertex_offset;
+				}
+			}
+
+			for (i = 0, k = 0; i < process.num_chunks; i++) {
+				freechunk(process.chunks[i]);
 			}
 		}
 	}
