@@ -126,6 +126,7 @@ typedef struct process {        /* parameters, storage */
 	unsigned int chunk_res, num_chunks;
 
 	CHUNK **chunks;
+	bool cubes_left_to_process;
 
 	MLSmall **mainb;			/* array of all metaelems */
 	unsigned int totelem, mem;	/* number of metaelems */
@@ -920,7 +921,7 @@ static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, int *r_vid
 
 	index = HASH(one[0], one[1], one[2]) + HASH(two[0], two[1], two[2]);
 
-	*r_is_common = false;// is_boundary_edge(chunk, one, two);
+	*r_is_common = is_boundary_edge(chunk, one, two);
 
 	if (*r_is_common) {
 		PROCESS *process = chunk->process;
@@ -1080,9 +1081,10 @@ static void closest_latice(int r[3], const float pos[3], const float size)
 	r[2] = (int)floorf(pos[2] / size + 1.0f);
 }
 
-#if 0
-static void draw_cube(PROCESS *process, int i, int j, int k)
+static void draw_cube(CHUNK *chunk, int i, int j, int k)
 {
+	PROCESS *process = chunk->process;
+
 	float n[3] = { 0.0f, 0.0f, 0.0f };
 	float v[8][3];
 	int vids[8];
@@ -1119,17 +1121,18 @@ static void draw_cube(PROCESS *process, int i, int j, int k)
 	v[7][2] = ((float)(k + 1) - 0.5f) * process->size;
 
 	for (int i = 0; i < 8; i++) {
-		vids[i] = addtovertices(process);
-		copytovertices(process, v[i], n, vids[i]);
+		vids[i] = addtovertices(chunk, false);
+		copytovertices(chunk, v[i], n, vids[i], false);
 	}
 
-	make_face(process, vids[0], vids[2], vids[4], vids[1]);
-	make_face(process, vids[0], vids[3], vids[5], vids[2]);
-	make_face(process, vids[0], vids[1], vids[6], vids[3]);
-	make_face(process, vids[1], vids[4], vids[7], vids[6]);
-	make_face(process, vids[2], vids[5], vids[7], vids[4]);
-	make_face(process, vids[3], vids[6], vids[7], vids[5]);
+	make_face(chunk, vids[0], vids[2], vids[4], vids[1]);
+	make_face(chunk, vids[0], vids[3], vids[5], vids[2]);
+	make_face(chunk, vids[0], vids[1], vids[6], vids[3]);
+	make_face(chunk, vids[1], vids[4], vids[7], vids[6]);
+	make_face(chunk, vids[2], vids[5], vids[7], vids[4]);
+	make_face(chunk, vids[3], vids[6], vids[7], vids[5]);
 }
+#if 0
 static void draw_box(PROCESS *process, Box *box)
 {
 	if (!box) return;
@@ -1184,11 +1187,14 @@ static void draw_box(PROCESS *process, Box *box)
 
 #endif // 0
 
-static void queue_cube(CHUNK *chunk, int i, int j, int k)
+static void enqueue_cube(CHUNK *chunk, int i, int j, int k)
 {
 	CENTERLIST *newc;
 
 	if (chunk != NULL) {
+		//draw_cube(chunk, i, j, k);
+		chunk->process->cubes_left_to_process = true;
+
 		BLI_mutex_lock(&chunk->cubes2_lock);
 
 		newc = BLI_memarena_alloc(chunk->cubes2_mem, sizeof(CENTERLIST));
@@ -1210,12 +1216,12 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
 	CUBES *ncube;
 	int n;
 
-	if      (i == chunk->min_lat[0] - 1) queue_cube(chunk->neighbors[0], i, j, k);
-	else if (i == chunk->max_lat[0] + 1) queue_cube(chunk->neighbors[1], i, j, k);
-	else if (j == chunk->min_lat[1] - 1) queue_cube(chunk->neighbors[2], i, j, k);
-	else if (j == chunk->max_lat[1] + 1) queue_cube(chunk->neighbors[3], i, j, k);
-	else if (k == chunk->min_lat[2] - 1) queue_cube(chunk->neighbors[4], i, j, k);
-	else if (k == chunk->max_lat[2] + 1) queue_cube(chunk->neighbors[5], i, j, k);
+	if      (i == chunk->min_lat[0] - 1) enqueue_cube(chunk->neighbors[0], i, j, k);
+	else if (i == chunk->max_lat[0] + 1) enqueue_cube(chunk->neighbors[1], i, j, k);
+	else if (j == chunk->min_lat[1] - 1) enqueue_cube(chunk->neighbors[2], i, j, k);
+	else if (j == chunk->max_lat[1] + 1) enqueue_cube(chunk->neighbors[3], i, j, k);
+	else if (k == chunk->min_lat[2] - 1) enqueue_cube(chunk->neighbors[4], i, j, k);
+	else if (k == chunk->max_lat[2] + 1) enqueue_cube(chunk->neighbors[5], i, j, k);
 	else {
 		/* test if cube has been found before */
 		if (setcenter(chunk, chunk->centers, i, j, k) == 0) {
@@ -1231,8 +1237,6 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
 			/* set corners of initial cube: */
 			for (n = 0; n < 8; n++)
 				ncube->cube.corners[n] = setcorner(chunk, i + MB_BIT(n, 2), j + MB_BIT(n, 1), k + MB_BIT(n, 0));
-
-			//draw_cube(chunk->process, i, j, k);
 		}
 	}
 }
@@ -1295,7 +1299,7 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 					if (a * b < 0.0f) {
 						VECSUB(add, it, dir);
 						DO_MIN(it, add);
-						add_cube(chunk, add[0], add[1], add[2]);
+						enqueue_cube(chunk, add[0], add[1], add[2]);
 						break;
 					}
 				} while (INSIDE(it, lbn, rtf));
@@ -1363,7 +1367,6 @@ static void set_chunk_neighbors(CHUNK *chunk)
 static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
 {
 	unsigned int i;
-	CUBE c;
 	Box allbb;
 	CHUNK *chunk = (CHUNK *)data;
 	PROCESS *process = chunk->process;
@@ -1411,13 +1414,6 @@ static void polygonize_chunk(TaskPool *pool, void *data, int threadid)
 		for (i = 0; i < chunk->elem; i++) {
 			find_first_points(chunk, i);
 		}
-
-		while (chunk->cubes != NULL) {
-			c = chunk->cubes->cube;
-			chunk->cubes = chunk->cubes->next;
-
-			docube(chunk, &c);
-		}
 	}
 }
 
@@ -1452,10 +1448,13 @@ static void polygonize(PROCESS *process)
 	}
 	BLI_task_pool_work_and_wait(task_pool);
 
-	for (i = 0; i < process->num_chunks; i++) {
-		BLI_task_pool_push(task_pool, do_queued_cubes, (void*)process->chunks[i], false, TASK_PRIORITY_HIGH);
+	while (process->cubes_left_to_process) {
+		process->cubes_left_to_process = false;
+		for (i = 0; i < process->num_chunks; i++) {
+			BLI_task_pool_push(task_pool, do_queued_cubes, (void*)process->chunks[i], false, TASK_PRIORITY_HIGH);
+		}
+		BLI_task_pool_work_and_wait(task_pool);
 	}
-	BLI_task_pool_work_and_wait(task_pool);
 
 	BLI_task_pool_free(task_pool);
 }
@@ -1652,7 +1651,7 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 
 	mb = ob->data;
 
-	/* TODO: Test theese numbers experimentally. 
+	/* TODO: Test these numbers experimentally. 
 	 * See what happens on a 64-core processor, maybe? */
 	int num_threads = BLI_system_thread_count();
 	if (num_threads < 2) process.chunk_res = 1;
