@@ -56,9 +56,8 @@
 
 #include "BLI_strict_flags.h"
 
-//#define MB_ACCUM_NORMAL
-//#define MB_LINEAR_CONVERGE
-//#define MB_DRAW_NORMALS
+#define MB_ACCUM_NORMAL
+#define MB_LINEAR_CONVERGE
 
 /* Data types */
 
@@ -436,11 +435,6 @@ static void make_face(CHUNK *chunk, int i1, int i2, int i3, int i4)
 {
 	int *cur;
 
-#ifdef MB_ACCUM_NORMAL
-	float n[3];
-#endif
-
-
 	if (UNLIKELY(chunk->totindex == chunk->curindex)) {
 		chunk->totindex += 4096;
 		chunk->indices = MEM_reallocN(chunk->indices, sizeof(int[4]) * chunk->totindex);
@@ -460,21 +454,6 @@ static void make_face(CHUNK *chunk, int i1, int i2, int i3, int i4)
 	else {
 		cur[3] = i4;
 	}
-
-#ifdef MB_ACCUM_NORMAL
-	if (i4 == -1) {
-		normal_tri_v3(n, chunk->co[i1], chunk->co[i2], chunk->co[i3]);
-		accumulate_vertex_normals(
-			chunk->no[i1], chunk->no[i2], chunk->no[i3], NULL, n,
-			chunk->co[i1], chunk->co[i2], chunk->co[i3], NULL);
-	}
-	else {
-		normal_quad_v3(n, chunk->co[i1], chunk->co[i2], chunk->co[i3], chunk->co[i4]);
-		accumulate_vertex_normals(
-			chunk->no[i1], chunk->no[i2], chunk->no[i3], chunk->no[i4], n,
-			chunk->co[i1], chunk->co[i2], chunk->co[i3], chunk->co[i4]);
-	}
-#endif
 }
 
 /* Frees allocated memory */
@@ -970,27 +949,6 @@ static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, int *r_vid
 	return false;
 }
 
-static void draw_normal(CHUNK *chunk, float v[3], float no[3])
-{
-	int v1, v2;
-	float co1[3], co2[3], n[3];
-	v1 = addtovertices(chunk, false);
-	v2 = addtovertices(chunk, false);
-
-	zero_v3(n);
-	n[1] = 0.1f;
-	copy_v3_v3(co1, v);
-	copy_v3_v3(co2, no);
-	normalize_v3(co2);
-	mul_v3_fl(co2, 0.2f);
-	add_v3_v3(co2, co1);
-
-	copytovertices(chunk, co1, n, v1, false);
-	copytovertices(chunk, co2, n, v2, false);
-
-	make_face(chunk, v1, v2, v2, -1);
-}
-
 /**
  * \return the id of vertex between two corners.
  *
@@ -1009,9 +967,6 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 
 	converge(chunk, c1, c2, v);  /* position */
 	vnormal(chunk, v, no); /* normal */
-#ifdef MB_DRAW_NORMALS
-	draw_normal(chunk, v, no);
-#endif
 
 	copytovertices(chunk, v, no, vid, is_common);
 
@@ -1459,6 +1414,71 @@ static void polygonize(PROCESS *process)
 	BLI_task_pool_free(task_pool);
 }
 
+static DispList* make_displist(PROCESS *process)
+{
+	unsigned int i, j, k;
+	DispList *dl;
+
+	dl = MEM_callocN(sizeof(DispList), "mballdisp");
+	dl->type = DL_INDEX4;
+	dl->nr = (int)process->curvertex;
+
+	/* count vertices from all chunks */
+	for (i = 0; i < process->num_chunks; i++) {
+		process->chunks[i]->vertex_offset = dl->nr;
+		dl->nr += (int)process->chunks[i]->curvertex;
+		dl->parts += (int)process->chunks[i]->curindex;
+	}
+
+	dl->verts = MEM_callocN(sizeof(float) * 3 * dl->nr, "verts");
+	for (i = 0; i < process->curvertex; i++) {
+		copy_v3_v3(&dl->verts[i * 3], process->co[i]);
+	}
+	for (i = 0; i < process->num_chunks; i++) {
+		for (j = 0, k = process->chunks[i]->vertex_offset; j < process->chunks[i]->curvertex; j++, k++) {
+			copy_v3_v3(&dl->verts[k * 3], process->chunks[i]->co[j]);
+		}
+	}
+
+	dl->index = MEM_callocN(sizeof(int[4]) * dl->parts, "indices");
+	for (i = 0, k = 0; i < process->num_chunks; i++) {
+		for (j = 0; j < process->chunks[i]->curindex; j++, k++) {
+			dl->index[k * 4] = process->chunks[i]->indices[j][0] < 0 ? -(process->chunks[i]->indices[j][0]) - 2 : process->chunks[i]->indices[j][0] + process->chunks[i]->vertex_offset;
+			dl->index[k * 4 + 1] = process->chunks[i]->indices[j][1] < 0 ? -(process->chunks[i]->indices[j][1]) - 2 : process->chunks[i]->indices[j][1] + process->chunks[i]->vertex_offset;
+			dl->index[k * 4 + 2] = process->chunks[i]->indices[j][2] < 0 ? -(process->chunks[i]->indices[j][2]) - 2 : process->chunks[i]->indices[j][2] + process->chunks[i]->vertex_offset;
+			dl->index[k * 4 + 3] = process->chunks[i]->indices[j][3] < 0 ? -(process->chunks[i]->indices[j][3]) - 2 : process->chunks[i]->indices[j][3] + process->chunks[i]->vertex_offset;
+		}
+	}
+
+	dl->nors = MEM_callocN(sizeof(float) * 3 * dl->nr, "nors");
+#ifdef MB_ACCUM_NORMAL
+	for (i = 0; i < (unsigned int)dl->parts; i++) {
+		float n[3];
+		normal_quad_v3(n, &dl->verts[dl->index[i * 4] * 3], &dl->verts[dl->index[i * 4 + 1] * 3], &dl->verts[dl->index[i * 4 + 2] * 3], &dl->verts[dl->index[i * 4 + 3] * 3]);
+		add_v3_v3(&dl->nors[dl->index[i * 4] * 3], n);
+		add_v3_v3(&dl->nors[dl->index[i * 4 + 1] * 3], n);
+		add_v3_v3(&dl->nors[dl->index[i * 4 + 2] * 3], n);
+		add_v3_v3(&dl->nors[dl->index[i * 4 + 3] * 3], n);
+	}
+	for (i = 0; i < (unsigned int)dl->nr; i++) {
+		normalize_v3(&dl->nors[i * 3]);
+	}
+#else
+	for (i = 0; i < process->curvertex; i++) {
+		normalize_v3(process->no[i]);
+		copy_v3_v3(&dl->nors[i * 3], process->no[i]);
+	}
+	for (i = 0; i < process->num_chunks; i++) {
+		for (j = 0, k = process->chunks[i]->vertex_offset; j < process->chunks[i]->curvertex; j++, k++) {
+			normalize_v3(process->chunks[i]->no[j]);
+			copy_v3_v3(&dl->nors[k * 3], process->chunks[i]->no[j]);
+		}
+	}
+#endif
+
+	return dl;
+}
+
 /**
  * Iterates over ALL objects in the scene and all of its sets, including
  * making all duplis(not only metas). Copies metas to mainb array.
@@ -1645,8 +1665,7 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob, ListBase *dispbase)
 {
 	MetaBall *mb;
-	DispList *dl;
-	unsigned int i, j, k;
+	unsigned int i;
 	PROCESS process = {0};
 
 	mb = ob->data;
@@ -1697,44 +1716,9 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 		{
 			polygonize(&process);
 
-			dl = MEM_callocN(sizeof(DispList), "mballdisp");
-			BLI_addtail(dispbase, dl);
-			dl->type = DL_INDEX4;
-			dl->nr = (int)process.curvertex;
+			BLI_addtail(dispbase, make_displist(&process));
 
-			/* count vertices from all chunks */
 			for (i = 0; i < process.num_chunks; i++) {
-				process.chunks[i]->vertex_offset = dl->nr;
-				dl->nr += (int)process.chunks[i]->curvertex;
-				dl->parts += (int)process.chunks[i]->curindex;
-			}
-
-			dl->verts = MEM_callocN(sizeof(float) * 3 * dl->nr, "verts");
-			dl->nors = MEM_callocN(sizeof(float) * 3 * dl->nr, "nors");
-			for (i = 0; i < process.curvertex; i++) {
-				normalize_v3(process.no[i]);
-				copy_v3_v3(&dl->verts[i * 3], process.co[i]);
-				copy_v3_v3(&dl->nors[i * 3], process.no[i]);
-			}
-			for (i = 0; i < process.num_chunks; i++) {
-				for (j = 0, k = process.chunks[i]->vertex_offset; j < process.chunks[i]->curvertex; j++, k++) {
-					normalize_v3(process.chunks[i]->no[j]);
-					copy_v3_v3(&dl->verts[k * 3], process.chunks[i]->co[j]);
-					copy_v3_v3(&dl->nors[k * 3], process.chunks[i]->no[j]);
-				}
-			}
-
-			dl->index = MEM_callocN(sizeof(int[4]) * dl->parts, "indices");
-			for (i = 0, k = 0; i < process.num_chunks; i++) {
-				for (j = 0; j < process.chunks[i]->curindex; j++, k++) {
-					dl->index[k * 4] = process.chunks[i]->indices[j][0] < 0 ? -(process.chunks[i]->indices[j][0]) - 2 : process.chunks[i]->indices[j][0] + process.chunks[i]->vertex_offset;
-					dl->index[k * 4 + 1] = process.chunks[i]->indices[j][1] < 0 ? -(process.chunks[i]->indices[j][1]) - 2 : process.chunks[i]->indices[j][1] + process.chunks[i]->vertex_offset;
-					dl->index[k * 4 + 2] = process.chunks[i]->indices[j][2] < 0 ? -(process.chunks[i]->indices[j][2]) - 2 : process.chunks[i]->indices[j][2] + process.chunks[i]->vertex_offset;
-					dl->index[k * 4 + 3] = process.chunks[i]->indices[j][3] < 0 ? -(process.chunks[i]->indices[j][3]) - 2 : process.chunks[i]->indices[j][3] + process.chunks[i]->vertex_offset;
-				}
-			}
-
-			for (i = 0, k = 0; i < process.num_chunks; i++) {
 				freechunk(process.chunks[i]);
 			}
 		}
