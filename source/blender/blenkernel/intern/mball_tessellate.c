@@ -218,17 +218,14 @@ static unsigned int partition_mainb(MLSmall **mainb, unsigned int start, unsigne
 		while (i < j && div > (mainb[i]->bb->max[s] + mainb[i]->bb->min[s])) i++;
 		while (j > i && div < (mainb[j]->bb->max[s] + mainb[j]->bb->min[s])) j--;
 
-		if (i >= j)
-			break;
+		if (i >= j)	break;
 
 		SWAP(MLSmall *, mainb[i], mainb[j]);
 		i++;
 		j--;
 	}
 
-	if (i == start) {
-		i++;
-	}
+	if (i == start) i++;
 
 	return i;
 }
@@ -262,8 +259,9 @@ static void build_bvh_spatial(
 	node->child[0] = NULL;
 
 	if (part > start + 1) {
-		for (j = start; j < part; j++)
+		for (j = start; j < part; j++) {
 			make_union(chunk->mainb[j]->bb, &node->bb[0], &node->bb[0]);
+		}
 
 		node->child[0] = BLI_memarena_alloc(chunk->mem, sizeof(MetaballBVHNode));
 		build_bvh_spatial(chunk, node->child[0], start, part, &node->bb[0]);
@@ -274,8 +272,9 @@ static void build_bvh_spatial(
 		make_box_from_ml(&node->bb[1], chunk->mainb[part]);
 
 		if (part < end - 1) {
-			for (j = part; j < end; j++)
+			for (j = part; j < end; j++) {
 				make_union(chunk->mainb[j]->bb, &node->bb[1], &node->bb[1]);
+			}
 
 			node->child[1] = BLI_memarena_alloc(chunk->mem, sizeof(MetaballBVHNode));
 			build_bvh_spatial(chunk, node->child[1], part, end, &node->bb[1]);
@@ -448,12 +447,8 @@ static void make_face(CHUNK *chunk, int i1, int i2, int i3, int i4)
 	cur[1] = i2;
 	cur[2] = i3;
 
-	if (i4 == -1) {
-		cur[3] = i3;
-	}
-	else {
-		cur[3] = i4;
-	}
+	if (i4 == -1) cur[3] = i3;
+	else          cur[3] = i4;
 }
 
 static void freechunk(CHUNK *chunk)
@@ -544,9 +539,7 @@ static void docube(CHUNK *chunk, CUBE *cube)
 
 	/* Determine which case cube falls into. */
 	for (i = 0; i < 8; i++) {
-		if (cube->corners[i]->value > 0.0f) {
-			index += (1 << i);
-		}
+		if (cube->corners[i]->value > 0.0f)	index += (1 << i);
 	}
 
 	/* Using faces[] table, adds neighbouring cube if surface intersects face in this direction. */
@@ -572,29 +565,26 @@ static void docube(CHUNK *chunk, CUBE *cube)
 		}
 
 		/* Adds faces to output. */
-		if (count > 2) {
-			switch (count) {
-				case 3:
-					make_face(chunk, indexar[2], indexar[1], indexar[0], -1);
-					break;
-				case 4:
-					make_face(chunk, indexar[3], indexar[2], indexar[1], indexar[0]);
-					break;
-				case 5:
-					make_face(chunk, indexar[3], indexar[2], indexar[1], indexar[0]);
-					make_face(chunk, indexar[4], indexar[3], indexar[0], -1);
-					break;
-				case 6:
-					make_face(chunk, indexar[3], indexar[2], indexar[1], indexar[0]);
-					make_face(chunk, indexar[5], indexar[4], indexar[3], indexar[0]);
-					break;
-				case 7:
-					make_face(chunk, indexar[3], indexar[2], indexar[1], indexar[0]);
-					make_face(chunk, indexar[5], indexar[4], indexar[3], indexar[0]);
-					
-					make_face(chunk, indexar[6], indexar[5], indexar[0], -1);
-					break;
-			}
+		switch (count) {
+			case 3:
+				make_face(chunk, indexar[2], indexar[1], indexar[0], -1);
+				break;
+			case 4:
+				make_face(chunk, indexar[3], indexar[2], indexar[1], indexar[0]);
+				break;
+			case 5:
+				make_face(chunk, indexar[3], indexar[2], indexar[1], indexar[0]);
+				make_face(chunk, indexar[4], indexar[3], indexar[0], -1);
+				break;
+			case 6:
+				make_face(chunk, indexar[3], indexar[2], indexar[1], indexar[0]);
+				make_face(chunk, indexar[5], indexar[4], indexar[3], indexar[0]);
+				break;
+			case 7:
+				make_face(chunk, indexar[3], indexar[2], indexar[1], indexar[0]);
+				make_face(chunk, indexar[5], indexar[4], indexar[3], indexar[0]);
+				make_face(chunk, indexar[6], indexar[5], indexar[0], -1);
+				break;
 		}
 	}
 }
@@ -603,7 +593,7 @@ static void docube(CHUNK *chunk, CUBE *cube)
  * return corner with the given lattice location
  * set (and cache) its function value
  */
-static CORNER *setcorner(CHUNK *chunk, int i, int j, int k)
+static CORNER *setcorner(CHUNK *chunk, const int i, const int j, const int k)
 {
 	/* for speed, do corner value caching here */
 	CORNER *c;
@@ -614,18 +604,17 @@ static CORNER *setcorner(CHUNK *chunk, int i, int j, int k)
 	c = chunk->corners[index];
 
 	for (; c != NULL; c = c->next) {
-		if (c->lat[0] == i && c->lat[1] == j && c->lat[2] == k) {
-			return c;
-		}
+		if (c->lat[0] == i && c->lat[1] == j && c->lat[2] == k) return c;
 	}
 
 	c = BLI_memarena_alloc(chunk->mem, sizeof(CORNER));
 
 	c->lat[0] = i;
-	c->co[0] = ((float)i - 0.5f) * chunk->process->size;
 	c->lat[1] = j;
-	c->co[1] = ((float)j - 0.5f) * chunk->process->size;
 	c->lat[2] = k;
+
+	c->co[0] = ((float)i - 0.5f) * chunk->process->size;
+	c->co[1] = ((float)j - 0.5f) * chunk->process->size;
 	c->co[2] = ((float)k - 0.5f) * chunk->process->size;
 
 	c->value = metaball(chunk, c->co[0], c->co[1], c->co[2]);
@@ -917,6 +906,7 @@ static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, int *r_vid
 	for (; q != NULL; q = q->next) {
 		if (equal_v3_v3_int(one, q->a) && equal_v3_v3_int(two, q->b)) {
 			*r_vid = q->vid;
+
 			if (*r_is_common) BLI_mutex_unlock(&chunk->process->edge_lock);
 
 			return true;
@@ -1180,8 +1170,9 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
 			ncube->cube.lat[2] = k;
 
 			/* set corners of initial cube: */
-			for (n = 0; n < 8; n++)
+			for (n = 0; n < 8; n++) {
 				ncube->cube.corners[n] = setcorner(chunk, i + MB_BIT(n, 2), j + MB_BIT(n, 1), k + MB_BIT(n, 0));
+			}
 		}
 	}
 }
@@ -1345,8 +1336,9 @@ static void init_chunk(TaskPool *pool, void *data, int threadid)
 		copy_v3_v3(allbb.min, chunk->mainb[0]->bb->min);
 		copy_v3_v3(allbb.max, chunk->mainb[0]->bb->max);
 
-		for (i = 1; i < chunk->elem; i++)
+		for (i = 1; i < chunk->elem; i++) {
 			make_union(chunk->mainb[i]->bb, &allbb, &allbb);
+		}
 
 		build_bvh_spatial(chunk, &chunk->bvh, 0, chunk->elem, &allbb);
 
