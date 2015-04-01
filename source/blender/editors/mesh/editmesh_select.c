@@ -38,7 +38,6 @@
 #include "BLI_math.h"
 #include "BLI_rand.h"
 #include "BLI_array.h"
-#include "BLI_smallhash.h"
 
 #include "BKE_context.h"
 #include "BKE_report.h"
@@ -62,9 +61,9 @@
 #include "DNA_meshdata_types.h"
 #include "DNA_object_types.h"
 
-#include "GPU_extensions.h"
-
 #include "UI_resources.h"
+
+#include "bmesh_tools.h"
 
 #include "mesh_intern.h"  /* own include */
 
@@ -213,7 +212,7 @@ bool EDBM_backbuf_border_init(ViewContext *vc, short xmin, short ymin, short xma
 	a = (xmax - xmin + 1) * (ymax - ymin + 1);
 	while (a--) {
 		if (*dr > 0 && *dr <= bm_vertoffs) {
-			BLI_BITMAP_SET(selbuf, *dr);
+			BLI_BITMAP_ENABLE(selbuf, *dr);
 		}
 		dr++;
 	}
@@ -230,7 +229,7 @@ bool EDBM_backbuf_check(unsigned int index)
 		return true;
 
 	if (index > 0 && index <= bm_vertoffs)
-		return BLI_BITMAP_GET_BOOL(selbuf, index);
+		return BLI_BITMAP_TEST_BOOL(selbuf, index);
 
 	return false;
 }
@@ -297,7 +296,7 @@ bool EDBM_backbuf_border_mask_init(ViewContext *vc, const int mcords[][2], short
 	a = (xmax - xmin + 1) * (ymax - ymin + 1);
 	while (a--) {
 		if (*dr > 0 && *dr <= bm_vertoffs && *dr_mask == true) {
-			BLI_BITMAP_SET(selbuf, *dr);
+			BLI_BITMAP_ENABLE(selbuf, *dr);
 		}
 		dr++; dr_mask++;
 	}
@@ -340,7 +339,7 @@ bool EDBM_backbuf_circle_init(ViewContext *vc, short xs, short ys, short rads)
 		for (xc = -rads; xc <= rads; xc++, dr++) {
 			if (xc * xc + yc * yc < radsq) {
 				if (*dr > 0 && *dr <= bm_vertoffs) {
-					BLI_BITMAP_SET(selbuf, *dr);
+					BLI_BITMAP_ENABLE(selbuf, *dr);
 				}
 			}
 		}
@@ -382,8 +381,6 @@ static void findnearestvert__doClosest(void *userData, BMVert *eve, const float 
 		}
 	}
 }
-
-
 
 
 static bool findnearestvert__backbufIndextest(void *handle, unsigned int index)
@@ -709,6 +706,7 @@ static EnumPropertyItem prop_similar_types[] = {
 	{SIMFACE_PERIMETER, "PERIMETER", 0, "Perimeter", ""},
 	{SIMFACE_NORMAL, "NORMAL", 0, "Normal", ""},
 	{SIMFACE_COPLANAR, "COPLANAR", 0, "Co-planar", ""},
+	{SIMFACE_SMOOTH, "SMOOTH", 0, "Flat/Smooth", ""},
 #ifdef WITH_FREESTYLE
 	{SIMFACE_FREESTYLE, "FREESTYLE_FACE", 0, "Freestyle Face Marks", ""},
 #endif
@@ -886,7 +884,7 @@ static EnumPropertyItem *select_similar_type_itemf(bContext *C, PointerRNA *UNUS
 #ifdef WITH_FREESTYLE
 			const int a_end = SIMFACE_FREESTYLE;
 #else
-			const int a_end = SIMFACE_COPLANAR;
+			const int a_end = SIMFACE_SMOOTH;
 #endif
 			for (a = SIMFACE_MATERIAL; a <= a_end; a++) {
 				RNA_enum_items_add_value(&item, &totitem, prop_similar_types, a);
@@ -926,6 +924,97 @@ void MESH_OT_select_similar(wmOperatorType *ot)
 	RNA_def_enum(ot->srna, "compare", prop_similar_compare_types, SIM_CMP_EQ, "Compare", "");
 
 	RNA_def_float(ot->srna, "threshold", 0.0, 0.0, 1.0, "Threshold", "", 0.0, 1.0);
+}
+
+
+/* -------------------------------------------------------------------- */
+/* Select Similar Regions */
+
+static int edbm_select_similar_region_exec(bContext *C, wmOperator *op)
+{
+	Object *obedit = CTX_data_edit_object(C);
+	BMEditMesh *em = BKE_editmesh_from_object(obedit);
+	BMesh *bm = em->bm;
+	bool changed = false;
+
+	/* group vars */
+	int *groups_array;
+	int (*group_index)[2];
+	int group_tot;
+	int i;
+
+	if (bm->totfacesel < 2) {
+		BKE_report(op->reports, RPT_ERROR, "No face regions selected");
+		return OPERATOR_CANCELLED;
+	}
+
+	groups_array = MEM_mallocN(sizeof(*groups_array) * bm->totfacesel, __func__);
+	group_tot = BM_mesh_calc_face_groups(bm, groups_array, &group_index,
+	                                     NULL, NULL,
+	                                     BM_ELEM_SELECT, BM_VERT);
+
+	BM_mesh_elem_table_ensure(bm, BM_FACE);
+
+	for (i = 0; i < group_tot; i++) {
+		ListBase faces_regions;
+		int tot;
+
+		const int fg_sta = group_index[i][0];
+		const int fg_len = group_index[i][1];
+		int j;
+		BMFace **fg = MEM_mallocN(sizeof(*fg) * fg_len, __func__);
+
+
+		for (j = 0; j < fg_len; j++) {
+			fg[j] = BM_face_at_index(bm, groups_array[fg_sta + j]);
+		}
+
+		tot = BM_mesh_region_match(bm, fg, fg_len, &faces_regions);
+
+		MEM_freeN(fg);
+
+		if (tot) {
+			LinkData *link;
+			while ((link = BLI_pophead(&faces_regions))) {
+				BMFace *f, **faces = link->data;
+				unsigned int i = 0;
+				while ((f = faces[i++])) {
+					BM_face_select_set(bm, f, true);
+				}
+				MEM_freeN(faces);
+				MEM_freeN(link);
+
+				changed = true;
+			}
+		}
+	}
+
+	MEM_freeN(groups_array);
+	MEM_freeN(group_index);
+
+	if (changed) {
+		WM_event_add_notifier(C, NC_GEOM | ND_SELECT, obedit);
+	}
+	else {
+		BKE_report(op->reports, RPT_WARNING, "No matching face regions found");
+	}
+
+	return OPERATOR_FINISHED;
+}
+
+void MESH_OT_select_similar_region(wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "Select Similar Regions";
+	ot->idname = "MESH_OT_select_similar_region";
+	ot->description = "Select similar face regions to the current selection";
+
+	/* api callbacks */
+	ot->exec = edbm_select_similar_region_exec;
+	ot->poll = ED_operator_editmesh;
+
+	/* flags */
+	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
 
@@ -2381,12 +2470,13 @@ void MESH_OT_select_mirror(wmOperatorType *ot)
 
 /* ******************** **************** */
 
-static int edbm_select_more_exec(bContext *C, wmOperator *UNUSED(op))
+static int edbm_select_more_exec(bContext *C, wmOperator *op)
 {
 	Object *obedit = CTX_data_edit_object(C);
 	BMEditMesh *em = BKE_editmesh_from_object(obedit);
+	const bool use_face_step = RNA_boolean_get(op->ptr, "use_face_step");
 
-	EDBM_select_more(em);
+	EDBM_select_more(em, use_face_step);
 
 	WM_event_add_notifier(C, NC_GEOM | ND_SELECT, obedit);
 	return OPERATOR_FINISHED;
@@ -2405,14 +2495,17 @@ void MESH_OT_select_more(wmOperatorType *ot)
 	
 	/* flags */
 	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+	RNA_def_boolean(ot->srna, "use_face_step", true, "Face Step", "Connected faces (instead of edges)");
 }
 
-static int edbm_select_less_exec(bContext *C, wmOperator *UNUSED(op))
+static int edbm_select_less_exec(bContext *C, wmOperator *op)
 {
 	Object *obedit = CTX_data_edit_object(C);
 	BMEditMesh *em = BKE_editmesh_from_object(obedit);
+	const bool use_face_step = RNA_boolean_get(op->ptr, "use_face_step");
 
-	EDBM_select_less(em);
+	EDBM_select_less(em, use_face_step);
 
 	WM_event_add_notifier(C, NC_GEOM | ND_SELECT, obedit);
 	return OPERATOR_FINISHED;
@@ -2431,6 +2524,8 @@ void MESH_OT_select_less(wmOperatorType *ot)
 	
 	/* flags */
 	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+	RNA_def_boolean(ot->srna, "use_face_step", true, "Face Step", "Connected faces (instead of edges)");
 }
 
 /**
@@ -2457,7 +2552,7 @@ static bool bm_edge_is_select_isolated(BMEdge *e)
 /* Walk all reachable elements of the same type as h_act in breadth-first
  * order, starting from h_act. Deselects elements if the depth when they
  * are reached is not a multiple of "nth". */
-static void walker_deselect_nth(BMEditMesh *em, int nth, int offset, BMHeader *h_act)
+static void walker_deselect_nth(BMEditMesh *em, int nth, int skip, int offset, BMHeader *h_act)
 {
 	BMElem *ele;
 	BMesh *bm = em->bm;
@@ -2523,7 +2618,8 @@ static void walker_deselect_nth(BMEditMesh *em, int nth, int offset, BMHeader *h
 	for (ele = BMW_begin(&walker, h_act); ele != NULL; ele = BMW_step(&walker)) {
 		if (!BM_elem_flag_test(ele, BM_ELEM_TAG)) {
 			/* Deselect elements that aren't at "nth" depth from active */
-			if ((offset + BMW_current_depth(&walker)) % nth) {
+			const int depth = BMW_current_depth(&walker) - 1;
+			if ((offset + depth) % (skip + nth) >= skip) {
 				BM_elem_select_set(bm, ele, false);
 			}
 			BM_elem_flag_enable(ele, BM_ELEM_TAG);
@@ -2590,7 +2686,7 @@ static void deselect_nth_active(BMEditMesh *em, BMVert **r_eve, BMEdge **r_eed, 
 	}
 }
 
-static bool edbm_deselect_nth(BMEditMesh *em, int nth, int offset)
+static bool edbm_deselect_nth(BMEditMesh *em, int nth, int skip, int offset)
 {
 	BMVert *v;
 	BMEdge *e;
@@ -2599,15 +2695,15 @@ static bool edbm_deselect_nth(BMEditMesh *em, int nth, int offset)
 	deselect_nth_active(em, &v, &e, &f);
 
 	if (v) {
-		walker_deselect_nth(em, nth, offset, &v->head);
+		walker_deselect_nth(em, nth, skip, offset, &v->head);
 		return true;
 	}
 	else if (e) {
-		walker_deselect_nth(em, nth, offset, &e->head);
+		walker_deselect_nth(em, nth, skip, offset, &e->head);
 		return true;
 	}
 	else if (f) {
-		walker_deselect_nth(em, nth, offset, &f->head);
+		walker_deselect_nth(em, nth, skip, offset, &f->head);
 		return true;
 	}
 
@@ -2618,15 +2714,14 @@ static int edbm_select_nth_exec(bContext *C, wmOperator *op)
 {
 	Object *obedit = CTX_data_edit_object(C);
 	BMEditMesh *em = BKE_editmesh_from_object(obedit);
-	const int nth = RNA_int_get(op->ptr, "nth");
+	const int nth = RNA_int_get(op->ptr, "nth") - 1;
+	const int skip = RNA_int_get(op->ptr, "skip");
 	int offset = RNA_int_get(op->ptr, "offset");
 
 	/* so input of offset zero ends up being (nth - 1) */
-	offset = mod_i(offset, nth);
-	/* depth starts at 1, this keeps active item selected */
-	offset -= 1;
+	offset = mod_i(offset, nth + skip);
 
-	if (edbm_deselect_nth(em, nth, offset) == false) {
+	if (edbm_deselect_nth(em, nth, skip, offset) == false) {
 		BKE_report(op->reports, RPT_ERROR, "Mesh has no active vert/edge/face");
 		return OPERATOR_CANCELLED;
 	}
@@ -2652,6 +2747,7 @@ void MESH_OT_select_nth(wmOperatorType *ot)
 	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 
 	RNA_def_int(ot->srna, "nth", 2, 2, INT_MAX, "Nth Selection", "", 2, 100);
+	RNA_def_int(ot->srna, "skip", 1, 1, INT_MAX, "Skip", "", 1, 100);
 	RNA_def_int(ot->srna, "offset", 0, INT_MIN, INT_MAX, "Offset", "", -100, 100);
 }
 
@@ -2807,6 +2903,13 @@ static int edbm_select_non_manifold_exec(bContext *C, wmOperator *op)
 	BMEdge *e;
 	BMIter iter;
 
+	const bool use_wire = RNA_boolean_get(op->ptr, "use_wire");
+	const bool use_boundary = RNA_boolean_get(op->ptr, "use_boundary");
+	const bool use_multi_face = RNA_boolean_get(op->ptr, "use_multi_face");
+	const bool use_non_contiguous = RNA_boolean_get(op->ptr, "use_non_contiguous");
+	const bool use_verts = RNA_boolean_get(op->ptr, "use_verts");
+
+
 	if (!RNA_boolean_get(op->ptr, "extend"))
 		EDBM_flag_disable_all(em, BM_ELEM_SELECT);
 
@@ -2819,15 +2922,30 @@ static int edbm_select_non_manifold_exec(bContext *C, wmOperator *op)
 		return OPERATOR_CANCELLED;
 	}
 	
-	BM_ITER_MESH (v, &iter, em->bm, BM_VERTS_OF_MESH) {
-		if (!BM_elem_flag_test(v, BM_ELEM_HIDDEN) && !BM_vert_is_manifold(v)) {
-			BM_vert_select_set(em->bm, v, true);
+	if (use_verts) {
+		BM_ITER_MESH (v, &iter, em->bm, BM_VERTS_OF_MESH) {
+			if (!BM_elem_flag_test(v, BM_ELEM_HIDDEN)) {
+				if (!BM_vert_is_manifold(v)) {
+					BM_vert_select_set(em->bm, v, true);
+				}
+			}
 		}
 	}
 	
-	BM_ITER_MESH (e, &iter, em->bm, BM_EDGES_OF_MESH) {
-		if (!BM_elem_flag_test(e, BM_ELEM_HIDDEN) && !BM_edge_is_manifold(e)) {
-			BM_edge_select_set(em->bm, e, true);
+	if (use_wire || use_boundary || use_multi_face || use_non_contiguous) {
+		BM_ITER_MESH (e, &iter, em->bm, BM_EDGES_OF_MESH) {
+			if (!BM_elem_flag_test(e, BM_ELEM_HIDDEN)) {
+				if ((use_wire && BM_edge_is_wire(e)) ||
+				    (use_boundary && BM_edge_is_boundary(e)) ||
+				    (use_non_contiguous && (BM_edge_is_manifold(e) && !BM_edge_is_contiguous(e))) ||
+				    (use_multi_face && (BM_edge_face_count(e) > 2)))
+				{
+					/* check we never select perfect edge (in test above) */
+					BLI_assert(!(BM_edge_is_manifold(e) && BM_edge_is_contiguous(e)));
+
+					BM_edge_select_set(em->bm, e, true);
+				}
+			}
 		}
 	}
 
@@ -2854,6 +2972,18 @@ void MESH_OT_select_non_manifold(wmOperatorType *ot)
 
 	/* props */
 	RNA_def_boolean(ot->srna, "extend", true, "Extend", "Extend the selection");
+	/* edges */
+	RNA_def_boolean(ot->srna, "use_wire", true, "Wire",
+	                "Wire edges");
+	RNA_def_boolean(ot->srna, "use_boundary", true, "Boundaries",
+	                "Boundary edges");
+	RNA_def_boolean(ot->srna, "use_multi_face", true,
+	                "Multiple Faces", "Edges shared by 3+ faces");
+	RNA_def_boolean(ot->srna, "use_non_contiguous", true, "Non Contiguous",
+	                "Edges between faces pointing in alternate directions");
+	/* verts */
+	RNA_def_boolean(ot->srna, "use_verts", true, "Vertices",
+	                "Vertices connecting multiple face regions");
 }
 
 static int edbm_select_random_exec(bContext *C, wmOperator *op)
@@ -3189,7 +3319,7 @@ void MESH_OT_region_to_loop(wmOperatorType *ot)
 }
 
 static int loop_find_region(BMLoop *l, int flag,
-                            SmallHash *fhash, BMFace ***region_out)
+                            GSet *visit_face_set, BMFace ***region_out)
 {
 	BMFace **region = NULL;
 	BMFace **stack = NULL;
@@ -3198,7 +3328,7 @@ static int loop_find_region(BMLoop *l, int flag,
 	BMFace *f;
 	
 	BLI_array_append(stack, l->f);
-	BLI_smallhash_insert(fhash, (uintptr_t)l->f, NULL);
+	BLI_gset_insert(visit_face_set, l->f);
 	
 	while (BLI_array_count(stack) > 0) {
 		BMIter liter1, liter2;
@@ -3217,11 +3347,10 @@ static int loop_find_region(BMLoop *l, int flag,
 				if (BM_elem_flag_test(l2->f, BM_ELEM_TAG)) {
 					continue;
 				}
-				if (BLI_smallhash_haskey(fhash, (uintptr_t)l2->f))
-					continue;
-				
-				BLI_array_append(stack, l2->f);
-				BLI_smallhash_insert(fhash, (uintptr_t)l2->f, NULL);
+
+				if (BLI_gset_add(visit_face_set, l2->f)) {
+					BLI_array_append(stack, l2->f);
+				}
 			}
 		}
 	}
@@ -3234,8 +3363,8 @@ static int loop_find_region(BMLoop *l, int flag,
 
 static int verg_radial(const void *va, const void *vb)
 {
-	BMEdge *e_a = *((BMEdge **)va);
-	BMEdge *e_b = *((BMEdge **)vb);
+	const BMEdge *e_a = *((const BMEdge **)va);
+	const BMEdge *e_b = *((const BMEdge **)vb);
 
 	int a, b;
 	a = BM_edge_face_count(e_a);
@@ -3254,13 +3383,13 @@ static int verg_radial(const void *va, const void *vb)
  */
 static int loop_find_regions(BMEditMesh *em, const bool selbigger)
 {
-	SmallHash visithash;
+	GSet *visit_face_set;
 	BMIter iter;
 	const int edges_len = em->bm->totedgesel;
 	BMEdge *e, **edges;
 	int count = 0, i;
 	
-	BLI_smallhash_init_ex(&visithash, edges_len);
+	visit_face_set = BLI_gset_ptr_new_ex(__func__, edges_len);
 	edges = MEM_mallocN(sizeof(*edges) * edges_len, __func__);
 
 	i = 0;
@@ -3289,10 +3418,10 @@ static int loop_find_regions(BMEditMesh *em, const bool selbigger)
 			continue;
 		
 		BM_ITER_ELEM (l, &liter, e, BM_LOOPS_OF_EDGE) {
-			if (BLI_smallhash_haskey(&visithash, (uintptr_t)l->f))
+			if (BLI_gset_haskey(visit_face_set, l->f))
 				continue;
-						
-			c = loop_find_region(l, BM_ELEM_SELECT, &visithash, &region_out);
+
+			c = loop_find_region(l, BM_ELEM_SELECT, visit_face_set, &region_out);
 
 			if (!region || (selbigger ? c >= tot : c < tot)) {
 				/* this region is the best seen so far */
@@ -3327,7 +3456,7 @@ static int loop_find_regions(BMEditMesh *em, const bool selbigger)
 	}
 	
 	MEM_freeN(edges);
-	BLI_smallhash_release(&visithash);
+	BLI_gset_free(visit_face_set, NULL);
 	
 	return count;
 }

@@ -88,6 +88,7 @@ struct MTFace;
 struct Object;
 struct Scene;
 struct Mesh;
+struct MLoopNorSpaceArray;
 struct BMEditMesh;
 struct KeyBlock;
 struct ModifierData;
@@ -96,7 +97,6 @@ struct ColorBand;
 struct GPUVertexAttribs;
 struct GPUDrawObject;
 struct BMEditMesh;
-struct ListBase;
 struct PBVH;
 
 /* number of sub-elements each mesh element has (for interpolation) */
@@ -147,11 +147,14 @@ typedef int (*DMSetMaterial)(int mat_nr, void *attribs);
 typedef int (*DMCompareDrawOptions)(void *userData, int cur_index, int next_index);
 typedef void (*DMSetDrawInterpOptions)(void *userData, int index, float t);
 typedef DMDrawOption (*DMSetDrawOptions)(void *userData, int index);
+typedef DMDrawOption (*DMSetDrawOptionsMappedTex)(void *userData, int origindex, int mat_nr);
 typedef DMDrawOption (*DMSetDrawOptionsTex)(struct MTFace *tface, const bool has_vcol, int matnr);
 
 typedef enum DMDrawFlag {
-	DM_DRAW_USE_COLORS = 1,
-	DM_DRAW_ALWAYS_SMOOTH = 2
+	DM_DRAW_USE_COLORS          = (1 << 0),
+	DM_DRAW_ALWAYS_SMOOTH       = (1 << 1),
+	DM_DRAW_USE_ACTIVE_UV       = (1 << 2),
+	DM_DRAW_USE_TEXPAINT_UV     = (1 << 3),
 } DMDrawFlag;
 
 typedef enum DMForeachFlag {
@@ -194,7 +197,11 @@ struct DerivedMesh {
 	void (*calcNormals)(DerivedMesh *dm);
 
 	/** Calculate loop (split) normals */
-	void (*calcLoopNormals)(DerivedMesh *dm, const float split_angle);
+	void (*calcLoopNormals)(DerivedMesh *dm, const bool use_split_normals, const float split_angle);
+
+	/** Calculate loop (split) normals, and returns split loop normal spacearr. */
+	void (*calcLoopNormalsSpaceArray)(DerivedMesh *dm, const bool use_split_normals, const float split_angle,
+	                                  struct MLoopNorSpaceArray *r_lnors_spacearr);
 
 	/** Recalculates mesh tessellation */
 	void (*recalcTessellation)(DerivedMesh *dm);
@@ -389,7 +396,7 @@ struct DerivedMesh {
 	void (*drawFacesTex)(DerivedMesh *dm,
 	                     DMSetDrawOptionsTex setDrawOptions,
 	                     DMCompareDrawOptions compareDrawOptions,
-	                     void *userData);
+	                     void *userData, DMDrawFlag uvflag);
 
 	/** Draw all faces with GLSL materials
 	 *  o setMaterial is called for every different material nr
@@ -421,9 +428,9 @@ struct DerivedMesh {
 	 * - Drawing options too complicated to enumerate, look at code.
 	 */
 	void (*drawMappedFacesTex)(DerivedMesh *dm,
-	                           DMSetDrawOptions setDrawOptions,
+	                           DMSetDrawOptionsMappedTex setDrawOptions,
 	                           DMCompareDrawOptions compareDrawOptions,
-	                           void *userData);
+	                           void *userData, DMDrawFlag uvflag);
 
 	/** Draw mapped faces with GLSL materials
 	 * - setMaterial is called for every different material nr
@@ -495,7 +502,7 @@ int DM_release(DerivedMesh *dm);
 
 /** utility function to convert a DerivedMesh to a Mesh
  */
-void DM_to_mesh(DerivedMesh *dm, struct Mesh *me, struct Object *ob, CustomDataMask mask);
+void DM_to_mesh(DerivedMesh *dm, struct Mesh *me, struct Object *ob, CustomDataMask mask, bool take_ownership);
 
 struct BMEditMesh *DM_to_editbmesh(struct DerivedMesh *dm,
                                    struct BMEditMesh *existing, const bool do_tessellate);
@@ -593,6 +600,8 @@ void DM_ensure_tessface(DerivedMesh *dm);
 void DM_update_tessface_data(DerivedMesh *dm);
 
 void DM_update_materials(DerivedMesh *dm, struct Object *ob);
+struct MTFace *DM_paint_uvlayer_active_get(DerivedMesh *dm, int mat_nr);
+
 /** interpolates vertex data from the vertices indexed by src_indices in the
  * source mesh using the given weights and stores the result in the vertex
  * indexed by dest_index in the dest mesh
@@ -647,6 +656,7 @@ void vDM_ColorBand_store(const struct ColorBand *coba, const char alert_color[4]
  * In use now by vertex/weight paint and particles */
 DMCoNo *mesh_get_mapped_verts_nors(struct Scene *scene, struct Object *ob);
 #endif
+void mesh_get_mapped_verts_coords(DerivedMesh *dm, float (*r_cos)[3], const int totcos);
 
 /* */
 DerivedMesh *mesh_get_derived_final(struct Scene *scene, struct Object *ob,
@@ -687,6 +697,9 @@ DerivedMesh *editbmesh_get_derived_cage(struct Scene *scene, struct Object *,
 DerivedMesh *editbmesh_get_derived_cage_and_final(struct Scene *scene, struct Object *, 
                                                   struct BMEditMesh *em, DerivedMesh **r_final,
                                                   CustomDataMask dataMask);
+
+DerivedMesh *object_get_derived_final(struct Object *ob, const bool for_render);
+
 float (*editbmesh_get_vertex_cos(struct BMEditMesh *em, int *r_numVerts))[3];
 bool editbmesh_modifier_is_enabled(struct Scene *scene, struct ModifierData *md, DerivedMesh *dm);
 void makeDerivedMesh(struct Scene *scene, struct Object *ob, struct BMEditMesh *em, 
@@ -736,6 +749,8 @@ typedef struct DMVertexAttribs {
 
 void DM_vertex_attributes_from_gpu(DerivedMesh *dm,
                                    struct GPUVertexAttribs *gattribs, DMVertexAttribs *attribs);
+
+void DM_draw_attrib_vertex(DMVertexAttribs *attribs, int a, int index, int vert);
 
 void DM_add_tangent_layer(DerivedMesh *dm);
 void DM_calc_auto_bump_scale(DerivedMesh *dm);

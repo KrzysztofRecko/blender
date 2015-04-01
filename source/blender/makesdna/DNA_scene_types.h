@@ -46,7 +46,9 @@ extern "C" {
 #include "DNA_listBase.h"
 #include "DNA_ID.h"
 #include "DNA_freestyle_types.h"
+#include "DNA_gpu_types.h"
 
+struct CurveMapping;
 struct Object;
 struct Brush;
 struct World;
@@ -242,6 +244,7 @@ typedef enum ScenePassType {
 	SCE_PASS_SUBSURFACE_DIRECT        = (1 << 28),
 	SCE_PASS_SUBSURFACE_INDIRECT      = (1 << 29),
 	SCE_PASS_SUBSURFACE_COLOR         = (1 << 30),
+	SCE_PASS_DEBUG                    = (1 << 31),  /* This is a virtual pass. */
 } ScenePassType;
 
 /* note, srl->passflag is treestore element 'nr' in outliner, short still... */
@@ -347,6 +350,12 @@ typedef struct ImageFormatData {
 #define R_IMF_EXR_CODEC_ZIP   2
 #define R_IMF_EXR_CODEC_PIZ   3
 #define R_IMF_EXR_CODEC_RLE   4
+#define R_IMF_EXR_CODEC_ZIPS  5
+#define R_IMF_EXR_CODEC_B44   6
+#define R_IMF_EXR_CODEC_B44A  7
+#define R_IMF_EXR_CODEC_DWAA  8
+#define R_IMF_EXR_CODEC_DWAB  9
+#define R_IMF_EXR_CODEC_MAX  10
 
 /* ImageFormatData.jp2_flag */
 #define R_IMF_JP2_FLAG_YCC          (1<<0)  /* when disabled use RGB */ /* was R_JPEG2K_YCC */
@@ -604,6 +613,9 @@ typedef struct RenderData {
 
 	/* Cycles baking */
 	struct BakeData bake;
+
+	int preview_start_resolution;
+	int pad;
 } RenderData;
 
 /* *************************************************************** */
@@ -706,7 +718,12 @@ typedef struct GameData {
 	short obstacleSimulation;
 	short raster_storage;
 	float levelHeight;
-	float deactivationtime, lineardeactthreshold, angulardeactthreshold, pad2;
+	float deactivationtime, lineardeactthreshold, angulardeactthreshold;
+
+	/* Scene LoD */
+	short lodflag, pad2;
+	int scehysteresis, pad5;
+
 } GameData;
 
 #define STEREO_NOSTEREO		1
@@ -779,6 +796,9 @@ enum {
 #pragma GCC poison GAME_MAT_TEXFACE
 #endif
 
+/* GameData.lodflag */
+#define SCE_LOD_USE_HYST		(1 << 0)
+
 /* UV Paint */
 #define UV_SCULPT_LOCK_BORDERS				1
 #define UV_SCULPT_ALL_ISLANDS				2
@@ -808,7 +828,9 @@ typedef struct TimeMarker {
 /* Paint Tool Base */
 typedef struct Paint {
 	struct Brush *brush;
-	
+	struct Palette *palette;
+	struct CurveMapping *cavity_curve; /* cavity curve */
+
 	/* WM Paint cursor */
 	void *paint_cursor;
 	unsigned char paint_cursor_col[4];
@@ -831,15 +853,20 @@ typedef struct Paint {
 typedef struct ImagePaintSettings {
 	Paint paint;
 
-	short flag, pad;
+	short flag, missing_data;
 	
 	/* for projection painting only */
 	short seam_bleed, normal_angle;
 	short screen_grab_size[2]; /* capture size for re-projection */
 
-	int pad1;
+	int mode;                  /* mode used for texture painting */
 
-	void *paintcursor;			/* wm handle */
+	void *paintcursor;		   /* wm handle */
+	struct Image *stencil;     /* workaround until we support true layer masks */
+	struct Image *clone;       /* clone layer for image mode for projective texture painting */
+	struct Image *canvas;      /* canvas when the explicit system is used for painting */
+	float stencil_col[3];
+	float dither;              /* dither amount used when painting on byte images */
 } ImagePaintSettings;
 
 /* ------------------------------------------- */
@@ -872,6 +899,7 @@ typedef struct ParticleEditSettings {
 
 	struct Scene *scene;
 	struct Object *object;
+	struct Object *shape_object;
 } ParticleEditSettings;
 
 /* ------------------------------------------- */
@@ -963,6 +991,11 @@ typedef struct UnifiedPaintSettings {
 	/* unified brush weight, [0, 1] */
 	float weight;
 
+	/* unified brush color */
+	float rgb[3];
+	/* unified brush secondary color */
+	float secondary_rgb[3];
+
 	/* user preferences for sculpt and paint */
 	int flag;
 
@@ -970,19 +1003,36 @@ typedef struct UnifiedPaintSettings {
 
 	/* record movement of mouse so that rake can start at an intuitive angle */
 	float last_rake[2];
-	int pad;
+	float last_rake_angle;
+	
+	int last_stroke_valid;
+	float average_stroke_accum[3];
+	int average_stroke_counter;
+	
 
 	float brush_rotation;
+	float brush_rotation_sec;
 
 	/*********************************************************************************
 	 *  all data below are used to communicate with cursor drawing and tex sampling  *
 	 *********************************************************************************/
-	int draw_anchored;
-	int   anchored_size;
+	int anchored_size;
+
+	float overlap_factor; /* normalization factor due to accumulated value of curve along spacing.
+	                       * Calculated when brush spacing changes to dampen strength of stroke
+	                       * if space attenuation is used*/
+	char draw_inverted;
+	/* check is there an ongoing stroke right now */
+	char stroke_active;
+
+	char draw_anchored;
+	char do_linear_conversion;
+
 	float anchored_initial_mouse[2];
 
-	/* check is there an ongoing stroke right now */
-	int stroke_active;
+	/* radius of brush, premultiplied with pressure.
+	 * In case of anchored brushes contains the anchored radius */
+	float pixel_radius;
 
 	/* drawing pressure */
 	float size_pressure_value;
@@ -994,19 +1044,14 @@ typedef struct UnifiedPaintSettings {
 	float mask_tex_mouse[2];
 
 	/* ColorSpace cache to avoid locking up during sampling */
-	int do_linear_conversion;
 	struct ColorSpace *colorspace;
-
-	/* radius of brush, premultiplied with pressure.
-	 * In case of anchored brushes contains that radius */
-	float pixel_radius;
-	int pad2;
 } UnifiedPaintSettings;
 
 typedef enum {
 	UNIFIED_PAINT_SIZE  = (1 << 0),
 	UNIFIED_PAINT_ALPHA = (1 << 1),
 	UNIFIED_PAINT_WEIGHT = (1 << 5),
+	UNIFIED_PAINT_COLOR = (1 << 6),
 
 	/* only used if unified size is enabled, mirrors the brush flags
 	 * BRUSH_LOCK_SIZE and BRUSH_SIZE_PRESSURE */
@@ -1071,9 +1116,10 @@ typedef struct ToolSettings {
 	short autoik_chainlen;  /* runtime only */
 
 	/* Grease Pencil */
-	char gpencil_flags;
+	char gpencil_flags;		/* flags/options for how the tool works */
+	char gpencil_src;		/* for main 3D view Grease Pencil, where data comes from */
 
-	char pad[5];
+	char pad[4];
 
 	/* Image Paint (8 byttse aligned please!) */
 	struct ImagePaintSettings imapaint;
@@ -1188,6 +1234,21 @@ typedef struct PhysicsSettings {
 	int flag, quick_cache_step, rt;
 } PhysicsSettings;
 
+/* ------------------------------------------- */
+/* Safe Area options used in Camera View & VSE
+ */
+typedef struct DisplaySafeAreas {
+	/* each value represents the (x,y) margins as a multiplier.
+	 * 'center' in this context is just the name for a different kind of safe-area */
+
+	float title[2];		/* Title Safe */
+	float action[2];	/* Image/Graphics Safe */
+
+	/* use for alternate aspect ratio */
+	float title_center[2];
+	float action_center[2];
+} DisplaySafeAreas;
+
 /* *************************************************************** */
 /* Scene ID-Block */
 
@@ -1223,6 +1284,7 @@ typedef struct Scene {
 	
 	struct ToolSettings *toolsettings;		/* default allocated now */
 	struct SceneStats *stats;				/* default allocated now */
+	struct DisplaySafeAreas safe_areas;
 
 	/* migrate or replace? depends on some internal things... */
 	/* no, is on the right place (ton) */
@@ -1377,6 +1439,7 @@ typedef struct Scene {
 /* #define R_RECURS_PROTECTION	0x20000 */
 #define R_TEXNODE_PREVIEW	0x40000
 #define R_VIEWPORT_PREVIEW	0x80000
+#define R_EXR_CACHE_FILE	0x100000
 
 /* r->stamp */
 #define R_STAMP_TIME 	0x0001
@@ -1442,8 +1505,9 @@ enum {
 #define R_BAKE_LORES_MESH	32
 #define R_BAKE_VCOL			64
 #define R_BAKE_USERSCALE	128
-#define R_BAKE_SPLIT_MAT	256
-#define R_BAKE_AUTO_NAME	512
+#define R_BAKE_CAGE			256
+#define R_BAKE_SPLIT_MAT	512
+#define R_BAKE_AUTO_NAME	1024
 
 /* bake_normal_space */
 #define R_BAKE_SPACE_CAMERA	 0
@@ -1460,7 +1524,10 @@ enum {
 
 /* sequencer seq_prev_type seq_rend_type */
 
-
+/* scene->r.engine (scene.c) */
+extern const char *RE_engine_id_BLENDER_RENDER;
+extern const char *RE_engine_id_BLENDER_GAME;
+extern const char *RE_engine_id_CYCLES;
 
 /* **************** SCENE ********************* */
 
@@ -1575,7 +1642,8 @@ enum {
 #define PROP_LIN               4
 #define PROP_CONST             5
 #define PROP_RANDOM            6
-#define PROP_MODE_MAX          7
+#define PROP_INVSQUARE         7
+#define PROP_MODE_MAX          8
 
 /* toolsettings->proportional */
 #define PROP_EDIT_OFF			0
@@ -1615,8 +1683,8 @@ typedef enum eVGroupSelect {
 #define SCE_FRAME_DROP			(1<<3)
 
 
-	/* return flag BKE_scene_base_iter_next function */
-#define F_ERROR			-1
+	/* return flag BKE_scene_base_iter_next functions */
+/* #define F_ERROR			-1 */  /* UNUSED */
 #define F_START			0
 #define F_SCENE			1
 #define F_DUPLI			3
@@ -1643,6 +1711,7 @@ typedef enum {
 	PAINT_SHOW_BRUSH = (1 << 0),
 	PAINT_FAST_NAVIGATE = (1 << 1),
 	PAINT_SHOW_BRUSH_ON_SURFACE = (1 << 2),
+	PAINT_USE_CAVITY_MASK = (1 << 3)
 } PaintFlags;
 
 /* Paint.symmetry_flags
@@ -1687,6 +1756,11 @@ typedef enum SculptFlags {
 	SCULPT_DYNTOPO_DETAIL_CONSTANT = (1 << 13)
 } SculptFlags;
 
+typedef enum ImagePaintMode {
+	IMAGEPAINT_MODE_MATERIAL, /* detect texture paint slots from the material */
+	IMAGEPAINT_MODE_IMAGE,    /* select texture paint image directly */
+} ImagePaintMode;
+
 #if (DNA_DEPRECATED_GCC_POISON == 1)
 #pragma GCC poison SCULPT_SYMM_X SCULPT_SYMM_Y SCULPT_SYMM_Z SCULPT_SYMMETRY_FEATHER
 #endif
@@ -1698,12 +1772,18 @@ typedef enum SculptFlags {
 // #define IMAGEPAINT_DRAW_TOOL_DRAWING	4 // deprecated
 
 /* projection painting only */
-#define IMAGEPAINT_PROJECT_XRAY			16
-#define IMAGEPAINT_PROJECT_BACKFACE		32
-#define IMAGEPAINT_PROJECT_FLAT			64
-#define IMAGEPAINT_PROJECT_LAYER_CLONE	128
-#define IMAGEPAINT_PROJECT_LAYER_STENCIL	256
-#define IMAGEPAINT_PROJECT_LAYER_STENCIL_INV	512
+#define IMAGEPAINT_PROJECT_XRAY			(1 << 4)
+#define IMAGEPAINT_PROJECT_BACKFACE		(1 << 5)
+#define IMAGEPAINT_PROJECT_FLAT			(1 << 6)
+#define IMAGEPAINT_PROJECT_LAYER_CLONE	(1 << 7)
+#define IMAGEPAINT_PROJECT_LAYER_STENCIL	(1 << 8)
+#define IMAGEPAINT_PROJECT_LAYER_STENCIL_INV	(1 << 9)
+
+
+#define IMAGEPAINT_MISSING_UVS       (1 << 0)
+#define IMAGEPAINT_MISSING_MATERIAL  (1 << 1)
+#define IMAGEPAINT_MISSING_TEX       (1 << 2)
+#define IMAGEPAINT_MISSING_STENCIL   (1 << 3)
 
 /* toolsettings->uvcalc_flag */
 #define UVCALC_FILLHOLES			1
@@ -1731,6 +1811,12 @@ typedef enum SculptFlags {
 
 /* toolsettings->gpencil_flags */
 #define GP_TOOL_FLAG_PAINTSESSIONS_ON	(1<<0)
+
+/* toolsettings->gpencil_src */
+typedef enum eGPencil_Source_3D {
+	GP_TOOL_SOURCE_SCENE    = 0,
+	GP_TOOL_SOURCE_OBJECT   = 1
+} eGPencil_Source_3d;
 
 /* toolsettings->particle flag */
 #define PE_KEEP_LENGTHS			1

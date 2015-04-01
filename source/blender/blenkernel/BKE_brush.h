@@ -27,14 +27,11 @@
  * General operations for brushes.
  */
 
-struct ID;
 struct Brush;
 struct ImBuf;
 struct ImagePool;
 struct Main;
-struct rctf;
 struct Scene;
-struct wmOperator;
 // enum CurveMappingPreset;
 
 
@@ -62,12 +59,11 @@ int BKE_brush_clone_image_delete(struct Brush *brush);
 /* jitter */
 void BKE_brush_jitter_pos(const struct Scene *scene, struct Brush *brush,
                           const float pos[2], float jitterpos[2]);
-void BKE_brush_randomize_texture_coordinates(struct UnifiedPaintSettings *ups, bool mask);
+void BKE_brush_randomize_texture_coords(struct UnifiedPaintSettings *ups, bool mask);
 
 /* brush curve */
 void BKE_brush_curve_preset(struct Brush *b, int preset);
-float BKE_brush_curve_strength_clamp(struct Brush *br, float p, const float len);
-float BKE_brush_curve_strength(struct Brush *br, float p, const float len); /* used for sculpt */
+float BKE_brush_curve_strength(struct Brush *br, float p, const float len);
 
 /* sampling */
 float BKE_brush_sample_tex_3D(const Scene *scene, struct Brush *br, const float point[3],
@@ -81,7 +77,11 @@ unsigned int *BKE_brush_gen_texture_cache(struct Brush *br, int half_side, bool 
 /* radial control */
 struct ImBuf *BKE_brush_gen_radial_control_imbuf(struct Brush *br, bool secondary);
 
-/* unified strength and size */
+/* unified strength size and color */
+
+float *BKE_brush_color_get(const struct Scene *scene, struct Brush *brush);
+float *BKE_brush_secondary_color_get(const struct Scene *scene, struct Brush *brush);
+void BKE_brush_color_set(struct Scene *scene, struct Brush *brush, const float color[3]);
 
 int  BKE_brush_size_get(const struct Scene *scene, struct Brush *brush);
 void BKE_brush_size_set(struct Scene *scene, struct Brush *brush, int value);

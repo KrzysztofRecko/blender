@@ -68,6 +68,7 @@
 #include "BLI_heap.h"
 #include "BLI_math.h"
 #include "BLI_stack.h"
+#include "BLI_bitmap.h"
 
 #include "BKE_cdderivedmesh.h"
 #include "BKE_deform.h"
@@ -77,8 +78,6 @@
 #include "BKE_modifier.h"
 
 #include "bmesh.h"
-
-#include "MOD_util.h"
 
 typedef struct {
 	float mat[3][3];
@@ -217,6 +216,7 @@ static bool skin_frame_find_contained_faces(const Frame *frame,
 /* Returns true if hull is successfully built, false otherwise */
 static bool build_hull(SkinOutput *so, Frame **frames, int totframe)
 {
+#ifdef WITH_BULLET
 	BMesh *bm = so->bm;
 	BMOperator op;
 	BMIter iter;
@@ -325,6 +325,10 @@ static bool build_hull(SkinOutput *so, Frame **frames, int totframe)
 	BM_mesh_delete_hflag_tagged(bm, BM_ELEM_TAG, BM_EDGE | BM_FACE);
 
 	return true;
+#else
+	UNUSED_VARS(so, frames, totframe, skin_frame_find_contained_faces);
+	return false;
+#endif
 }
 
 /* Returns the average frame side length (frames are rectangular, so
@@ -641,7 +645,7 @@ typedef struct {
 	int e;
 } EdgeStackElem;
 
-static void build_emats_stack(BLI_Stack *stack, int *visited_e, EMat *emat,
+static void build_emats_stack(BLI_Stack *stack, BLI_bitmap *visited_e, EMat *emat,
                               const MeshElemMap *emap, const MEdge *medge,
                               const MVertSkin *vs, const MVert *mvert)
 {
@@ -654,11 +658,11 @@ static void build_emats_stack(BLI_Stack *stack, int *visited_e, EMat *emat,
 	e = stack_elem.e;
 
 	/* Skip if edge already visited */
-	if (visited_e[e])
+	if (BLI_BITMAP_TEST(visited_e, e))
 		return;
 
 	/* Mark edge as visited */
-	visited_e[e] = true;
+	BLI_BITMAP_ENABLE(visited_e, e);
 	
 	/* Process edge */
 
@@ -704,11 +708,12 @@ static EMat *build_edge_mats(const MVertSkin *vs,
 	BLI_Stack *stack;
 	EMat *emat;
 	EdgeStackElem stack_elem;
-	int *visited_e, i, v;
+	BLI_bitmap *visited_e;
+	int i, v;
 
 	stack = BLI_stack_new(sizeof(stack_elem), "build_edge_mats.stack");
 
-	visited_e = MEM_callocN(sizeof(int) * totedge, "build_edge_mats.visited_e");
+	visited_e = BLI_BITMAP_NEW(totedge, "build_edge_mats.visited_e");
 	emat = MEM_callocN(sizeof(EMat) * totedge, "build_edge_mats.emat");
 
 	/* Edge matrices are built from the root nodes, add all roots with
@@ -730,7 +735,7 @@ static EMat *build_edge_mats(const MVertSkin *vs,
 		}
 	}
 
-	while (!BLI_stack_empty(stack)) {
+	while (!BLI_stack_is_empty(stack)) {
 		build_emats_stack(stack, visited_e, emat, emap, medge, vs, mvert);
 	}
 
@@ -960,23 +965,51 @@ static void add_poly(SkinOutput *so,
 	f->mat_nr = so->mat_nr;
 }
 
-static void connect_frames(SkinOutput *so,
-                           BMVert *frame1[4],
-BMVert *frame2[4])
+static void connect_frames(
+        SkinOutput *so,
+        BMVert *frame1[4],
+        BMVert *frame2[4])
 {
 	BMVert *q[4][4] = {{frame2[0], frame2[1], frame1[1], frame1[0]},
 	                   {frame2[1], frame2[2], frame1[2], frame1[1]},
 	                   {frame2[2], frame2[3], frame1[3], frame1[2]},
 	                   {frame2[3], frame2[0], frame1[0], frame1[3]}};
-	float p[3], no[3];
-	int i, swap;
+	int i;
+	bool swap;
 
 	/* Check if frame normals need swap */
-	sub_v3_v3v3(p, q[3][0]->co, q[0][0]->co);
-	normal_quad_v3(no,
-	               q[0][0]->co, q[0][1]->co,
-	               q[0][2]->co, q[0][3]->co);
-	swap = dot_v3v3(no, p) > 0;
+#if 0
+	{
+		/* simple method, works mostly */
+		float p[3], no[3];
+		sub_v3_v3v3(p, q[3][0]->co, q[0][0]->co);
+		normal_quad_v3(no,
+		        q[0][0]->co, q[0][1]->co,
+		        q[0][2]->co, q[0][3]->co);
+		swap = dot_v3v3(no, p) > 0;
+	}
+#else
+	{
+		/* comprehensive method, accumulate flipping of all faces */
+		float cent_sides[4][3];
+		float cent[3];
+		float dot = 0.0f;
+
+		for (i = 0; i < 4; i++) {
+			mid_v3_v3v3v3v3(cent_sides[i], UNPACK4_EX(, q[i], ->co));
+		}
+		mid_v3_v3v3v3v3(cent, UNPACK4(cent_sides));
+
+		for (i = 0; i < 4; i++) {
+			float p[3], no[3];
+			normal_quad_v3(no, UNPACK4_EX(, q[i], ->co));
+			sub_v3_v3v3(p, cent, cent_sides[i]);
+			dot += dot_v3v3(no, p);
+		}
+
+		swap = dot > 0;
+	}
+#endif
 
 	for (i = 0; i < 4; i++) {
 		if (swap)
@@ -1109,7 +1142,7 @@ static BMFace *collapse_face_corners(BMesh *bm, BMFace *f, int n,
 					orig_verts[i] = NULL;
 				}
 				else if (orig_verts[i] &&
-				         !BM_vert_in_face(vf, orig_verts[i]))
+				         !BM_vert_in_face(orig_verts[i], vf))
 				{
 					wrong_face = true;
 					break;
@@ -1255,7 +1288,7 @@ static void skin_fix_hole_no_good_verts(BMesh *bm, Frame *frame, BMFace *split_f
 
 		BMO_op_callf(bm, BMO_FLAG_DEFAULTS,
 		             "subdivide_edges edges=%he cuts=%i quad_corner_type=%i",
-		             BM_ELEM_TAG, 1, SUBD_STRAIGHT_CUT);
+		             BM_ELEM_TAG, 1, SUBD_CORNER_STRAIGHT_CUT);
 	}
 	else if (split_face->len > 4) {
 		/* Maintain a dynamic vert array containing the split_face's
@@ -1703,6 +1736,11 @@ static BMesh *build_skin(SkinNode *skin_nodes,
 	so.bm = BM_mesh_create(&bm_mesh_allocsize_default);
 	so.mat_nr = 0;
 	
+	/* BMESH_TODO: bumping up the stack level (see MOD_array.c) */
+	BM_mesh_elem_toolflags_ensure(so.bm);
+	BMO_push(so.bm, NULL);
+	bmesh_edit_begin(so.bm, 0);
+
 	if (input_dvert)
 		BM_data_layer_add(so.bm, &so.bm->vdata, CD_MDEFORMVERT);
 
@@ -1750,13 +1788,12 @@ static BMesh *build_skin(SkinNode *skin_nodes,
 
 static void skin_set_orig_indices(DerivedMesh *dm)
 {
-	int *orig, totpoly, i;
+	int *orig, totpoly;
 
 	totpoly = dm->getNumPolys(dm);
 	orig = CustomData_add_layer(&dm->polyData, CD_ORIGINDEX,
 	                            CD_CALLOC, NULL, totpoly);
-	for (i = 0; i < totpoly; i++)
-		orig[i] = ORIGINDEX_NONE;
+	fill_vn_i(orig, totpoly, ORIGINDEX_NONE);
 }
 
 /*

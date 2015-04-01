@@ -60,8 +60,6 @@
 #include "BKE_context.h"
 #include "BKE_report.h"
 
-#include "UI_interface.h"
-#include "UI_resources.h"
 #include "UI_view2d.h"
 
 #include "ED_anim_api.h"
@@ -500,12 +498,17 @@ static void insert_graph_keys(bAnimContext *ac, short mode)
 		else 
 			cfra = (float)CFRA;
 			
-		/* if there's an id */
-		if (ale->id)
+		/* read value from property the F-Curve represents, or from the curve only?
+		 * - ale->id != NULL:    Typically, this means that we have enough info to try resolving the path
+		 * - ale->owner != NULL: If this is set, then the path may not be resolvable from the ID alone,
+		 *                       so it's easier for now to just read the F-Curve directly.
+		 *                       (TODO: add the full-blown PointerRNA relative parsing case here...)
+		 */
+		if (ale->id && !ale->owner)
 			insert_keyframe(reports, ale->id, NULL, ((fcu->grp) ? (fcu->grp->name) : (NULL)), fcu->rna_path, fcu->array_index, cfra, flag);
 		else
 			insert_vert_fcurve(fcu, cfra, fcu->curval, 0);
-
+		
 		ale->update |= ANIM_UPDATE_DEFAULT;
 	}
 	
@@ -598,12 +601,12 @@ static int graphkeys_click_insert_exec(bContext *C, wmOperator *op)
 		
 		/* insert keyframe on the specified frame + value */
 		insert_vert_fcurve(fcu, frame, val, 0);
-
+		
 		ale->update |= ANIM_UPDATE_DEPS;
-
+		
 		BLI_listbase_clear(&anim_data);
 		BLI_addtail(&anim_data, ale);
-
+		
 		ANIM_animdata_update(&ac, &anim_data);
 	}
 	else {
@@ -699,7 +702,7 @@ static short copy_graph_keys(bAnimContext *ac)
 }
 
 static short paste_graph_keys(bAnimContext *ac,
-                              const eKeyPasteOffset offset_mode, const eKeyMergeMode merge_mode)
+                              const eKeyPasteOffset offset_mode, const eKeyMergeMode merge_mode, bool flip)
 {	
 	ListBase anim_data = {NULL, NULL};
 	int filter, ok = 0;
@@ -716,7 +719,7 @@ static short paste_graph_keys(bAnimContext *ac,
 		ANIM_animdata_filter(ac, &anim_data, filter, ac->data, ac->datatype);
 	
 	/* paste keyframes */
-	ok = paste_animedit_keys(ac, &anim_data, offset_mode, merge_mode);
+	ok = paste_animedit_keys(ac, &anim_data, offset_mode, merge_mode, flip);
 
 	/* clean up */
 	ANIM_animdata_freelist(&anim_data);
@@ -767,6 +770,7 @@ static int graphkeys_paste_exec(bContext *C, wmOperator *op)
 
 	const eKeyPasteOffset offset_mode = RNA_enum_get(op->ptr, "offset");
 	const eKeyMergeMode merge_mode = RNA_enum_get(op->ptr, "merge");
+	const bool flipped = RNA_boolean_get(op->ptr, "flipped");
 	
 	/* get editor data */
 	if (ANIM_animdata_get_context(C, &ac) == 0)
@@ -776,7 +780,7 @@ static int graphkeys_paste_exec(bContext *C, wmOperator *op)
 	ac.reports = op->reports;
 
 	/* paste keyframes - non-zero return means an error occurred while trying to paste */
-	if (paste_graph_keys(&ac, offset_mode, merge_mode)) {
+	if (paste_graph_keys(&ac, offset_mode, merge_mode, flipped)) {
 		return OPERATOR_CANCELLED;
 	}
 	
@@ -788,6 +792,8 @@ static int graphkeys_paste_exec(bContext *C, wmOperator *op)
  
 void GRAPH_OT_paste(wmOperatorType *ot)
 {
+	PropertyRNA *prop;
+	
 	/* identifiers */
 	ot->name = "Paste Keyframes";
 	ot->idname = "GRAPH_OT_paste";
@@ -804,6 +810,8 @@ void GRAPH_OT_paste(wmOperatorType *ot)
 	/* props */
 	RNA_def_enum(ot->srna, "offset", keyframe_paste_offset_items, KEYFRAME_PASTE_OFFSET_CFRA_START, "Offset", "Paste time offset of keys");
 	RNA_def_enum(ot->srna, "merge", keyframe_paste_merge_items, KEYFRAME_PASTE_MERGE_MIX, "Type", "Method of merging pasted keys and existing");
+	prop = RNA_def_boolean(ot->srna, "flipped", false, "Flipped", "Paste keyframes from mirrored bones if they exist");
+	RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
 
 /* ******************** Duplicate Keyframes Operator ************************* */
@@ -907,6 +915,7 @@ static bool delete_graph_keys(bAnimContext *ac)
 		    (fcu->driver == NULL))
 		{
 			ANIM_fcurve_delete_from_animdata(ac, adt, fcu);
+			ale->key_data = NULL;
 		}
 	}
 
@@ -1240,7 +1249,7 @@ void GRAPH_OT_sound_bake(wmOperatorType *ot)
 	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 
 	/* properties */
-	WM_operator_properties_filesel(ot, FOLDERFILE | SOUNDFILE | MOVIEFILE, FILE_SPECIAL, FILE_OPENFILE,
+	WM_operator_properties_filesel(ot, FILE_TYPE_FOLDER | FILE_TYPE_SOUND | FILE_TYPE_MOVIE, FILE_SPECIAL, FILE_OPENFILE,
 	                               WM_FILESEL_FILEPATH, FILE_DEFAULTDISPLAY);
 	RNA_def_float(ot->srna, "low", 0.0f, 0.0, 100000.0, "Lowest frequency",
 	              "Cutoff frequency of a high-pass filter that is applied to the audio data", 0.1, 1000.00);
@@ -1706,7 +1715,7 @@ static int graphkeys_euler_filter_exec(bContext *C, wmOperator *op)
 		 */
 		if (strstr(fcu->rna_path, "rotation_euler") == NULL)
 			continue;
-		else if (ELEM3(fcu->array_index, 0, 1, 2) == 0) {
+		else if (ELEM(fcu->array_index, 0, 1, 2) == 0) {
 			BKE_reportf(op->reports, RPT_WARNING,
 			            "Euler Rotation F-Curve has invalid index (ID='%s', Path='%s', Index=%d)",
 			            (ale->id) ? ale->id->name : TIP_("<No ID>"), fcu->rna_path, fcu->array_index);
@@ -1717,7 +1726,7 @@ static int graphkeys_euler_filter_exec(bContext *C, wmOperator *op)
 		 * so if the paths or the ID's don't match up, then a curve needs to be added 
 		 * to a new group
 		 */
-		if ((euf) && (euf->id == ale->id) && (strcmp(euf->rna_path, fcu->rna_path) == 0)) {
+		if ((euf) && (euf->id == ale->id) && (STREQ(euf->rna_path, fcu->rna_path))) {
 			/* this should be fine to add to the existing group then */
 			euf->fcurves[fcu->array_index] = fcu;
 		}
@@ -1749,7 +1758,7 @@ static int graphkeys_euler_filter_exec(bContext *C, wmOperator *op)
 		
 		/* sanity check: ensure that there are enough F-Curves to work on in this group */
 		/* TODO: also enforce assumption that there be a full set of keyframes at each position by ensuring that totvert counts are same? */
-		if (ELEM3(NULL, euf->fcurves[0], euf->fcurves[1], euf->fcurves[2])) {
+		if (ELEM(NULL, euf->fcurves[0], euf->fcurves[1], euf->fcurves[2])) {
 			/* report which components are missing */
 			BKE_reportf(op->reports, RPT_WARNING,
 			            "Missing %s%s%s component(s) of euler rotation for ID='%s' and RNA-Path='%s'",
@@ -1887,7 +1896,7 @@ static int graphkeys_framejump_exec(bContext *C, wmOperator *UNUSED(op))
 
 		ked.f1 += current_ked.f1;
 		ked.i1 += current_ked.i1;
-		ked.f2 += current_ked.f2 / unit_scale;
+		ked.f2 += current_ked.f2 * unit_scale;
 		ked.i2 += current_ked.i2;
 	}
 	
@@ -2239,7 +2248,7 @@ static EnumPropertyItem *graph_fmodifier_itemf(bContext *C, PointerRNA *UNUSED(p
 
 	/* start from 1 to skip the 'Invalid' modifier type */
 	for (i = 1; i < FMODIFIER_NUM_TYPES; i++) {
-		FModifierTypeInfo *fmi = get_fmodifier_typeinfo(i);
+		const FModifierTypeInfo *fmi = get_fmodifier_typeinfo(i);
 		int index;
 
 		/* check if modifier is valid for this context */

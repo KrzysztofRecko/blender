@@ -32,7 +32,7 @@ extern "C" {
 #include "COM_compositor.h"
 #include "COM_ExecutionSystem.h"
 #include "COM_WorkScheduler.h"
-#include "OCL_opencl.h"
+#include "clew.h"
 #include "COM_MovieDistortionOperation.h"
 
 static ThreadMutex s_compositorMutex;
@@ -77,6 +77,7 @@ void COM_execute(RenderData *rd, Scene *scene, bNodeTree *editingtree, int rende
 
 	/* set progress bar to 0% and status to init compositing */
 	editingtree->progress(editingtree->prh, 0.0);
+	editingtree->stats_draw(editingtree->sdh, (char*)"Compositing");
 
 	bool twopass = (editingtree->flag & NTREE_TWO_PASS) > 0 && !rendering;
 	/* initialize execution system */

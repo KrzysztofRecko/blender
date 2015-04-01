@@ -40,7 +40,6 @@
 
 struct ID;
 struct ListBase;
-struct SpaceNode;
 struct bNodeLink;
 struct bNodeType;
 struct bNodeTreeExec;
@@ -383,7 +382,7 @@ typedef struct bNodeTree {
 	
 	/* callbacks */
 	void (*progress)(void *, float progress);
-	void (*stats_draw)(void *, char *str);
+	void (*stats_draw)(void *, const char *str);
 	int (*test_break)(void *);
 	void (*update_draw)(void *);
 	void *tbh, *prh, *sdh, *udh;
@@ -825,6 +824,10 @@ typedef struct NodeTranslateData {
 typedef struct NodePlaneTrackDeformData {
 	char tracking_object[64];
 	char plane_track_name[64];
+	char flag;
+	char motion_blur_samples;
+	char pad[2];
+	float motion_blur_shutter;
 } NodePlaneTrackDeformData;
 
 typedef struct NodeShaderScript {
@@ -852,6 +855,12 @@ typedef struct NodeShaderUVMap {
 	char uv_map[64];
 } NodeShaderUVMap;
 
+typedef struct NodeSunBeams {
+	float source[2];
+
+	float ray_length;
+} NodeSunBeams;
+
 /* script node mode */
 #define NODE_SCRIPT_INTERNAL		0
 #define NODE_SCRIPT_EXTERNAL		1
@@ -874,9 +883,10 @@ typedef struct NodeShaderUVMap {
 #define CMP_NODE_CHANNEL_MATTE_CS_YCC	4
 
 /* glossy distributions */
-#define SHD_GLOSSY_BECKMANN	0
-#define SHD_GLOSSY_SHARP	1
-#define SHD_GLOSSY_GGX		2
+#define SHD_GLOSSY_BECKMANN				0
+#define SHD_GLOSSY_SHARP				1
+#define SHD_GLOSSY_GGX					2
+#define SHD_GLOSSY_ASHIKHMIN_SHIRLEY	3
 
 /* vector transform */
 #define SHD_VECT_TRANSFORM_TYPE_VECTOR	0
@@ -955,6 +965,8 @@ typedef struct NodeShaderUVMap {
 /* image texture */
 #define SHD_PROJ_FLAT				0
 #define SHD_PROJ_BOX				1
+#define SHD_PROJ_SPHERE				2
+#define SHD_PROJ_TUBE				3
 
 /* image texture interpolation */
 #define SHD_INTERP_LINEAR		0
@@ -977,6 +989,36 @@ typedef struct NodeShaderUVMap {
 #define SHD_NORMAL_MAP_WORLD			2
 #define SHD_NORMAL_MAP_BLENDER_OBJECT	3
 #define SHD_NORMAL_MAP_BLENDER_WORLD	4
+
+/* math node clamp */
+#define SHD_MATH_CLAMP		1
+
+/* Math node operation/ */
+enum {
+	NODE_MATH_ADD     = 0,
+	NODE_MATH_SUB     = 1,
+	NODE_MATH_MUL     = 2,
+	NODE_MATH_DIVIDE  = 3,
+	NODE_MATH_SIN     = 4,
+	NODE_MATH_COS     = 5,
+	NODE_MATH_TAN     = 6,
+	NODE_MATH_ASIN    = 7,
+	NODE_MATH_ACOS    = 8,
+	NODE_MATH_ATAN    = 9,
+	NODE_MATH_POW     = 10,
+	NODE_MATH_LOG     = 11,
+	NODE_MATH_MIN     = 12,
+	NODE_MATH_MAX     = 13,
+	NODE_MATH_ROUND   = 14,
+	NODE_MATH_LESS    = 15,
+	NODE_MATH_GREATER = 16,
+	NODE_MATH_MOD     = 17,
+	NODE_MATH_ABS     = 18,
+};
+
+/* mix rgb node flags */
+#define SHD_MIXRGB_USE_ALPHA	1
+#define SHD_MIXRGB_CLAMP	2
 
 /* subsurface */
 enum {
@@ -1040,5 +1082,12 @@ enum {
 
 /* viewer and cmposite output */
 #define CMP_NODE_OUTPUT_IGNORE_ALPHA		1
+
+/* Plane track deform node */
+enum {
+	CMP_NODEFLAG_PLANETRACKDEFORM_MOTION_BLUR = 1,
+};
+
+#define CMP_NODE_PLANETRACKDEFORM_MBLUR_SAMPLES_MAX 64
 
 #endif

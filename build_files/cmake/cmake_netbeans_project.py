@@ -24,23 +24,24 @@
 
 """
 Example linux usage
- python3 ~/blenderSVN/blender/build_files/cmake/cmake_netbeans_project.py ~/blenderSVN/cmake
+ python3 ~/blender-git/blender/build_files/cmake/cmake_netbeans_project.py ~/blender-git/cmake
 
 Windows not supported so far
 """
 
-from project_info import (SIMPLE_PROJECTFILE,
-                          SOURCE_DIR,
-                          CMAKE_DIR,
-                          PROJECT_DIR,
-                          source_list,
-                          is_project_file,
-                          is_c_header,
-                          # is_py,
-                          cmake_advanced_info,
-                          cmake_compiler_defines,
-                          project_name_get,
-                          )
+from project_info import (
+        SIMPLE_PROJECTFILE,
+        SOURCE_DIR,
+        CMAKE_DIR,
+        PROJECT_DIR,
+        source_list,
+        is_project_file,
+        is_c_header,
+        # is_py,
+        cmake_advanced_info,
+        cmake_compiler_defines,
+        project_name_get,
+        )
 
 
 import os
@@ -67,7 +68,7 @@ def create_nb_project_main():
         if 0:
             PROJECT_NAME = "Blender"
         else:
-            # be tricky, get the project name from SVN if we can!
+            # be tricky, get the project name from git if we can!
             PROJECT_NAME = project_name_get()
 
         # --------------- NB spesific
@@ -124,6 +125,8 @@ def create_nb_project_main():
         f.write('        </data>\n')
         f.write('    </configuration>\n')
         f.write('</project>\n')
+
+        f.close()
 
         f = open(join(PROJECT_DIR_NB, "configurations.xml"), 'w')
 
@@ -242,6 +245,8 @@ def create_nb_project_main():
         # todo
 
         f.write('</configurationDescriptor>\n')
+
+        f.close()
 
 
 def main():

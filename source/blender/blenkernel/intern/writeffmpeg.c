@@ -30,13 +30,6 @@
 #include <string.h>
 #include <stdio.h>
 
-#if defined(_WIN32) && defined(DEBUG) && !defined(__MINGW32__) && !defined(__CYGWIN__)
-/* This does not seem necessary or present on MSVC 8, but may be needed in earlier versions? */
-#  if _MSC_VER < 1400
-#    include <stdint.h>
-#  endif
-#endif
-
 #include <stdlib.h>
 
 #include <libavformat/avformat.h>
@@ -64,7 +57,6 @@
 #include "BKE_sound.h"
 #include "BKE_writeffmpeg.h"
 
-#include "IMB_imbuf_types.h"
 #include "IMB_imbuf.h"
 
 #include "ffmpeg_compat.h"
@@ -77,6 +69,7 @@ static int ffmpeg_audio_bitrate = 128;
 static int ffmpeg_gop_size = 12;
 static int ffmpeg_autosplit = 0;
 static int ffmpeg_autosplit_count = 0;
+static bool ffmpeg_preview = false;
 
 static AVFormatContext *outfile = 0;
 static AVStream *video_stream = 0;
@@ -423,6 +416,11 @@ static AVFrame *generate_video_frame(uint8_t *pixels, ReportList *reports)
 		          current_frame->data, current_frame->linesize);
 		delete_picture(rgb_frame);
 	}
+
+	current_frame->format = PIX_FMT_BGR32;
+	current_frame->width = width;
+	current_frame->height = height;
+
 	return current_frame;
 }
 
@@ -472,8 +470,8 @@ static int ffmpeg_proprty_valid(AVCodecContext *c, const char *prop_name, IDProp
 {
 	int valid = 1;
 
-	if (strcmp(prop_name, "video") == 0) {
-		if (strcmp(curr->name, "bf") == 0) {
+	if (STREQ(prop_name, "video")) {
+		if (STREQ(curr->name, "bf")) {
 			/* flash codec doesn't support b frames */
 			valid &= c->codec_id != AV_CODEC_ID_FLV1;
 		}
@@ -486,7 +484,6 @@ static void set_ffmpeg_properties(RenderData *rd, AVCodecContext *c, const char 
                                   AVDictionary **dictionary)
 {
 	IDProperty *prop;
-	void *iter;
 	IDProperty *curr;
 
 	/* TODO(sergey): This is actually rather stupid, because changing
@@ -497,7 +494,7 @@ static void set_ffmpeg_properties(RenderData *rd, AVCodecContext *c, const char 
 	 *
 	 * For as long we don't allow editing properties in the interface
 	 * it's all good. bug if we allow editing them, we'll need to
-	 * repace it with some smarter code which would port settings
+	 * replace it with some smarter code which would port settings
 	 * from deprecated to new one.
 	 */
 	ffmpeg_set_expert_options(rd);
@@ -511,9 +508,7 @@ static void set_ffmpeg_properties(RenderData *rd, AVCodecContext *c, const char 
 		return;
 	}
 
-	iter = IDP_GetGroupIterator(prop);
-
-	while ((curr = IDP_GroupIterNext(iter)) != NULL) {
+	for (curr = prop->data.group.first; curr; curr = curr->next) {
 		if (ffmpeg_proprty_valid(c, prop_name, curr))
 			set_ffmpeg_property_option(c, curr, dictionary);
 	}
@@ -604,8 +599,12 @@ static AVStream *alloc_video_stream(RenderData *rd, int codec_id, AVFormatContex
 	
 	/* Keep lossless encodes in the RGB domain. */
 	if (codec_id == AV_CODEC_ID_HUFFYUV) {
-		/* HUFFYUV was PIX_FMT_YUV422P before */
-		c->pix_fmt = PIX_FMT_RGB32;
+		if (rd->im_format.planes == R_IMF_PLANES_RGBA) {
+			c->pix_fmt = PIX_FMT_BGRA;
+		}
+		else {
+			c->pix_fmt = PIX_FMT_RGB32;
+		}
 	}
 
 	if (codec_id == AV_CODEC_ID_FFV1) {
@@ -626,9 +625,9 @@ static AVStream *alloc_video_stream(RenderData *rd, int codec_id, AVFormatContex
 
 	if ((of->oformat->flags & AVFMT_GLOBALHEADER)
 #if 0
-	    || !strcmp(of->oformat->name, "mp4")
-	    || !strcmp(of->oformat->name, "mov")
-	    || !strcmp(of->oformat->name, "3gp")
+	    || STREQ(of->oformat->name, "mp4")
+	    || STREQ(of->oformat->name, "mov")
+	    || STREQ(of->oformat->name, "3gp")
 #endif
 	    )
 	{
@@ -698,12 +697,12 @@ static AVStream *alloc_audio_stream(RenderData *rd, int codec_id, AVFormatContex
 	}
 
 	if (codec->sample_fmts) {
-		/* check if the prefered sample format for this codec is supported.
+		/* check if the preferred sample format for this codec is supported.
 		 * this is because, depending on the version of libav, and with the whole ffmpeg/libav fork situation,
 		 * you have various implementations around. float samples in particular are not always supported.
 		 */
 		const enum AVSampleFormat *p = codec->sample_fmts;
-		for (; *p!=-1; p++) {
+		for (; *p != -1; p++) {
 			if (*p == st->codec->sample_fmt)
 				break;
 		}
@@ -818,7 +817,7 @@ static int start_ffmpeg_impl(struct RenderData *rd, int rectx, int recty, Report
 	ffmpeg_autosplit = rd->ffcodecdata.flags & FFMPEG_AUTOSPLIT_OUTPUT;
 	
 	/* Determine the correct filename */
-	BKE_ffmpeg_filepath_get(name, rd);
+	BKE_ffmpeg_filepath_get(name, rd, ffmpeg_preview);
 	PRINT("Starting output to %s(ffmpeg)...\n"
 	        "  Using type=%d, codec=%d, audio_codec=%d,\n"
 	        "  video_bitrate=%d, audio_bitrate=%d,\n"
@@ -1030,14 +1029,24 @@ static void flush_ffmpeg(void)
  * ********************************************************************** */
 
 /* Get the output filename-- similar to the other output formats */
-void BKE_ffmpeg_filepath_get(char *string, RenderData *rd)
+void BKE_ffmpeg_filepath_get(char *string, RenderData *rd, bool preview)
 {
 	char autosplit[20];
 
 	const char **exts = get_file_extensions(rd->ffcodecdata.type);
 	const char **fe = exts;
+	int sfra, efra;
 
 	if (!string || !exts) return;
+
+	if (preview) {
+		sfra = rd->psfra;
+		efra = rd->pefra;
+	}
+	else {
+		sfra = rd->sfra;
+		efra = rd->efra;
+	}
 
 	strcpy(string, rd->pic);
 	BLI_path_abs(string, G.main->name);
@@ -1061,7 +1070,7 @@ void BKE_ffmpeg_filepath_get(char *string, RenderData *rd)
 		if (*fe == NULL) {
 			strcat(string, autosplit);
 
-			BLI_path_frame_range(string, rd->sfra, rd->efra, 4);
+			BLI_path_frame_range(string, sfra, efra, 4);
 			strcat(string, *exts);
 		}
 		else {
@@ -1072,18 +1081,19 @@ void BKE_ffmpeg_filepath_get(char *string, RenderData *rd)
 	}
 	else {
 		if (BLI_path_frame_check_chars(string)) {
-			BLI_path_frame_range(string, rd->sfra, rd->efra, 4);
+			BLI_path_frame_range(string, sfra, efra, 4);
 		}
 
 		strcat(string, autosplit);
 	}
 }
 
-int BKE_ffmpeg_start(struct Scene *scene, RenderData *rd, int rectx, int recty, ReportList *reports)
+int BKE_ffmpeg_start(struct Scene *scene, RenderData *rd, int rectx, int recty, ReportList *reports, bool preview)
 {
 	int success;
 
 	ffmpeg_autosplit_count = 0;
+	ffmpeg_preview = preview;
 
 	success = start_ffmpeg_impl(rd, rectx, recty, reports);
 #ifdef WITH_AUDASPACE
@@ -1113,7 +1123,7 @@ int BKE_ffmpeg_start(struct Scene *scene, RenderData *rd, int rectx, int recty, 
 		}
 
 		specs.rate = rd->ffcodecdata.audio_mixrate;
-		audio_mixdown_device = sound_mixdown(scene, specs, rd->sfra, rd->ffcodecdata.audio_volume);
+		audio_mixdown_device = BKE_sound_mixdown(scene, specs, preview ? rd->psfra : rd->sfra, rd->ffcodecdata.audio_volume);
 #ifdef FFMPEG_CODEC_TIME_BASE
 		c->time_base.den = specs.rate;
 		c->time_base.num = 1;
@@ -1164,7 +1174,7 @@ int BKE_ffmpeg_append(RenderData *rd, int start_frame, int frame, int *pixels, i
 	}
 
 #ifdef WITH_AUDASPACE
-	write_audio_frames((frame - rd->sfra) / (((double)rd->frs_sec) / (double)rd->frs_sec_base));
+	write_audio_frames((frame - start_frame) / (((double)rd->frs_sec) / (double)rd->frs_sec_base));
 #endif
 	return success;
 }
@@ -1632,6 +1642,12 @@ bool BKE_ffmpeg_alpha_channel_is_supported(RenderData *rd)
 		return true;
 
 	if (codec == AV_CODEC_ID_PNG)
+		return true;
+
+	if (codec == AV_CODEC_ID_PNG)
+		return true;
+
+	if (codec == AV_CODEC_ID_HUFFYUV)
 		return true;
 
 #ifdef FFMPEG_FFV1_ALPHA_SUPPORTED

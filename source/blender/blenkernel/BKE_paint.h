@@ -37,15 +37,18 @@ struct BMesh;
 struct BMFace;
 struct Brush;
 struct CurveMapping;
-struct MDisps;
 struct MeshElemMap;
 struct GridPaintMask;
+struct Main;
 struct MFace;
-struct MultireModifierData;
 struct MVert;
 struct Object;
 struct Paint;
+struct PaintCurve;
+struct Palette;
+struct PaletteColor;
 struct PBVH;
+struct ReportList;
 struct Scene;
 struct Sculpt;
 struct StrokeCache;
@@ -91,15 +94,35 @@ OverlayControlFlags BKE_paint_get_overlay_flags(void);
 void BKE_paint_reset_overlay_invalid(OverlayControlFlags flag);
 void BKE_paint_set_overlay_override(enum OverlayFlags flag);
 
-void BKE_paint_init(struct Paint *p, const char col[3]);
+/* palettes */
+void                 BKE_palette_free(struct Palette *palette);
+struct Palette      *BKE_palette_add(struct Main *bmain, const char *name);
+struct PaletteColor *BKE_palette_color_add(struct Palette *palette);
+bool                 BKE_palette_is_empty(const struct Palette *palette);
+void                 BKE_palette_color_remove(struct Palette *palette, struct PaletteColor *color);
+void                 BKE_palette_clear(struct Palette *palette);
+
+/* paint curves */
+struct PaintCurve *BKE_paint_curve_add(struct Main *bmain, const char *name);
+void BKE_paint_curve_free(struct PaintCurve *pc);
+
+void BKE_paint_init(struct UnifiedPaintSettings *ups, struct Paint *p, const char col[3]);
 void BKE_paint_free(struct Paint *p);
 void BKE_paint_copy(struct Paint *src, struct Paint *tar);
+
+void BKE_paint_cavity_curve_preset(struct Paint *p, int preset);
 
 struct Paint *BKE_paint_get_active(struct Scene *sce);
 struct Paint *BKE_paint_get_active_from_context(const struct bContext *C);
 PaintMode BKE_paintmode_get_active_from_context(const struct bContext *C);
 struct Brush *BKE_paint_brush(struct Paint *paint);
 void BKE_paint_brush_set(struct Paint *paint, struct Brush *br);
+struct Palette *BKE_paint_palette(struct Paint *paint);
+void BKE_paint_palette_set(struct Paint *p, struct Palette *palette);
+void BKE_paint_curve_set(struct Brush *br, struct PaintCurve *pc);
+
+void BKE_paint_data_warning(struct ReportList *reports, bool uvs, bool mat, bool tex, bool stencil);
+bool BKE_paint_proj_mesh_data_check(struct Scene *scene, struct Object *ob, bool *uvs, bool *mat, bool *tex, bool *stencil);
 
 /* testing face select mode
  * Texture paint could be removed since selected faces are not used
@@ -117,7 +140,12 @@ bool paint_is_bmesh_face_hidden(struct BMFace *f);
 /* paint masks */
 float paint_grid_paint_mask(const struct GridPaintMask *gpm, unsigned level,
                             unsigned x, unsigned y);
-void paint_calculate_rake_rotation(struct UnifiedPaintSettings *ups, const float mouse_pos[2]);
+
+/* stroke related */
+void paint_calculate_rake_rotation(struct UnifiedPaintSettings *ups, struct Brush *brush, const float mouse_pos[2]);
+
+void BKE_paint_stroke_get_average(struct Scene *scene, struct Object *ob, float stroke[3]);
+
 /* Session data (mode-specific) */
 
 typedef struct SculptSession {
@@ -146,7 +174,7 @@ typedef struct SculptSession {
 	struct PBVH *pbvh;
 	bool show_diffuse_color;
 
-	/* Paiting on deformed mesh */
+	/* Painting on deformed mesh */
 	bool modifiers_active; /* object is deformed with some modifiers */
 	float (*orig_cos)[3]; /* coords of undeformed mesh */
 	float (*deform_cos)[3]; /* coords of deformed mesh but without stroke displacement */
@@ -164,13 +192,6 @@ typedef struct SculptSession {
 
 	struct SculptStroke *stroke;
 	struct StrokeCache *cache;
-
-	/* last paint/sculpt stroke location */
-	bool last_stroke_valid;
-	float last_stroke[3];
-
-	float average_stroke_accum[3];
-	int average_stroke_counter;
 } SculptSession;
 
 void BKE_free_sculptsession(struct Object *ob);

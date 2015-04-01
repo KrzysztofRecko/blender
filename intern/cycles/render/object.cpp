@@ -11,7 +11,7 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License
+ * limitations under the License.
  */
 
 #include "device.h"
@@ -75,8 +75,14 @@ void Object::compute_bounds(bool motion_blur)
 			bounds.grow(mbounds.transformed(&ttfm));
 		}
 	}
-	else
-		bounds = mbounds.transformed(&tfm);
+	else {
+		if(mesh->transform_applied) {
+			bounds = mbounds;
+		}
+		else {
+			bounds = mbounds.transformed(&tfm);
+		}
+	}
 }
 
 void Object::apply_transform(bool apply_to_motion)
@@ -98,11 +104,11 @@ void Object::apply_transform(bool apply_to_motion)
 		if(apply_to_motion) {
 			Attribute *attr = mesh->attributes.find(ATTR_STD_MOTION_VERTEX_POSITION);
 
-			if (attr) {
+			if(attr) {
 				size_t steps_size = mesh->verts.size() * (mesh->motion_steps - 1);
 				float3 *vert_steps = attr->data_float3();
 
-				for (size_t i = 0; i < steps_size; i++)
+				for(size_t i = 0; i < steps_size; i++)
 					vert_steps[i] = transform_point(&tfm, vert_steps[i]);
 			}
 
@@ -113,7 +119,7 @@ void Object::apply_transform(bool apply_to_motion)
 				size_t steps_size = mesh->verts.size() * (mesh->motion_steps - 1);
 				float3 *normal_steps = attr_N->data_float3();
 
-				for (size_t i = 0; i < steps_size; i++)
+				for(size_t i = 0; i < steps_size; i++)
 					normal_steps[i] = normalize(transform_direction(&ntfm, normal_steps[i]));
 			}
 		}
@@ -140,12 +146,12 @@ void Object::apply_transform(bool apply_to_motion)
 		if(apply_to_motion) {
 			Attribute *curve_attr = mesh->curve_attributes.find(ATTR_STD_MOTION_VERTEX_POSITION);
 
-			if (curve_attr) {
+			if(curve_attr) {
 				/* apply transform to motion curve keys */
 				size_t steps_size = mesh->curve_keys.size() * (mesh->motion_steps - 1);
 				float4 *key_steps = curve_attr->data_float4();
 
-				for (size_t i = 0; i < steps_size; i++) {
+				for(size_t i = 0; i < steps_size; i++) {
 					float3 co = transform_point(&tfm, float4_to_float3(key_steps[i]));
 					float radius = key_steps[i].w * scalar;
 
@@ -215,6 +221,7 @@ vector<float> Object::motion_times()
 ObjectManager::ObjectManager()
 {
 	need_update = true;
+	need_flags_update = true;
 }
 
 ObjectManager::~ObjectManager()
@@ -312,6 +319,9 @@ void ObjectManager::device_update_transforms(Device *device, DeviceScene *dscene
 				mtfm_pre = mtfm_pre * itfm;
 				mtfm_post = mtfm_post * itfm;
 			}
+			else {
+				flag |= SD_OBJECT_HAS_VERTEX_MOTION;
+			}
 
 			memcpy(&objects_vector[i*OBJECT_VECTOR_SIZE+0], &mtfm_pre, sizeof(float4)*3);
 			memcpy(&objects_vector[i*OBJECT_VECTOR_SIZE+3], &mtfm_post, sizeof(float4)*3);
@@ -372,8 +382,6 @@ void ObjectManager::device_update(Device *device, DeviceScene *dscene, Scene *sc
 	
 	device_free(device, dscene);
 
-	need_update = false;
-
 	if(scene->objects.size() == 0)
 		return;
 
@@ -391,6 +399,52 @@ void ObjectManager::device_update(Device *device, DeviceScene *dscene, Scene *sc
 	if(scene->params.bvh_type == SceneParams::BVH_STATIC) {
 		progress.set_status("Updating Objects", "Applying Static Transformations");
 		apply_static_transforms(dscene, scene, object_flag, progress);
+	}
+}
+
+void ObjectManager::device_update_flags(Device *device,
+                                        DeviceScene *dscene,
+                                        Scene *scene,
+                                        Progress& /*progress*/)
+{
+	if(!need_update && !need_flags_update)
+		return;
+
+	need_update = false;
+	need_flags_update = false;
+
+	if(scene->objects.size() == 0)
+		return;
+
+	/* object info flag */
+	uint *object_flag = dscene->object_flag.get_data();
+
+	vector<Object *> volume_objects;
+	foreach(Object *object, scene->objects) {
+		if(object->mesh->has_volume) {
+			volume_objects.push_back(object);
+		}
+	}
+
+	int object_index = 0;
+	foreach(Object *object, scene->objects) {
+		if(object->mesh->has_volume) {
+			object_flag[object_index] |= SD_OBJECT_HAS_VOLUME;
+		}
+		else {
+			object_flag[object_index] &= ~SD_OBJECT_HAS_VOLUME;
+		}
+
+		foreach(Object *volume_object, volume_objects) {
+			if(object == volume_object) {
+				continue;
+			}
+			if(object->bounds.intersects(volume_object->bounds)) {
+				object_flag[object_index] |= SD_OBJECT_INTERSECTS_VOLUME;
+				break;
+			}
+		}
+		++object_index;
 	}
 
 	/* allocate object flag */
@@ -449,6 +503,8 @@ void ObjectManager::apply_static_transforms(DeviceScene *dscene, Scene *scene, u
 				}
 
 				object_flag[i] |= SD_TRANSFORM_APPLIED;
+				if(object->mesh->transform_negative_scaled)
+					object_flag[i] |= SD_NEGATIVE_SCALE_APPLIED;
 			}
 			else
 				have_instancing = true;

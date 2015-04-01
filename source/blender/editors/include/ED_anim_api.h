@@ -49,7 +49,6 @@ struct Object;
 struct bDopeSheet;
 
 struct bAction;
-struct bActionGroup;
 struct FCurve;
 struct FModifier;
 
@@ -115,13 +114,17 @@ typedef struct bAnimListElem {
 	int     flag;           /* copy of elem's flags for quick access */
 	int     index;          /* for un-named data, the index of the data in its collection */
 	
-	short   update;         /* (eAnim_Update_Flags)  tag the element for updating */
+	char    update;         /* (eAnim_Update_Flags)  tag the element for updating */
+	char    tag;            /* tag the included data. Temporary always */
+
 	short   datatype;       /* (eAnim_KeyType) type of motion data to expect */
 	void   *key_data;       /* motion data - mostly F-Curves, but can be other types too */
 	
 	
 	struct ID *id;          /* ID block that channel is attached to */
 	struct AnimData *adt;   /* source of the animation data attached to ID block (for convenience) */
+	
+	void   *owner;          /* for per-element F-Curves (e.g. NLA Control Curves), the element that this represents (e.g. NlaStrip) */
 } bAnimListElem;
 
 
@@ -141,6 +144,9 @@ typedef enum eAnim_ChannelType {
 	ANIMTYPE_GROUP,
 	ANIMTYPE_FCURVE,
 	
+	ANIMTYPE_NLACONTROLS,
+	ANIMTYPE_NLACURVE,
+	
 	ANIMTYPE_FILLACTD,
 	ANIMTYPE_FILLDRIVERS,
 	
@@ -159,6 +165,7 @@ typedef enum eAnim_ChannelType {
 	ANIMTYPE_DSLAT,
 	ANIMTYPE_DSLINESTYLE,
 	ANIMTYPE_DSSPK,
+	ANIMTYPE_DSGPENCIL,
 	
 	ANIMTYPE_SHAPEKEY,
 	
@@ -449,7 +456,7 @@ typedef struct bAnimChannelType {
 /* ------------------------ Drawing API -------------------------- */
 
 /* Get typeinfo for the given channel */
-bAnimChannelType *ANIM_channel_get_typeinfo(bAnimListElem *ale);
+const bAnimChannelType *ANIM_channel_get_typeinfo(bAnimListElem *ale);
 
 /* Print debugging info about a given channel */
 void ANIM_channel_debug_print_info(bAnimListElem *ale, short indent_level);
@@ -457,7 +464,7 @@ void ANIM_channel_debug_print_info(bAnimListElem *ale, short indent_level);
 /* Draw the given channel */
 void ANIM_channel_draw(bAnimContext *ac, bAnimListElem *ale, float yminc, float ymaxc);
 /* Draw the widgets for the given channel */
-void ANIM_channel_draw_widgets(struct bContext *C, bAnimContext *ac, bAnimListElem *ale, struct uiBlock *block, float yminc, float ymaxc, size_t channel_index);
+void ANIM_channel_draw_widgets(const struct bContext *C, bAnimContext *ac, bAnimListElem *ale, struct uiBlock *block, float yminc, float ymaxc, size_t channel_index);
 
 
 /* ------------------------ Editing API -------------------------- */
@@ -467,13 +474,13 @@ void ANIM_channel_draw_widgets(struct bContext *C, bAnimContext *ac, bAnimListEl
  *
  *  - setting: eAnimChannel_Settings
  */
-short ANIM_channel_setting_get(bAnimContext *ac, bAnimListElem *ale, int setting);
+short ANIM_channel_setting_get(bAnimContext *ac, bAnimListElem *ale, eAnimChannel_Settings setting);
 
 /* Change value of some setting for a channel 
  *	- setting: eAnimChannel_Settings
  *	- mode: eAnimChannels_SetFlag
  */
-void ANIM_channel_setting_set(bAnimContext *ac, bAnimListElem *ale, int setting, short mode);
+void ANIM_channel_setting_set(bAnimContext *ac, bAnimListElem *ale, eAnimChannel_Settings setting, eAnimChannels_SetFlag mode);
 
 
 /* Flush visibility (for Graph Editor) changes up/down hierarchy for changes in the given setting 
@@ -485,14 +492,14 @@ void ANIM_channel_setting_set(bAnimContext *ac, bAnimListElem *ale, int setting,
  *	- setting: type of setting to set
  *	- on: whether the visibility setting has been enabled or disabled 
  */
-void ANIM_flush_setting_anim_channels(bAnimContext *ac, ListBase *anim_data, bAnimListElem *ale_setting, int setting, short mode);
+void ANIM_flush_setting_anim_channels(bAnimContext *ac, ListBase *anim_data, bAnimListElem *ale_setting, eAnimChannel_Settings setting, eAnimChannels_SetFlag mode);
 
 
 /* Deselect all animation channels */
-void ANIM_deselect_anim_channels(bAnimContext *ac, void *data, short datatype, short test, short sel);
+void ANIM_deselect_anim_channels(bAnimContext *ac, void *data, eAnimCont_Types datatype, bool test, eAnimChannels_SetFlag sel);
 
 /* Set the 'active' channel of type channel_type, in the given action */
-void ANIM_set_active_channel(bAnimContext *ac, void *data, short datatype, int filter, void *channel_data, short channel_type);
+void ANIM_set_active_channel(bAnimContext *ac, void *data, eAnimCont_Types datatype, eAnimFilter_Flags filter, void *channel_data, eAnim_ChannelType channel_type);
 
 
 /* Delete the F-Curve from the given AnimData block (if possible), as appropriate according to animation context */

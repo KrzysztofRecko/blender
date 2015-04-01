@@ -45,8 +45,6 @@
 #include "BLI_blenlib.h"
 #include "BLI_threads.h"
 #include "BLI_utildefines.h"
-#include "BLI_math.h"
-#include "BLI_math_geom.h"
 
 #include "BKE_blender.h"
 #include "BKE_screen.h"
@@ -71,7 +69,6 @@
 
 #include "IMB_imbuf_types.h"
 #include "IMB_imbuf.h"
-#include "IMB_colormanagement.h"
 
 #include "GPU_draw.h" /* GPU_free_image */
 
@@ -438,7 +435,7 @@ static void multiresbake_startjob(void *bkv, short *stop, short *do_update, floa
 	MultiresBakeJob *bkj = bkv;
 	int baked_objects = 0, tot_obj;
 
-	tot_obj = BLI_countlist(&bkj->data);
+	tot_obj = BLI_listbase_count(&bkj->data);
 
 	if (bkj->bake_clear) {  /* clear images */
 		for (data = bkj->data.first; data; data = data->next) {
@@ -682,6 +679,7 @@ static void finish_bake_internal(BakeRender *bkr)
 			}
 
 			BKE_image_release_ibuf(ima, ibuf, NULL);
+			DAG_id_tag_update(&ima->id, 0);			
 		}
 	}
 
@@ -770,7 +768,7 @@ static int objects_bake_render_modal(bContext *C, wmOperator *UNUSED(op), const 
 
 static bool is_multires_bake(Scene *scene)
 {
-	if (ELEM4(scene->r.bake_mode, RE_BAKE_NORMALS, RE_BAKE_DISPLACEMENT, RE_BAKE_DERIVATIVE, RE_BAKE_AO))
+	if (ELEM(scene->r.bake_mode, RE_BAKE_NORMALS, RE_BAKE_DISPLACEMENT, RE_BAKE_DERIVATIVE, RE_BAKE_AO))
 		return scene->r.bake_flag & R_BAKE_MULTIRES;
 
 	return 0;

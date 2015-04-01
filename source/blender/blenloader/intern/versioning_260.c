@@ -25,8 +25,6 @@
  *  \ingroup blenloader
  */
 
-#include "zlib.h"
-
 #include "BLI_utildefines.h"
 
 /* allow readfile to use deprecated functionality */
@@ -829,7 +827,7 @@ void blo_do_versions_260(FileData *fd, Library *UNUSED(lib), Main *main)
 				for (i = 0; i < 3; i++) {
 					if ( (ob->dsize[i] == 0.0f) || /* simple case, user never touched dsize */
 					     (ob->size[i]  == 0.0f))   /* cant scale the dsize to give a non zero result,
-					                                  so fallback to 1.0f */
+					                                * so fallback to 1.0f */
 					{
 						ob->dscale[i] = 1.0f;
 					}
@@ -1885,7 +1883,7 @@ void blo_do_versions_260(FileData *fd, Library *UNUSED(lib), Main *main)
 			SEQ_END
 
 			if (scene->r.bake_samples == 0)
-			scene->r.bake_samples = 256;
+				scene->r.bake_samples = 256;
 
 			if (scene->world) {
 				World *world = blo_do_versions_newlibadr(fd, scene->id.lib, scene->world);
@@ -2098,7 +2096,7 @@ void blo_do_versions_260(FileData *fd, Library *UNUSED(lib), Main *main)
 	if (!MAIN_VERSION_ATLEAST(main, 266, 4)) {
 		Brush *brush;
 		for (brush = main->brush.first; brush; brush = brush->id.next) {
-			default_mtex(&brush->mask_mtex);
+			BKE_texture_mtex_default(&brush->mask_mtex);
 
 			if (brush->ob_mode & OB_MODE_TEXTURE_PAINT) {
 				brush->spacing /= 2;
@@ -2454,9 +2452,9 @@ void blo_do_versions_260(FileData *fd, Library *UNUSED(lib), Main *main)
 					if (sl->spacetype == SPACE_OUTLINER) {
 						SpaceOops *so = (SpaceOops *)sl;
 
-						if (!ELEM11(so->outlinevis, SO_ALL_SCENES, SO_CUR_SCENE, SO_VISIBLE, SO_SELECTED, SO_ACTIVE,
-						                            SO_SAME_TYPE, SO_GROUPS, SO_LIBRARIES, SO_SEQUENCE, SO_DATABLOCKS,
-						                            SO_USERDEF))
+						if (!ELEM(so->outlinevis, SO_ALL_SCENES, SO_CUR_SCENE, SO_VISIBLE, SO_SELECTED, SO_ACTIVE,
+						                          SO_SAME_TYPE, SO_GROUPS, SO_LIBRARIES, SO_SEQUENCE, SO_DATABLOCKS,
+						                          SO_USERDEF))
 						{
 							so->outlinevis = SO_ALL_SCENES;
 						}

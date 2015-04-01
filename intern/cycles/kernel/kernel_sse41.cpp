@@ -11,7 +11,7 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License
+ * limitations under the License.
  */
 
 /* Optimized CPU kernel entry points. This file is compiled with SSE3/SSSE3
@@ -30,8 +30,8 @@
 
 #ifdef WITH_CYCLES_OPTIMIZED_KERNEL_SSE41
 
-#include "kernel.h"
 #include "kernel_compat_cpu.h"
+#include "kernel.h"
 #include "kernel_math.h"
 #include "kernel_types.h"
 #include "kernel_globals.h"
@@ -67,12 +67,12 @@ void kernel_cpu_sse41_convert_to_half_float(KernelGlobals *kg, uchar4 *rgba, flo
 
 /* Shader Evaluate */
 
-void kernel_cpu_sse41_shader(KernelGlobals *kg, uint4 *input, float4 *output, int type, int i)
+void kernel_cpu_sse41_shader(KernelGlobals *kg, uint4 *input, float4 *output, int type, int i, int offset, int sample)
 {
 	if(type >= SHADER_EVAL_BAKE)
-		kernel_bake_evaluate(kg, input, output, (ShaderEvalType)type, i);
+		kernel_bake_evaluate(kg, input, output, (ShaderEvalType)type, i, offset, sample);
 	else
-		kernel_shader_evaluate(kg, input, output, (ShaderEvalType)type, i);
+		kernel_shader_evaluate(kg, input, output, (ShaderEvalType)type, i, sample);
 }
 
 CCL_NAMESPACE_END

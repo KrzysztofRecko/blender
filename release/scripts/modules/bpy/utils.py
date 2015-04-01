@@ -44,20 +44,22 @@ __all__ = (
     "script_paths",
     "smpte_from_frame",
     "smpte_from_seconds",
+    "units",
     "unregister_class",
     "unregister_module",
     "user_resource",
     )
 
 from _bpy import (
-    escape_identifier,
-    register_class,
-    unregister_class,
-    blend_paths,
-    resource_path,
-    )
+        escape_identifier,
+        register_class,
+        unregister_class,
+        blend_paths,
+        resource_path,
+        )
 from _bpy import script_paths as _bpy_script_paths
 from _bpy import user_resource as _user_resource
+from _bpy import _utils_units as units
 
 import bpy as _bpy
 import os as _os
@@ -183,7 +185,7 @@ def load_scripts(reload_scripts=False, refresh_scripts=False):
                 traceback.print_exc()
 
     def test_reload(mod):
-        import imp
+        import importlib
         # reloading this causes internal errors
         # because the classes from this module are stored internally
         # possibly to refresh internal references too but for now, best not to.
@@ -191,7 +193,7 @@ def load_scripts(reload_scripts=False, refresh_scripts=False):
             return mod
 
         try:
-            return imp.reload(mod)
+            return importlib.reload(mod)
         except:
             import traceback
             traceback.print_exc()
@@ -242,7 +244,14 @@ def load_scripts(reload_scripts=False, refresh_scripts=False):
                         test_register(mod)
 
     # deal with addons separately
-    _addon_utils.reset_all(reload_scripts)
+    _initialize = getattr(_addon_utils, "_initialize", None)
+    if _initialize is not None:
+        # first time, use fast-path
+        _initialize()
+        del _addon_utils._initialize
+    else:
+        _addon_utils.reset_all(reload_scripts)
+    del _initialize
 
     # run the active integration preset
     filepath = preset_find(_user_preferences.inputs.active_keyconfig,
@@ -427,7 +436,7 @@ def time_from_frame(frame, fps=None, fps_base=None):
     :arg frame: number.
     :type frame: the frame number
     :return: the time in seconds.
-    :rtype: timedate.timedelta
+    :rtype: datetime.timedelta
     """
 
     if fps is None:
@@ -438,18 +447,18 @@ def time_from_frame(frame, fps=None, fps_base=None):
 
     from datetime import timedelta
 
-    return timedelta((frame * fps_base) / fps)
+    return timedelta(0, (frame * fps_base) / fps)
 
 
 def time_to_frame(time, fps=None, fps_base=None):
     """
     Returns a float frame number from a time given in seconds or
-    as a timedate.timedelta object.
+    as a datetime.timedelta object.
 
     If *fps* and *fps_base* are not given the current scene is used.
 
     :arg time: time in seconds.
-    :type time: number or a timedate.timedelta object
+    :type time: number or a datetime.timedelta object
     :return: the frame.
     :rtype: float
     """

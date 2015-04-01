@@ -28,14 +28,10 @@
  *  \ingroup spnla
  */
 
-
 #include <string.h>
 #include <stdio.h>
 
 #include "DNA_scene_types.h"
-
-
-#include "BLI_blenlib.h"
 
 #include "BKE_context.h"
 #include "BKE_screen.h"
@@ -322,6 +318,9 @@ void nla_keymap(wmKeyConfig *keyconf)
 	 */
 	WM_keymap_add_item(keymap, "NLA_OT_tweakmode_enter", TABKEY, KM_PRESS, 0, 0);
 	WM_keymap_add_item(keymap, "NLA_OT_tweakmode_exit", TABKEY, KM_PRESS, 0, 0);
+	
+	/* find (i.e. a shortcut for setting the name filter) */
+	WM_keymap_add_item(keymap, "ANIM_OT_channels_find", FKEY, KM_PRESS, KM_CTRL, 0);
 	
 	/* channels ---------------------------------------------------------- */
 	/* Channels are not directly handled by the NLA Editor module, but are inherited from the Animation module. 

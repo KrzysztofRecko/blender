@@ -69,11 +69,11 @@ static const char trailingBytesForUTF8[256] = {
 
 int BLI_utf8_invalid_byte(const char *str, int length)
 {
-	const unsigned char *p, *pend = (unsigned char *)str + length;
+	const unsigned char *p, *pend = (const unsigned char *)str + length;
 	unsigned char c;
 	int ab;
 
-	for (p = (unsigned char *)str; p < pend; p++) {
+	for (p = (const unsigned char *)str; p < pend; p++) {
 		c = *p;
 		if (c < 128)
 			continue;
@@ -130,7 +130,7 @@ int BLI_utf8_invalid_byte(const char *str, int length)
 
 utf8_error:
 
-	return (int)((char *)p - (char *)str) - 1;
+	return (int)((const char *)p - (const char *)str) - 1;
 }
 
 int BLI_utf8_invalid_strip(char *str, int length)
@@ -209,6 +209,22 @@ char *BLI_strncpy_utf8(char *__restrict dst, const char *__restrict src, size_t 
 	return r_dst;
 }
 
+size_t BLI_strncpy_utf8_rlen(char *__restrict dst, const char *__restrict src, size_t maxncpy)
+{
+	char *r_dst = dst;
+
+	BLI_assert(maxncpy != 0);
+
+#ifdef DEBUG_STRSIZE
+	memset(dst, 0xff, sizeof(*dst) * maxncpy);
+#endif
+
+	/* note: currently we don't attempt to deal with invalid utf8 chars */
+	BLI_STR_UTF8_CPY(dst, src, maxncpy);
+
+	return (size_t)(dst - r_dst);
+}
+
 char *BLI_strncat_utf8(char *__restrict dst, const char *__restrict src, size_t maxncpy)
 {
 	while (*dst && maxncpy > 0) {
@@ -233,6 +249,7 @@ char *BLI_strncat_utf8(char *__restrict dst, const char *__restrict src, size_t 
 size_t BLI_strncpy_wchar_as_utf8(char *__restrict dst, const wchar_t *__restrict src, const size_t maxncpy)
 {
 	const size_t maxlen = maxncpy - 1;
+	const int64_t maxlen_secured = (int64_t)maxlen - 6;  /* 6 is max utf8 length of an unicode char. */
 	size_t len = 0;
 
 	BLI_assert(maxncpy != 0);
@@ -241,8 +258,21 @@ size_t BLI_strncpy_wchar_as_utf8(char *__restrict dst, const wchar_t *__restrict
 	memset(dst, 0xff, sizeof(*dst) * maxncpy);
 #endif
 
-	while (*src && len < maxlen) { /* XXX can still run over the buffer because utf8 size isn't known :| */
+	while (*src && len <= maxlen_secured) {
 		len += BLI_str_utf8_from_unicode((unsigned int)*src++, dst + len);
+	}
+
+	/* We have to be more careful for the last six bytes, to avoid buffer overflow in case utf8-encoded char
+	 * would be too long for our dst buffer. */
+	while (*src) {
+		char t[6];
+		size_t l = BLI_str_utf8_from_unicode((unsigned int)*src++, t);
+		BLI_assert(l <= 6);
+		if (len + l > maxlen) {
+			break;
+		}
+		memcpy(dst + len, t, l);
+		len += l;
 	}
 
 	dst[len] = '\0';
@@ -703,3 +733,49 @@ char *BLI_str_prev_char_utf8(const char *p)
 	}
 }
 /* end glib copy */
+
+size_t BLI_str_partition_utf8(const char *str, const unsigned int delim[], char **sep, char **suf)
+{
+	return BLI_str_partition_ex_utf8(str, delim, sep, suf, false);
+}
+
+size_t BLI_str_rpartition_utf8(const char *str, const unsigned int delim[], char **sep, char **suf)
+{
+	return BLI_str_partition_ex_utf8(str, delim, sep, suf, true);
+}
+
+size_t BLI_str_partition_ex_utf8(const char *str, const unsigned int delim[], char **sep, char **suf,
+                                 const bool from_right)
+{
+	const unsigned int *d;
+	const size_t str_len = strlen(str);
+	size_t index;
+
+	*suf = (char *)(str + str_len);
+
+	for (*sep = (char *)(from_right ? BLI_str_find_prev_char_utf8(str, str + str_len) : str), index = 0;
+	     *sep != NULL && **sep != '\0';
+	     *sep = (char *)(from_right ? (char *)BLI_str_find_prev_char_utf8(str, *sep) : str + index))
+	{
+		const unsigned int c = BLI_str_utf8_as_unicode_and_size(*sep, &index);
+
+		if (c == BLI_UTF8_ERR) {
+			*suf = *sep = NULL;
+			break;
+		}
+
+		for (d = delim; *d != '\0'; ++d) {
+			if (*d == c) {
+				/* *suf is already correct in case from_right is true. */
+				if (!from_right)
+					*suf = (char *)(str + index);
+				return (size_t)(*sep - str);
+			}
+		}
+
+		*suf = *sep;  /* Useful in 'from_right' case! */
+	}
+
+	*suf = *sep = NULL;
+	return str_len;
+}

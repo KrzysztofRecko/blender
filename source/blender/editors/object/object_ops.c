@@ -40,7 +40,6 @@
 #include "BKE_context.h"
 
 #include "RNA_access.h"
-#include "RNA_define.h"
 
 #include "WM_api.h"
 #include "WM_types.h"
@@ -145,6 +144,7 @@ void ED_operatortypes_object(void)
 	WM_operatortype_append(OBJECT_OT_skin_radii_equalize);
 	WM_operatortype_append(OBJECT_OT_skin_armature_create);
 
+	WM_operatortype_append(OBJECT_OT_correctivesmooth_bind);
 	WM_operatortype_append(OBJECT_OT_meshdeform_bind);
 	WM_operatortype_append(OBJECT_OT_explode_refresh);
 	WM_operatortype_append(OBJECT_OT_ocean_bake);
@@ -178,7 +178,6 @@ void ED_operatortypes_object(void)
 	WM_operatortype_append(OBJECT_OT_vertex_group_select);
 	WM_operatortype_append(OBJECT_OT_vertex_group_deselect);
 	WM_operatortype_append(OBJECT_OT_vertex_group_copy_to_linked);
-	WM_operatortype_append(OBJECT_OT_vertex_group_transfer_weight);
 	WM_operatortype_append(OBJECT_OT_vertex_group_copy_to_selected);
 	WM_operatortype_append(OBJECT_OT_vertex_group_copy);
 	WM_operatortype_append(OBJECT_OT_vertex_group_normalize);
@@ -229,6 +228,8 @@ void ED_operatortypes_object(void)
 	WM_operatortype_append(OBJECT_OT_group_add);
 	WM_operatortype_append(OBJECT_OT_group_link);
 	WM_operatortype_append(OBJECT_OT_group_remove);
+	WM_operatortype_append(OBJECT_OT_group_unlink);
+	WM_operatortype_append(OBJECT_OT_grouped_select);
 
 	WM_operatortype_append(OBJECT_OT_hook_add_selob);
 	WM_operatortype_append(OBJECT_OT_hook_add_newob);
@@ -241,6 +242,7 @@ void ED_operatortypes_object(void)
 	WM_operatortype_append(OBJECT_OT_bake_image);
 	WM_operatortype_append(OBJECT_OT_bake);
 	WM_operatortype_append(OBJECT_OT_drop_named_material);
+	WM_operatortype_append(OBJECT_OT_unlink_data);
 	WM_operatortype_append(OBJECT_OT_laplaciandeform_bind);
 
 	WM_operatortype_append(OBJECT_OT_lod_add);
@@ -249,6 +251,9 @@ void ED_operatortypes_object(void)
 	WM_operatortype_append(OBJECT_OT_vertex_random);
 	WM_operatortype_append(OBJECT_OT_quadremesh_computeflow);
 	WM_operatortype_append(OBJECT_OT_quadremesh_remesh);
+
+	WM_operatortype_append(OBJECT_OT_data_transfer);
+	WM_operatortype_append(OBJECT_OT_datalayout_transfer);
 }
 
 void ED_operatormacros_object(void)
@@ -319,6 +324,7 @@ void ED_keymap_object(wmKeyConfig *keyconf)
 	ED_keymap_proportional_cycle(keyconf, keymap);
 	ED_keymap_proportional_obmode(keyconf, keymap);
 
+	/* game-engine only, leave free for users to define */
 	WM_keymap_add_item(keymap, "VIEW3D_OT_game_start", PKEY, KM_PRESS, 0, 0);
 
 	kmi = WM_keymap_add_item(keymap, "OBJECT_OT_select_all", AKEY, KM_PRESS, 0, 0);
@@ -418,6 +424,10 @@ void ED_keymap_object(wmKeyConfig *keyconf)
 	WM_keymap_verify_item(keymap, "GROUP_OT_objects_remove_active", GKEY, KM_PRESS, KM_SHIFT | KM_ALT, 0);
 	
 	WM_keymap_add_menu(keymap, "VIEW3D_MT_object_specials", WKEY, KM_PRESS, 0, 0);
+
+	WM_keymap_verify_item(keymap, "OBJECT_OT_data_transfer", TKEY, KM_PRESS, KM_SHIFT | KM_CTRL, 0);
+	/* XXX No more available 'T' shortcuts... :/ */
+	/* WM_keymap_verify_item(keymap, "OBJECT_OT_datalayout_transfer", TKEY, KM_PRESS, KM_SHIFT | KM_CTRL, 0); */
 
 	for (i = 0; i <= 5; i++) {
 		kmi = WM_keymap_add_item(keymap, "OBJECT_OT_subdivision_set", ZEROKEY + i, KM_PRESS, KM_CTRL, 0);

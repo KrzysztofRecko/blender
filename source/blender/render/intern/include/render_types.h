@@ -58,7 +58,6 @@ struct MemArena;
 struct VertTableNode;
 struct VlakTableNode;
 struct GHash;
-struct RenderBuckets;
 struct ObjectInstanceRen;
 struct RayObject;
 struct RayFace;
@@ -192,8 +191,9 @@ struct Render
 	RenderData r;
 	World wrld;
 	struct Object *camera_override;
-	unsigned int lay;
+	unsigned int lay, layer_override;
 	
+	ThreadRWMutex partsmutex;
 	ListBase parts;
 	
 	/* render engine */
@@ -240,7 +240,7 @@ struct Render
 	ListBase volumes;
 
 #ifdef WITH_FREESTYLE
-	struct Main freestyle_bmain;
+	struct Main *freestyle_bmain;
 	ListBase freestyle_renders;
 #endif
 
@@ -388,7 +388,6 @@ struct halosort {
 
 /* ------------------------------------------------------------------------- */
 struct Material;
-struct MTFace;
 struct ImagePool;
 
 typedef struct RadFace {
@@ -424,6 +423,7 @@ typedef struct HaloRen {
 	unsigned int lay;
 	struct Material *mat;
 	struct ImagePool *pool;
+	bool skip_load_image;
 } HaloRen;
 
 /* ------------------------------------------------------------------------- */
@@ -595,7 +595,9 @@ typedef struct LampRen {
 	float imat[3][3];
 	float spottexfac;
 	float sh_invcampos[3], sh_zfac;	/* sh_= spothalo */
-	
+
+	float lampmat[4][4];	/* worls space lamp matrix, used for scene rotation */
+
 	float mat[3][3];	/* 3x3 part from lampmat x viewmat */
 	float area[8][3], areasize;
 	

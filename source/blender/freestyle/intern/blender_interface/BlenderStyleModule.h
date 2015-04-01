@@ -29,10 +29,9 @@
 #include "../system/PythonInterpreter.h"
 
 extern "C" {
-#include "BKE_global.h"
-#include "BKE_library.h"
-#include "BKE_text.h"
-#include "BLI_utildefines.h"
+#include "BLI_utildefines.h" // BLI_assert()
+
+struct Text;
 }
 
 namespace Freestyle {

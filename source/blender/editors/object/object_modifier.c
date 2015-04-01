@@ -68,6 +68,7 @@
 #include "BKE_multires.h"
 #include "BKE_report.h"
 #include "BKE_object.h"
+#include "BKE_object_deform.h"
 #include "BKE_ocean.h"
 #include "BKE_paint.h"
 #include "BKE_particle.h"
@@ -95,10 +96,10 @@ static void modifier_skin_customdata_delete(struct Object *ob);
 ModifierData *ED_object_modifier_add(ReportList *reports, Main *bmain, Scene *scene, Object *ob, const char *name, int type)
 {
 	ModifierData *md = NULL, *new_md = NULL;
-	ModifierTypeInfo *mti = modifierType_getInfo(type);
+	const ModifierTypeInfo *mti = modifierType_getInfo(type);
 	
 	/* only geometry objects should be able to get modifiers [#25291] */
-	if (!ELEM5(ob->type, OB_MESH, OB_CURVE, OB_SURF, OB_FONT, OB_LATTICE)) {
+	if (!ELEM(ob->type, OB_MESH, OB_CURVE, OB_SURF, OB_FONT, OB_LATTICE)) {
 		BKE_reportf(reports, RPT_WARNING, "Modifiers cannot be added to object '%s'", ob->id.name + 2);
 		return NULL;
 	}
@@ -367,10 +368,10 @@ void ED_object_modifier_clear(Main *bmain, Object *ob)
 int ED_object_modifier_move_up(ReportList *reports, Object *ob, ModifierData *md)
 {
 	if (md->prev) {
-		ModifierTypeInfo *mti = modifierType_getInfo(md->type);
+		const ModifierTypeInfo *mti = modifierType_getInfo(md->type);
 
 		if (mti->type != eModifierTypeType_OnlyDeform) {
-			ModifierTypeInfo *nmti = modifierType_getInfo(md->prev->type);
+			const ModifierTypeInfo *nmti = modifierType_getInfo(md->prev->type);
 
 			if (nmti->flags & eModifierTypeFlag_RequiresOriginalData) {
 				BKE_report(reports, RPT_WARNING, "Cannot move above a modifier requiring original data");
@@ -388,10 +389,10 @@ int ED_object_modifier_move_up(ReportList *reports, Object *ob, ModifierData *md
 int ED_object_modifier_move_down(ReportList *reports, Object *ob, ModifierData *md)
 {
 	if (md->next) {
-		ModifierTypeInfo *mti = modifierType_getInfo(md->type);
+		const ModifierTypeInfo *mti = modifierType_getInfo(md->type);
 
 		if (mti->flags & eModifierTypeFlag_RequiresOriginalData) {
-			ModifierTypeInfo *nmti = modifierType_getInfo(md->next->type);
+			const ModifierTypeInfo *nmti = modifierType_getInfo(md->next->type);
 
 			if (nmti->type != eModifierTypeType_OnlyDeform) {
 				BKE_report(reports, RPT_WARNING, "Cannot move beyond a non-deforming modifier");
@@ -439,9 +440,9 @@ int ED_object_modifier_convert(ReportList *UNUSED(reports), Main *bmain, Scene *
 	for (a = 0; a < totpart; a++) {
 		key = cache[a];
 
-		if (key->steps > 0) {
-			totvert += key->steps + 1;
-			totedge += key->steps;
+		if (key->segments > 0) {
+			totvert += key->segments + 1;
+			totedge += key->segments;
 		}
 	}
 
@@ -449,9 +450,9 @@ int ED_object_modifier_convert(ReportList *UNUSED(reports), Main *bmain, Scene *
 	for (a = 0; a < totchild; a++) {
 		key = cache[a];
 
-		if (key->steps > 0) {
-			totvert += key->steps + 1;
-			totedge += key->steps;
+		if (key->segments > 0) {
+			totvert += key->segments + 1;
+			totedge += key->segments;
 		}
 	}
 
@@ -475,7 +476,7 @@ int ED_object_modifier_convert(ReportList *UNUSED(reports), Main *bmain, Scene *
 	cache = psys->pathcache;
 	for (a = 0; a < totpart; a++) {
 		key = cache[a];
-		kmax = key->steps;
+		kmax = key->segments;
 		for (k = 0; k <= kmax; k++, key++, cvert++, mvert++) {
 			copy_v3_v3(mvert->co, key->co);
 			if (k) {
@@ -494,7 +495,7 @@ int ED_object_modifier_convert(ReportList *UNUSED(reports), Main *bmain, Scene *
 	cache = psys->childcache;
 	for (a = 0; a < totchild; a++) {
 		key = cache[a];
-		kmax = key->steps;
+		kmax = key->segments;
 		for (k = 0; k <= kmax; k++, key++, cvert++, mvert++) {
 			copy_v3_v3(mvert->co, key->co);
 			if (k) {
@@ -517,7 +518,7 @@ int ED_object_modifier_convert(ReportList *UNUSED(reports), Main *bmain, Scene *
 
 static int modifier_apply_shape(ReportList *reports, Scene *scene, Object *ob, ModifierData *md)
 {
-	ModifierTypeInfo *mti = modifierType_getInfo(md->type);
+	const ModifierTypeInfo *mti = modifierType_getInfo(md->type);
 
 	md->scene = scene;
 
@@ -560,7 +561,7 @@ static int modifier_apply_shape(ReportList *reports, Scene *scene, Object *ob, M
 			/* if that was the first key block added, then it was the basis.
 			 * Initialize it with the mesh, and add another for the modifier */
 			kb = BKE_keyblock_add(key, NULL);
-			BKE_key_convert_from_mesh(me, kb);
+			BKE_keyblock_convert_from_mesh(me, kb);
 		}
 
 		kb = BKE_keyblock_add(key, md->name);
@@ -577,7 +578,7 @@ static int modifier_apply_shape(ReportList *reports, Scene *scene, Object *ob, M
 
 static int modifier_apply_obdata(ReportList *reports, Scene *scene, Object *ob, ModifierData *md)
 {
-	ModifierTypeInfo *mti = modifierType_getInfo(md->type);
+	const ModifierTypeInfo *mti = modifierType_getInfo(md->type);
 
 	md->scene = scene;
 
@@ -613,9 +614,7 @@ static int modifier_apply_obdata(ReportList *reports, Scene *scene, Object *ob, 
 				return 0;
 			}
 
-			DM_to_mesh(dm, me, ob, CD_MASK_MESH);
-
-			dm->release(dm);
+			DM_to_mesh(dm, me, ob, CD_MASK_MESH, true);
 
 			if (md->type == eModifierType_Multires)
 				multires_customdata_delete(me);
@@ -743,7 +742,7 @@ static EnumPropertyItem *modifier_add_itemf(bContext *C, PointerRNA *UNUSED(ptr)
 {	
 	Object *ob = ED_object_active_context(C);
 	EnumPropertyItem *item = NULL, *md_item, *group_item = NULL;
-	ModifierTypeInfo *mti;
+	const ModifierTypeInfo *mti;
 	int totitem = 0, a;
 	
 	if (!ob)
@@ -807,7 +806,7 @@ void OBJECT_OT_modifier_add(wmOperatorType *ot)
 
 /************************ generic functions for operators using mod names and data context *********************/
 
-static int edit_modifier_poll_generic(bContext *C, StructRNA *rna_type, int obtype_flag)
+int edit_modifier_poll_generic(bContext *C, StructRNA *rna_type, int obtype_flag)
 {
 	PointerRNA ptr = CTX_data_pointer_get_type(C, "modifier", rna_type);
 	Object *ob = (ptr.id.data) ? ptr.id.data : ED_object_active_context(C);
@@ -819,17 +818,17 @@ static int edit_modifier_poll_generic(bContext *C, StructRNA *rna_type, int obty
 	return 1;
 }
 
-static int edit_modifier_poll(bContext *C)
+int edit_modifier_poll(bContext *C)
 {
 	return edit_modifier_poll_generic(C, &RNA_Modifier, 0);
 }
 
-static void edit_modifier_properties(wmOperatorType *ot)
+void edit_modifier_properties(wmOperatorType *ot)
 {
 	RNA_def_string(ot->srna, "modifier", NULL, MAX_NAME, "Modifier", "Name of the modifier to edit");
 }
 
-static int edit_modifier_invoke_properties(bContext *C, wmOperator *op)
+int edit_modifier_invoke_properties(bContext *C, wmOperator *op)
 {
 	ModifierData *md;
 	
@@ -848,7 +847,7 @@ static int edit_modifier_invoke_properties(bContext *C, wmOperator *op)
 	return false;
 }
 
-static ModifierData *edit_modifier_property_get(wmOperator *op, Object *ob, int type)
+ModifierData *edit_modifier_property_get(wmOperator *op, Object *ob, int type)
 {
 	char modifier_name[MAX_NAME];
 	ModifierData *md;
@@ -1353,7 +1352,7 @@ void OBJECT_OT_multires_external_save(wmOperatorType *ot)
 	/* flags */
 	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
 
-	WM_operator_properties_filesel(ot, FOLDERFILE | BTXFILE, FILE_SPECIAL, FILE_SAVE,
+	WM_operator_properties_filesel(ot, FILE_TYPE_FOLDER | FILE_TYPE_BTX, FILE_SPECIAL, FILE_SAVE,
 	                               WM_FILESEL_FILEPATH | WM_FILESEL_RELPATH, FILE_DEFAULTDISPLAY);
 	edit_modifier_properties(ot);
 }
@@ -1650,9 +1649,9 @@ static void skin_armature_bone_create(Object *skin_ob,
 		int v;
 
 		/* ignore edge if already visited */
-		if (BLI_BITMAP_GET(edges_visited, endx))
+		if (BLI_BITMAP_TEST(edges_visited, endx))
 			continue;
-		BLI_BITMAP_SET(edges_visited, endx);
+		BLI_BITMAP_ENABLE(edges_visited, endx);
 
 		v = (e->v1 == parent_v ? e->v2 : e->v1);
 
@@ -1667,7 +1666,7 @@ static void skin_armature_bone_create(Object *skin_ob,
 		BLI_snprintf(bone->name, sizeof(bone->name), "Bone.%.2d", endx);
 
 		/* add bDeformGroup */
-		if ((dg = ED_vgroup_add_name(skin_ob, bone->name))) {
+		if ((dg = BKE_object_defgroup_add_name(skin_ob, bone->name))) {
 			ED_vgroup_vert_add(skin_ob, dg, parent_v, 1, WEIGHT_REPLACE);
 			ED_vgroup_vert_add(skin_ob, dg, v, 1, WEIGHT_REPLACE);
 		}
@@ -1816,6 +1815,73 @@ void OBJECT_OT_skin_armature_create(wmOperatorType *ot)
 	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
 	edit_modifier_properties(ot);
 }
+/************************ delta mush bind operator *********************/
+
+static int correctivesmooth_poll(bContext *C)
+{
+	return edit_modifier_poll_generic(C, &RNA_CorrectiveSmoothModifier, 0);
+}
+
+static int correctivesmooth_bind_exec(bContext *C, wmOperator *op)
+{
+	Scene *scene = CTX_data_scene(C);
+	Object *ob = ED_object_active_context(C);
+	CorrectiveSmoothModifierData *csmd = (CorrectiveSmoothModifierData *)edit_modifier_property_get(op, ob, eModifierType_CorrectiveSmooth);
+	bool is_bind;
+
+	if (!csmd) {
+		return OPERATOR_CANCELLED;
+	}
+
+	if (!modifier_isEnabled(scene, &csmd->modifier, eModifierMode_Realtime)) {
+		BKE_report(op->reports, RPT_ERROR, "Modifier is disabled");
+		return OPERATOR_CANCELLED;
+	}
+
+	is_bind = (csmd->bind_coords != NULL);
+
+	MEM_SAFE_FREE(csmd->bind_coords);
+	MEM_SAFE_FREE(csmd->delta_cache);
+
+	if (is_bind) {
+		/* toggle off */
+		csmd->bind_coords_num = 0;
+	}
+	else {
+		/* signal to modifier to recalculate */
+		csmd->bind_coords_num = (unsigned int)-1;
+	}
+
+	DAG_id_tag_update(&ob->id, OB_RECALC_DATA);
+	WM_event_add_notifier(C, NC_OBJECT | ND_MODIFIER, ob);
+
+	return OPERATOR_FINISHED;
+}
+
+static int correctivesmooth_bind_invoke(bContext *C, wmOperator *op, const wmEvent *UNUSED(event))
+{
+	if (edit_modifier_invoke_properties(C, op))
+		return correctivesmooth_bind_exec(C, op);
+	else
+		return OPERATOR_CANCELLED;
+}
+
+void OBJECT_OT_correctivesmooth_bind(wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "Corrective Smooth Bind";
+	ot->description = "Bind base pose in delta mush modifier";
+	ot->idname = "OBJECT_OT_correctivesmooth_bind";
+
+	/* api callbacks */
+	ot->poll = correctivesmooth_poll;
+	ot->invoke = correctivesmooth_bind_invoke;
+	ot->exec = correctivesmooth_bind_exec;
+
+	/* flags */
+	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+	edit_modifier_properties(ot);
+}
 
 /************************ mdef bind operator *********************/
 
@@ -1876,7 +1942,7 @@ static int meshdeform_bind_exec(bContext *C, wmOperator *op)
 		else if (ob->type == OB_MBALL) {
 			BKE_displist_make_mball(CTX_data_main(C)->eval_ctx, scene, ob);
 		}
-		else if (ELEM3(ob->type, OB_CURVE, OB_SURF, OB_FONT)) {
+		else if (ELEM(ob->type, OB_CURVE, OB_SURF, OB_FONT)) {
 			BKE_displist_make_curveTypes(scene, ob, 0);
 		}
 

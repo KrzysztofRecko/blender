@@ -40,7 +40,6 @@
 #include <Python.h>
 
 #include "DNA_scene_types.h"
-#include "DNA_image_types.h"
 #include "DNA_material_types.h"
 #include "DNA_ID.h"
 #include "DNA_customdata_types.h"
@@ -96,6 +95,14 @@ static PyObject *PyInit_gpu(void)
 	PY_MODULE_ADD_CONSTANT(m, GPU_DYNAMIC_SAMPLER_2DBUFFER);
 	PY_MODULE_ADD_CONSTANT(m, GPU_DYNAMIC_SAMPLER_2DIMAGE);
 	PY_MODULE_ADD_CONSTANT(m, GPU_DYNAMIC_SAMPLER_2DSHADOW);
+	PY_MODULE_ADD_CONSTANT(m, GPU_DYNAMIC_MIST_ENABLE);
+	PY_MODULE_ADD_CONSTANT(m, GPU_DYNAMIC_MIST_START);
+	PY_MODULE_ADD_CONSTANT(m, GPU_DYNAMIC_MIST_DISTANCE);
+	PY_MODULE_ADD_CONSTANT(m, GPU_DYNAMIC_MIST_INTENSITY);
+	PY_MODULE_ADD_CONSTANT(m, GPU_DYNAMIC_MIST_TYPE);
+	PY_MODULE_ADD_CONSTANT(m, GPU_DYNAMIC_MIST_COLOR);
+	PY_MODULE_ADD_CONSTANT(m, GPU_DYNAMIC_HORIZON_COLOR);
+	PY_MODULE_ADD_CONSTANT(m, GPU_DYNAMIC_AMBIENT_COLOR);
 
 	PY_MODULE_ADD_CONSTANT(m, GPU_DATA_1I);
 	PY_MODULE_ADD_CONSTANT(m, GPU_DATA_1F);
@@ -200,7 +207,7 @@ static PyObject *GPU_export_shader(PyObject *UNUSED(self), PyObject *args, PyObj
 	if (shader->vertex) {
 		PY_DICT_ADD_STRING(result, shader, vertex);
 	}
-	seq = PyList_New(BLI_countlist(&shader->uniforms));
+	seq = PyList_New(BLI_listbase_count(&shader->uniforms));
 	for (i = 0, uniform = shader->uniforms.first; uniform; uniform = uniform->next, i++) {
 		dict = PyDict_New();
 		PY_DICT_ADD_STRING(dict, uniform, varname);
@@ -229,7 +236,7 @@ static PyObject *GPU_export_shader(PyObject *UNUSED(self), PyObject *args, PyObj
 	PyDict_SetItemString(result, "uniforms", seq);
 	Py_DECREF(seq);
 
-	seq = PyList_New(BLI_countlist(&shader->attributes));
+	seq = PyList_New(BLI_listbase_count(&shader->attributes));
 	for (i = 0, attribute = shader->attributes.first; attribute; attribute = attribute->next, i++) {
 		dict = PyDict_New();
 		PY_DICT_ADD_STRING(dict, attribute, varname);

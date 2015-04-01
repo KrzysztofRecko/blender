@@ -31,9 +31,10 @@ import sys
 import tempfile
 #import time
 
-from bl_i18n_utils import (settings,
-                           utils_rtl,
-                          )
+from bl_i18n_utils import (
+        settings,
+        utils_rtl,
+        )
 
 import bpy
 
@@ -1343,7 +1344,7 @@ class I18n:
         #key = self.settings.PO_HEADER_KEY
         #for uid, trans in self.trans.items():
             #if key not in trans.msgs:
-                #trans.msgs[key] 
+                #trans.msgs[key]
         self.unescape()
 
     def write(self, kind, langs=set()):

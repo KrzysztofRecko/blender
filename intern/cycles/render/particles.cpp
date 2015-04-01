@@ -11,7 +11,7 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License
+ * limitations under the License.
  */
 
 #include "device.h"
@@ -111,7 +111,7 @@ void ParticleSystemManager::device_free(Device *device, DeviceScene *dscene)
 	dscene->particles.clear();
 }
 
-void ParticleSystemManager::tag_update(Scene *scene)
+void ParticleSystemManager::tag_update(Scene * /*scene*/)
 {
 	need_update = true;
 }

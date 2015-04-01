@@ -11,7 +11,7 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License
+ * limitations under the License.
  */
 
 #include <stdlib.h>
@@ -276,6 +276,22 @@ public:
 		}
 
 		return -1;
+	}
+
+	int get_split_task_count(DeviceTask& task)
+	{
+		int total_tasks = 0;
+		list<DeviceTask> tasks;
+		task.split(tasks, devices.size());
+		foreach(SubDevice& sub, devices) {
+			if(!tasks.empty()) {
+				DeviceTask subtask = tasks.front();
+				tasks.pop_front();
+
+				total_tasks += sub.device->get_split_task_count(subtask);
+			}
+		}
+		return total_tasks;
 	}
 
 	void task_add(DeviceTask& task)

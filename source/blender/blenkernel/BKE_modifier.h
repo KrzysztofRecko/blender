@@ -39,8 +39,8 @@ struct DagNode;
 struct Object;
 struct Scene;
 struct ListBase;
-struct LinkNode;
 struct bArmature;
+struct Main;
 struct ModifierData;
 struct BMEditMesh;
 
@@ -111,7 +111,10 @@ typedef enum ModifierApplyFlag {
 	MOD_APPLY_RENDER = 1 << 0,       /* Render time. */
 	MOD_APPLY_USECACHE = 1 << 1,     /* Result of evaluation will be cached, so modifier might
 	                                  * want to cache data for quick updates (used by subsurf) */
-	MOD_APPLY_ORCO = 1 << 2          /* Modifier evaluated for undeformed texture coordinates */
+	MOD_APPLY_ORCO = 1 << 2,         /* Modifier evaluated for undeformed texture coordinates */
+	MOD_APPLY_IGNORE_SIMPLIFY = 1 << 3, /* Ignore scene simplification flag and use subdivisions
+	                                     * level set in multires modifier.
+	                                     */
 } ModifierApplyFlag;
 
 
@@ -253,7 +256,8 @@ typedef struct ModifierTypeInfo {
 	 *
 	 * This function is optional.
 	 */
-	void (*updateDepgraph)(struct ModifierData *md, struct DagForest *forest, struct Scene *scene,
+	void (*updateDepgraph)(struct ModifierData *md, struct DagForest *forest,
+	                       struct Main *bmain, struct Scene *scene,
 	                       struct Object *ob, struct DagNode *obNode);
 
 	/* Should return true if the modifier needs to be recalculated on time
@@ -308,7 +312,7 @@ typedef struct ModifierTypeInfo {
 /* Initialize modifier's global data (type info and some common global storages). */
 void BKE_modifier_init(void);
 
-ModifierTypeInfo *modifierType_getInfo(ModifierType type);
+const ModifierTypeInfo *modifierType_getInfo(ModifierType type);
 
 /* Modifier utility calls, do call through type pointer and return
  * default values if pointer is optional.
@@ -316,7 +320,7 @@ ModifierTypeInfo *modifierType_getInfo(ModifierType type);
 struct ModifierData  *modifier_new(int type);
 void          modifier_free(struct ModifierData *md);
 
-void          modifier_unique_name(struct ListBase *modifiers, struct ModifierData *md);
+bool          modifier_unique_name(struct ListBase *modifiers, struct ModifierData *md);
 
 void          modifier_copyData_generic(const struct ModifierData *md, struct ModifierData *target);
 void          modifier_copyData(struct ModifierData *md, struct ModifierData *target);

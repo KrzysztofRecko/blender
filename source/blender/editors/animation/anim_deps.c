@@ -92,7 +92,7 @@ void ANIM_list_elem_update(Scene *scene, bAnimListElem *ale)
 			RNA_property_update_main(G.main, scene, &ptr, prop);
 	}
 	else {
-		/* in other case we do standard depsgaph update, ideally
+		/* in other case we do standard depsgraph update, ideally
 		 * we'd be calling property update functions here too ... */
 		DAG_id_tag_update(id, OB_RECALC_OB | OB_RECALC_DATA | OB_RECALC_TIME); // XXX or do we want something more restrictive?
 	}
@@ -193,7 +193,7 @@ static void animchan_sync_fcurve(bAnimContext *ac, bAnimListElem *ale, FCurve **
 	/* major priority is selection status, so refer to the checks done in anim_filter.c 
 	 * skip_fcurve_selected_data() for reference about what's going on here...
 	 */
-	if (ELEM3(NULL, fcu, fcu->rna_path, owner_id))
+	if (ELEM(NULL, fcu, fcu->rna_path, owner_id))
 		return;
 	
 	if (GS(owner_id->name) == ID_OB) {
@@ -349,20 +349,29 @@ void ANIM_animdata_update(bAnimContext *ac, ListBase *anim_data)
 {
 	bAnimListElem *ale;
 
-	if (ELEM(ac->datatype, ANIMCONT_GPENCIL, ANIMCONT_MASK))
+	if (ELEM(ac->datatype, ANIMCONT_GPENCIL, ANIMCONT_MASK)) {
+#ifdef DEBUG
+		/* quiet assert */
+		for (ale = anim_data->first; ale; ale = ale->next) {
+			ale->update = 0;
+		}
+#endif
 		return;
+	}
 
 	for (ale = anim_data->first; ale; ale = ale->next) {
 		FCurve *fcu = ale->key_data;
 
 		if (ale->update & ANIM_UPDATE_ORDER) {
 			ale->update &= ~ANIM_UPDATE_ORDER;
-			sort_time_fcurve(fcu);
+			if (fcu)
+				sort_time_fcurve(fcu);
 		}
 
 		if (ale->update & ANIM_UPDATE_HANDLES) {
 			ale->update &= ~ANIM_UPDATE_HANDLES;
-			calchandles_fcurve(fcu);
+			if (fcu)
+				calchandles_fcurve(fcu);
 		}
 
 		if (ale->update & ANIM_UPDATE_DEPS) {

@@ -35,19 +35,22 @@
 
 #include "MEM_guardedalloc.h"
 
+#include "BKE_appdir.h"
 #include "BLI_utildefines.h"
 #include "BLI_listbase.h"
+#include "BLI_hash_md5.h"
 #include "BLI_path_util.h"
 #include "BLI_rect.h"
 #include "BLI_string.h"
-#include "BLI_system.h"
-#include BLI_SYSTEM_PID_H
 #include "BLI_threads.h"
 
 #include "BKE_image.h"
 #include "BKE_global.h"
 #include "BKE_main.h"
 #include "BKE_report.h"
+#ifdef WITH_CYCLES_DEBUG
+#  include "BKE_scene.h"
+#endif
 
 #include "IMB_imbuf.h"
 #include "IMB_imbuf_types.h"
@@ -91,6 +94,8 @@ void render_result_free(RenderResult *res)
 		MEM_freeN(res->rectf);
 	if (res->text)
 		MEM_freeN(res->text);
+	if (res->error)
+		MEM_freeN(res->error);
 	
 	MEM_freeN(res);
 }
@@ -304,97 +309,97 @@ static const char *get_pass_name(int passtype, int channel)
 static int passtype_from_name(const char *str)
 {
 	
-	if (strcmp(str, "Combined") == 0)
+	if (STREQ(str, "Combined"))
 		return SCE_PASS_COMBINED;
 
-	if (strcmp(str, "Depth") == 0)
+	if (STREQ(str, "Depth"))
 		return SCE_PASS_Z;
 
-	if (strcmp(str, "Vector") == 0)
+	if (STREQ(str, "Vector"))
 		return SCE_PASS_VECTOR;
 
-	if (strcmp(str, "Normal") == 0)
+	if (STREQ(str, "Normal"))
 		return SCE_PASS_NORMAL;
 
-	if (strcmp(str, "UV") == 0)
+	if (STREQ(str, "UV"))
 		return SCE_PASS_UV;
 
-	if (strcmp(str, "Color") == 0)
+	if (STREQ(str, "Color"))
 		return SCE_PASS_RGBA;
 
-	if (strcmp(str, "Emit") == 0)
+	if (STREQ(str, "Emit"))
 		return SCE_PASS_EMIT;
 
-	if (strcmp(str, "Diffuse") == 0)
+	if (STREQ(str, "Diffuse"))
 		return SCE_PASS_DIFFUSE;
 
-	if (strcmp(str, "Spec") == 0)
+	if (STREQ(str, "Spec"))
 		return SCE_PASS_SPEC;
 
-	if (strcmp(str, "Shadow") == 0)
+	if (STREQ(str, "Shadow"))
 		return SCE_PASS_SHADOW;
 	
-	if (strcmp(str, "AO") == 0)
+	if (STREQ(str, "AO"))
 		return SCE_PASS_AO;
 
-	if (strcmp(str, "Env") == 0)
+	if (STREQ(str, "Env"))
 		return SCE_PASS_ENVIRONMENT;
 
-	if (strcmp(str, "Indirect") == 0)
+	if (STREQ(str, "Indirect"))
 		return SCE_PASS_INDIRECT;
 
-	if (strcmp(str, "Reflect") == 0)
+	if (STREQ(str, "Reflect"))
 		return SCE_PASS_REFLECT;
 
-	if (strcmp(str, "Refract") == 0)
+	if (STREQ(str, "Refract"))
 		return SCE_PASS_REFRACT;
 
-	if (strcmp(str, "IndexOB") == 0)
+	if (STREQ(str, "IndexOB"))
 		return SCE_PASS_INDEXOB;
 
-	if (strcmp(str, "IndexMA") == 0)
+	if (STREQ(str, "IndexMA"))
 		return SCE_PASS_INDEXMA;
 
-	if (strcmp(str, "Mist") == 0)
+	if (STREQ(str, "Mist"))
 		return SCE_PASS_MIST;
 	
-	if (strcmp(str, "RayHits") == 0)
+	if (STREQ(str, "RayHits"))
 		return SCE_PASS_RAYHITS;
 
-	if (strcmp(str, "DiffDir") == 0)
+	if (STREQ(str, "DiffDir"))
 		return SCE_PASS_DIFFUSE_DIRECT;
 
-	if (strcmp(str, "DiffInd") == 0)
+	if (STREQ(str, "DiffInd"))
 		return SCE_PASS_DIFFUSE_INDIRECT;
 
-	if (strcmp(str, "DiffCol") == 0)
+	if (STREQ(str, "DiffCol"))
 		return SCE_PASS_DIFFUSE_COLOR;
 
-	if (strcmp(str, "GlossDir") == 0)
+	if (STREQ(str, "GlossDir"))
 		return SCE_PASS_GLOSSY_DIRECT;
 
-	if (strcmp(str, "GlossInd") == 0)
+	if (STREQ(str, "GlossInd"))
 		return SCE_PASS_GLOSSY_INDIRECT;
 
-	if (strcmp(str, "GlossCol") == 0)
+	if (STREQ(str, "GlossCol"))
 		return SCE_PASS_GLOSSY_COLOR;
 
-	if (strcmp(str, "TransDir") == 0)
+	if (STREQ(str, "TransDir"))
 		return SCE_PASS_TRANSM_DIRECT;
 
-	if (strcmp(str, "TransInd") == 0)
+	if (STREQ(str, "TransInd"))
 		return SCE_PASS_TRANSM_INDIRECT;
 
-	if (strcmp(str, "TransCol") == 0)
+	if (STREQ(str, "TransCol"))
 		return SCE_PASS_TRANSM_COLOR;
 		
-	if (strcmp(str, "SubsurfaceDir") == 0)
+	if (STREQ(str, "SubsurfaceDir"))
 		return SCE_PASS_SUBSURFACE_DIRECT;
 
-	if (strcmp(str, "SubsurfaceInd") == 0)
+	if (STREQ(str, "SubsurfaceInd"))
 		return SCE_PASS_SUBSURFACE_INDIRECT;
 
-	if (strcmp(str, "SubsurfaceCol") == 0)
+	if (STREQ(str, "SubsurfaceCol"))
 		return SCE_PASS_SUBSURFACE_COLOR;
 
 	return 0;
@@ -402,7 +407,7 @@ static int passtype_from_name(const char *str)
 
 /********************************** New **************************************/
 
-static void render_layer_add_pass(RenderResult *rr, RenderLayer *rl, int channels, int passtype)
+static RenderPass *render_layer_add_pass(RenderResult *rr, RenderLayer *rl, int channels, int passtype)
 {
 	const char *typestr = get_pass_name(passtype, 0);
 	RenderPass *rpass = MEM_callocN(sizeof(RenderPass), typestr);
@@ -438,7 +443,33 @@ static void render_layer_add_pass(RenderResult *rr, RenderLayer *rl, int channel
 				rect[x] = 10e10;
 		}
 	}
+	return rpass;
 }
+
+#ifdef WITH_CYCLES_DEBUG
+static const char *debug_pass_type_name_get(int debug_type)
+{
+	switch (debug_type) {
+		case RENDER_PASS_DEBUG_BVH_TRAVERSAL_STEPS:
+			return "BVH Traversal Steps";
+	}
+	return "Unknown";
+}
+
+static RenderPass *render_layer_add_debug_pass(RenderResult *rr,
+                                               RenderLayer *rl,
+                                               int channels,
+                                               int pass_type,
+                                               int debug_type)
+{
+	RenderPass *rpass = render_layer_add_pass(rr, rl, channels, pass_type);
+	rpass->debug_type = debug_type;
+	BLI_strncpy(rpass->name,
+	            debug_pass_type_name_get(debug_type),
+	            sizeof(rpass->name));
+	return rpass;
+}
+#endif
 
 /* called by main render as well for parts */
 /* will read info from Render *re to define layers */
@@ -478,7 +509,7 @@ RenderResult *render_result_new(Render *re, rcti *partrct, int crop, int savebuf
 	for (nr = 0, srl = re->r.layers.first; srl; srl = srl->next, nr++) {
 
 		if (layername && layername[0])
-			if (strcmp(srl->name, layername) != 0)
+			if (!STREQ(srl->name, layername))
 				continue;
 
 		if (re->r.scemode & R_SINGLE_LAYER) {
@@ -578,6 +609,13 @@ RenderResult *render_result_new(Render *re, rcti *partrct, int crop, int savebuf
 			render_layer_add_pass(rr, rl, 3, SCE_PASS_SUBSURFACE_INDIRECT);
 		if (srl->passflag  & SCE_PASS_SUBSURFACE_COLOR)
 			render_layer_add_pass(rr, rl, 3, SCE_PASS_SUBSURFACE_COLOR);
+
+#ifdef WITH_CYCLES_DEBUG
+		if (BKE_scene_use_new_shading_nodes(re->scene)) {
+			render_layer_add_debug_pass(rr, rl, 1, SCE_PASS_DEBUG,
+			        RENDER_PASS_DEBUG_BVH_TRAVERSAL_STEPS);
+		}
+#endif
 	}
 	/* sss, previewrender and envmap don't do layers, so we make a default one */
 	if (BLI_listbase_is_empty(&rr->layers) && !(layername && layername[0])) {
@@ -1013,7 +1051,7 @@ void render_result_exr_file_end(Render *re)
 	render_result_free_list(&re->fullresult, re->result);
 	re->result = NULL;
 
-	render_result_exr_file_read(re, 0);
+	render_result_exr_file_read_sample(re, 0);
 }
 
 /* save part into exr file */
@@ -1030,35 +1068,35 @@ void render_result_exr_file_path(Scene *scene, const char *layname, int sample, 
 	
 	BLI_split_file_part(G.main->name, fi, sizeof(fi));
 	if (sample == 0) {
-		BLI_snprintf(name, sizeof(name), "%s_%s_%s_%d.exr", fi, scene->id.name + 2, layname, abs(getpid()));
+		BLI_snprintf(name, sizeof(name), "%s_%s_%s.exr", fi, scene->id.name + 2, layname);
 	}
 	else {
-		BLI_snprintf(name, sizeof(name), "%s_%s_%s%d_%d.exr", fi, scene->id.name + 2, layname, sample,
-		             abs(getpid()));
+		BLI_snprintf(name, sizeof(name), "%s_%s_%s%d.exr", fi, scene->id.name + 2, layname, sample);
 	}
 
-	BLI_make_file_string("/", filepath, BLI_temporary_dir(), name);
+	/* Make name safe for paths, see T43275. */
+	BLI_filename_make_safe(name);
+
+	BLI_make_file_string("/", filepath, BKE_tempdir_session(), name);
 }
 
-/* only for temp buffer files, makes exact copy of render result */
-int render_result_exr_file_read(Render *re, int sample)
+/* only for temp buffer, makes exact copy of render result */
+int render_result_exr_file_read_sample(Render *re, int sample)
 {
 	RenderLayer *rl;
-	char str[FILE_MAX];
+	char str[FILE_MAXFILE + MAX_ID_NAME + MAX_ID_NAME + 100] = "";
 	bool success = true;
 
 	RE_FreeRenderResult(re->result);
 	re->result = render_result_new(re, &re->disprect, 0, RR_USE_MEM, RR_ALL_LAYERS);
 
 	for (rl = re->result->layers.first; rl; rl = rl->next) {
-
 		render_result_exr_file_path(re->scene, rl->name, sample, str);
 		printf("read exr tmp file: %s\n", str);
 
 		if (!render_result_exr_file_read_path(re->result, rl, str)) {
 			printf("cannot read: %s\n", str);
 			success = false;
-
 		}
 	}
 
@@ -1115,6 +1153,65 @@ int render_result_exr_file_read_path(RenderResult *rr, RenderLayer *rl_single, c
 	IMB_exr_close(exrhandle);
 
 	return 1;
+}
+
+static void render_result_exr_file_cache_path(Scene *sce, const char *root, char *r_path)
+{
+	char filename_full[FILE_MAX + MAX_ID_NAME + 100], filename[FILE_MAXFILE], dirname[FILE_MAXDIR];
+	char path_digest[16] = {0};
+	char path_hexdigest[33];
+
+	/* If root is relative, use either current .blend file dir, or temp one if not saved. */
+	if (G.main->name[0]) {
+		BLI_split_dirfile(G.main->name, dirname, filename, sizeof(dirname), sizeof(filename));
+		BLI_replace_extension(filename, sizeof(filename), "");  /* strip '.blend' */
+		BLI_hash_md5_buffer(G.main->name, strlen(G.main->name), path_digest);
+	}
+	else {
+		BLI_strncpy(dirname, BKE_tempdir_base(), sizeof(dirname));
+		BLI_strncpy(filename, "UNSAVED", sizeof(filename));
+	}
+	BLI_hash_md5_to_hexdigest(path_digest, path_hexdigest);
+
+	/* Default to *non-volatile* tmp dir. */
+	if (*root == '\0') {
+		root = BKE_tempdir_base();
+	}
+
+	BLI_snprintf(filename_full, sizeof(filename_full), "cached_RR_%s_%s_%s.exr",
+	             filename, sce->id.name + 2, path_hexdigest);
+	BLI_make_file_string(dirname, r_path, root, filename_full);
+}
+
+void render_result_exr_file_cache_write(Render *re)
+{
+	RenderResult *rr = re->result;
+	char str[FILE_MAXFILE + FILE_MAXFILE + MAX_ID_NAME + 100];
+	char *root = U.render_cachedir;
+
+	render_result_exr_file_cache_path(re->scene, root, str);
+	printf("Caching exr file, %dx%d, %s\n", rr->rectx, rr->recty, str);
+	RE_WriteRenderResult(NULL, rr, str, 0);
+}
+
+/* For cache, makes exact copy of render result */
+bool render_result_exr_file_cache_read(Render *re)
+{
+	char str[FILE_MAXFILE + MAX_ID_NAME + MAX_ID_NAME + 100] = "";
+	char *root = U.render_cachedir;
+
+	RE_FreeRenderResult(re->result);
+	re->result = render_result_new(re, &re->disprect, 0, RR_USE_MEM, RR_ALL_LAYERS);
+
+	/* First try cache. */
+	render_result_exr_file_cache_path(re->scene, root, str);
+
+	printf("read exr cache file: %s\n", str);
+	if (!render_result_exr_file_read_path(re->result, NULL, str)) {
+		printf("cannot read: %s\n", str);
+		return false;
+	}
+	return true;
 }
 
 /*************************** Combined Pixel Rect *****************************/

@@ -429,6 +429,7 @@ EnumPropertyItem operator_return_items[] = {
 	{OPERATOR_FINISHED, "FINISHED", 0, "Finished", "When the operator is complete, operator exits"},
 	/* used as a flag */
 	{OPERATOR_PASS_THROUGH, "PASS_THROUGH", 0, "Pass Through", "Do nothing and pass the event on"},
+	{OPERATOR_INTERFACE, "INTERFACE", 0, "Interface", "Handled but not executed (popup menus)"},
 	{0, NULL, 0, NULL, NULL}
 };
 
@@ -525,21 +526,21 @@ static PointerRNA rna_OperatorMacro_properties_get(PointerRNA *ptr)
 
 static void rna_Event_ascii_get(PointerRNA *ptr, char *value)
 {
-	wmEvent *event = (wmEvent *)ptr->data;
+	const wmEvent *event = ptr->data;
 	value[0] = event->ascii;
 	value[1] = '\0';
 }
 
 static int rna_Event_ascii_length(PointerRNA *ptr)
 {
-	wmEvent *event = (wmEvent *)ptr->data;
+	const wmEvent *event = ptr->data;
 	return (event->ascii) ? 1 : 0;
 }
 
 static void rna_Event_unicode_get(PointerRNA *ptr, char *value)
 {
 	/* utf8 buf isn't \0 terminated */
-	wmEvent *event = (wmEvent *)ptr->data;
+	const wmEvent *event = ptr->data;
 	size_t len = 0;
 
 	if (event->utf8_buf[0]) {
@@ -555,7 +556,7 @@ static void rna_Event_unicode_get(PointerRNA *ptr, char *value)
 static int rna_Event_unicode_length(PointerRNA *ptr)
 {
 
-	wmEvent *event = (wmEvent *)ptr->data;
+	const wmEvent *event = ptr->data;
 	if (event->utf8_buf[0]) {
 		/* invalid value is checked on assignment so we don't need to account for this */
 		return BLI_str_utf8_size(event->utf8_buf);
@@ -565,10 +566,39 @@ static int rna_Event_unicode_length(PointerRNA *ptr)
 	}
 }
 
+static float rna_Event_pressure_get(PointerRNA *ptr)
+{
+	const wmEvent *event = ptr->data;
+	return WM_event_tablet_data(event, NULL, NULL);
+}
+
+static int rna_Event_is_tablet_get(PointerRNA *ptr)
+{
+	const wmEvent *event = ptr->data;
+	return WM_event_is_tablet(event);
+}
+
+static void rna_Event_tilt_get(PointerRNA *ptr, float *values)
+{
+	wmEvent *event = ptr->data;
+	WM_event_tablet_data(event, NULL, values);
+}
+
 static PointerRNA rna_PopupMenu_layout_get(PointerRNA *ptr)
 {
 	struct uiPopupMenu *pup = ptr->data;
-	uiLayout *layout = uiPupMenuLayout(pup);
+	uiLayout *layout = UI_popup_menu_layout(pup);
+
+	PointerRNA rptr;
+	RNA_pointer_create(ptr->id.data, &RNA_UILayout, layout, &rptr);
+
+	return rptr;
+}
+
+static PointerRNA rna_PieMenu_layout_get(PointerRNA *ptr)
+{
+	struct uiPieMenu *pie = ptr->data;
+	uiLayout *layout = UI_pie_menu_layout(pie);
 
 	PointerRNA rptr;
 	RNA_pointer_create(ptr->id.data, &RNA_UILayout, layout, &rptr);
@@ -587,7 +617,7 @@ static void rna_Window_screen_set(PointerRNA *ptr, PointerRNA value)
 	win->newscreen = value.data;
 }
 
-int rna_Window_screen_assign_poll(PointerRNA *UNUSED(ptr), PointerRNA value)
+static int rna_Window_screen_assign_poll(PointerRNA *UNUSED(ptr), PointerRNA value)
 {
 	bScreen *screen = (bScreen *)value.id.data;
 
@@ -732,7 +762,7 @@ static EnumPropertyItem *rna_KeyMapItem_propvalue_itemf(bContext *C, PointerRNA 
 	return keymap_propvalue_items; /* ERROR */
 }
 
-static int rna_KeyMapItem_any_getf(PointerRNA *ptr)
+static int rna_KeyMapItem_any_get(PointerRNA *ptr)
 {
 	wmKeyMapItem *kmi = (wmKeyMapItem *)ptr->data;
 
@@ -748,7 +778,7 @@ static int rna_KeyMapItem_any_getf(PointerRNA *ptr)
 	}
 }
 
-static void rna_KeyMapItem_any_setf(PointerRNA *ptr, int value)
+static void rna_KeyMapItem_any_set(PointerRNA *ptr, int value)
 {
 	wmKeyMapItem *kmi = (wmKeyMapItem *)ptr->data;
 
@@ -805,7 +835,7 @@ static void rna_wmKeyMapItem_idname_set(PointerRNA *ptr, const char *value)
 
 	WM_operator_bl_idname(idname, value);
 
-	if (strcmp(idname, kmi->idname) != 0) {
+	if (!STREQ(idname, kmi->idname)) {
 		BLI_strncpy(kmi->idname, idname, sizeof(kmi->idname));
 
 		WM_keymap_properties_reset(kmi, NULL);
@@ -1608,6 +1638,21 @@ static void rna_def_event(BlenderRNA *brna)
 	RNA_def_property_clear_flag(prop, PROP_EDITABLE);
 	RNA_def_property_ui_text(prop, "Mouse Previous Y Position", "The window relative vertical location of the mouse");
 
+	prop = RNA_def_property(srna, "pressure", PROP_FLOAT, PROP_NONE);
+	RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+	RNA_def_property_float_funcs(prop, "rna_Event_pressure_get", NULL, NULL);
+	RNA_def_property_ui_text(prop, "Tablet Pressure", "The pressure of the tablet or 1.0 if no tablet present");
+
+	prop = RNA_def_property(srna, "tilt", PROP_FLOAT, PROP_XYZ_LENGTH);
+	RNA_def_property_array(prop, 2);
+	RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+	RNA_def_property_float_funcs(prop, "rna_Event_tilt_get", NULL, NULL);
+	RNA_def_property_ui_text(prop, "Tablet Tilt", "The pressure of the tablet or zeroes if no tablet present");
+
+	prop = RNA_def_property(srna, "is_tablet", PROP_BOOLEAN, PROP_NONE);
+	RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+	RNA_def_property_boolean_funcs(prop, "rna_Event_is_tablet_get", NULL);
+	RNA_def_property_ui_text(prop, "Tablet Pressure", "The pressure of the tablet or 1.0 if no tablet present");
 
 	/* modifiers */
 	prop = RNA_def_property(srna, "shift", PROP_BOOLEAN, PROP_NONE);
@@ -1678,6 +1723,26 @@ static void rna_def_popupmenu(BlenderRNA *brna)
 	prop = RNA_def_property(srna, "layout", PROP_POINTER, PROP_NONE);
 	RNA_def_property_struct_type(prop, "UILayout");
 	RNA_def_property_pointer_funcs(prop, "rna_PopupMenu_layout_get",
+	                               NULL, NULL, NULL);
+
+	RNA_define_verify_sdna(1); /* not in sdna */
+}
+
+static void rna_def_piemenu(BlenderRNA *brna)
+{
+	StructRNA *srna;
+	PropertyRNA *prop;
+
+	srna = RNA_def_struct(brna, "UIPieMenu", NULL);
+	RNA_def_struct_ui_text(srna, "PieMenu", "");
+	RNA_def_struct_sdna(srna, "uiPieMenu");
+
+	RNA_define_verify_sdna(0); /* not in sdna */
+
+	/* could wrap more, for now this is enough */
+	prop = RNA_def_property(srna, "layout", PROP_POINTER, PROP_NONE);
+	RNA_def_property_struct_type(prop, "UILayout");
+	RNA_def_property_pointer_funcs(prop, "rna_PieMenu_layout_get",
 	                               NULL, NULL, NULL);
 
 	RNA_define_verify_sdna(1); /* not in sdna */
@@ -1963,7 +2028,7 @@ static void rna_def_keyconfig(BlenderRNA *brna)
 	RNA_def_property_update(prop, 0, "rna_KeyMapItem_update");
 
 	prop = RNA_def_property(srna, "any", PROP_BOOLEAN, PROP_NONE);
-	RNA_def_property_boolean_funcs(prop, "rna_KeyMapItem_any_getf", "rna_KeyMapItem_any_setf");
+	RNA_def_property_boolean_funcs(prop, "rna_KeyMapItem_any_get", "rna_KeyMapItem_any_set");
 	RNA_def_property_ui_text(prop, "Any", "Any modifier keys pressed");
 	RNA_def_property_update(prop, 0, "rna_KeyMapItem_update");
 
@@ -2045,6 +2110,7 @@ void RNA_def_wm(BlenderRNA *brna)
 	rna_def_event(brna);
 	rna_def_timer(brna);
 	rna_def_popupmenu(brna);
+	rna_def_piemenu(brna);
 	rna_def_window(brna);
 	rna_def_windowmanager(brna);
 	rna_def_keyconfig(brna);

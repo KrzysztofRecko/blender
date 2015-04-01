@@ -33,6 +33,7 @@
 #include "DNA_meshdata_types.h"
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
+#include "DNA_image_types.h"
 
 #include "MEM_guardedalloc.h"
 
@@ -255,6 +256,10 @@ static void image_operatortypes(void)
 	WM_operatortype_append(IMAGE_OT_toolshelf);
 
 	WM_operatortype_append(IMAGE_OT_change_frame);
+
+	WM_operatortype_append(IMAGE_OT_read_renderlayers);
+	WM_operatortype_append(IMAGE_OT_render_border);
+	WM_operatortype_append(IMAGE_OT_clear_render_border);
 }
 
 static void image_keymap(struct wmKeyConfig *keyconf)
@@ -266,6 +271,7 @@ static void image_keymap(struct wmKeyConfig *keyconf)
 	WM_keymap_add_item(keymap, "IMAGE_OT_new", NKEY, KM_PRESS, KM_ALT, 0);
 	WM_keymap_add_item(keymap, "IMAGE_OT_open", OKEY, KM_PRESS, KM_ALT, 0);
 	WM_keymap_add_item(keymap, "IMAGE_OT_reload", RKEY, KM_PRESS, KM_ALT, 0);
+	WM_keymap_add_item(keymap, "IMAGE_OT_read_renderlayers", RKEY, KM_PRESS, KM_CTRL, 0);
 	WM_keymap_add_item(keymap, "IMAGE_OT_save", SKEY, KM_PRESS, KM_ALT, 0);
 	WM_keymap_add_item(keymap, "IMAGE_OT_save_as", F3KEY, KM_PRESS, 0, 0);
 	WM_keymap_add_item(keymap, "IMAGE_OT_properties", NKEY, KM_PRESS, 0, 0);
@@ -322,9 +328,9 @@ static void image_keymap(struct wmKeyConfig *keyconf)
 	RNA_boolean_set(kmi->ptr, "toggle", true);
 
 	/* fast switch to render slots */
-	for (i = 0; i < MAX2(IMA_MAX_RENDER_SLOT, 9); i++) {
+	for (i = 0; i < MIN2(IMA_MAX_RENDER_SLOT, 9); i++) {
 		kmi = WM_keymap_add_item(keymap, "WM_OT_context_set_int", ONEKEY + i, KM_PRESS, 0, 0);
-		RNA_string_set(kmi->ptr, "data_path", "space_data.image.render_slot");
+		RNA_string_set(kmi->ptr, "data_path", "space_data.image.render_slots.active_index");
 		RNA_int_set(kmi->ptr, "value", i);
 	}
 
@@ -340,13 +346,17 @@ static void image_keymap(struct wmKeyConfig *keyconf)
 	kmi = WM_keymap_add_item(keymap, "WM_OT_context_set_enum", PERIODKEY, KM_PRESS, 0, 0);
 	RNA_string_set(kmi->ptr, "data_path", "space_data.pivot_point");
 	RNA_string_set(kmi->ptr, "value", "CURSOR");
+
+	/* render border */
+	WM_keymap_add_item(keymap, "IMAGE_OT_render_border", BKEY, KM_PRESS, KM_CTRL, 0);
+	WM_keymap_add_item(keymap, "IMAGE_OT_clear_render_border", BKEY, KM_PRESS, KM_CTRL | KM_ALT, 0);
 }
 
 /* dropboxes */
 static int image_drop_poll(bContext *UNUSED(C), wmDrag *drag, const wmEvent *UNUSED(event))
 {
 	if (drag->type == WM_DRAG_PATH)
-		if (ELEM3(drag->icon, 0, ICON_FILE_IMAGE, ICON_FILE_BLANK)) /* rule might not work? */
+		if (ELEM(drag->icon, 0, ICON_FILE_IMAGE, ICON_FILE_MOVIE, ICON_FILE_BLANK)) /* rule might not work? */
 			return 1;
 	return 0;
 }
@@ -536,6 +546,12 @@ static void image_listener(bScreen *sc, ScrArea *sa, wmNotifier *wmn)
 			}
 			break;
 		}
+		case NC_WM:
+			if (wmn->data == ND_UNDO) {
+				ED_area_tag_redraw(sa);
+				ED_area_tag_refresh(sa);
+			}
+			break;
 	}
 }
 
@@ -630,6 +646,12 @@ static void image_main_area_init(wmWindowManager *wm, ARegion *ar)
 	WM_event_add_keymap_handler_bb(&ar->handlers, keymap, &ar->v2d.mask, &ar->winrct);
 
 	/* image paint polls for mode */
+	keymap = WM_keymap_find(wm->defaultconf, "Curve", 0, 0);
+	WM_event_add_keymap_handler_bb(&ar->handlers, keymap, &ar->v2d.mask, &ar->winrct);
+
+	keymap = WM_keymap_find(wm->defaultconf, "Paint Curve", 0, 0);
+	WM_event_add_keymap_handler(&ar->handlers, keymap);
+
 	keymap = WM_keymap_find(wm->defaultconf, "Image Paint", 0, 0);
 	WM_event_add_keymap_handler_bb(&ar->handlers, keymap, &ar->v2d.mask, &ar->winrct);
 
@@ -654,6 +676,7 @@ static void image_main_area_draw(const bContext *C, ARegion *ar)
 	Object *obact = CTX_data_active_object(C);
 	Object *obedit = CTX_data_edit_object(C);
 	Mask *mask = NULL;
+	bool curve = false;
 	Scene *scene = CTX_data_scene(C);
 	View2D *v2d = &ar->v2d;
 	//View2DScrollers *scrollers;
@@ -670,7 +693,7 @@ static void image_main_area_draw(const bContext *C, ARegion *ar)
 	/* put scene context variable in iuser */
 	if (sima->image && sima->image->type == IMA_TYPE_R_RESULT) {
 		/* for render result, try to use the currently rendering scene */
-		Scene *render_scene = ED_render_job_get_scene(C);
+		Scene *render_scene = ED_render_job_get_current_scene(C);
 		if (render_scene)
 			sima->iuser.scene = render_scene;
 		else
@@ -690,7 +713,7 @@ static void image_main_area_draw(const bContext *C, ARegion *ar)
 
 	ED_region_draw_cb_draw(C, ar, REGION_DRAW_PRE_VIEW);
 
-	draw_uvedit_main(sima, ar, scene, obedit, obact);
+	ED_uvedit_draw_main(sima, ar, scene, obedit, obact);
 
 	/* check for mask (delay draw) */
 	if (ED_space_image_show_uvedit(sima, obedit)) {
@@ -698,6 +721,9 @@ static void image_main_area_draw(const bContext *C, ARegion *ar)
 	}
 	else if (sima->mode == SI_MODE_MASK) {
 		mask = ED_space_image_get_mask(sima);
+	}
+	else if (ED_space_image_paint_curve(C)) {
+		curve = true;
 	}
 
 	ED_region_draw_cb_draw(C, ar, REGION_DRAW_POST_VIEW);
@@ -747,7 +773,12 @@ static void image_main_area_draw(const bContext *C, ARegion *ar)
 		                    NULL, C);
 
 		UI_view2d_view_ortho(v2d);
-		draw_image_cursor(ar, sima->cursor);
+		ED_image_draw_cursor(ar, sima->cursor);
+		UI_view2d_view_restore(C);
+	}
+	else if (curve) {
+		UI_view2d_view_ortho(v2d);
+		ED_image_draw_cursor(ar, sima->cursor);
 		UI_view2d_view_restore(C);
 	}
 
@@ -761,17 +792,27 @@ static void image_main_area_draw(const bContext *C, ARegion *ar)
 #endif
 }
 
-static void image_main_area_listener(bScreen *UNUSED(sc), ScrArea *UNUSED(sa), ARegion *ar, wmNotifier *wmn)
+static void image_main_area_listener(bScreen *UNUSED(sc), ScrArea *sa, ARegion *ar, wmNotifier *wmn)
 {
 	/* context changes */
 	switch (wmn->category) {
 		case NC_GPENCIL:
-			if (wmn->action == NA_EDITED)
+			if (ELEM(wmn->action, NA_EDITED, NA_SELECTED))
+				ED_region_tag_redraw(ar);
+			else if (wmn->data & ND_GPENCIL_EDITMODE)
 				ED_region_tag_redraw(ar);
 			break;
 		case NC_IMAGE:
 			if (wmn->action == NA_PAINTING)
 				ED_region_tag_redraw(ar);
+			break;
+		case NC_MATERIAL:
+			if (wmn->data == ND_SHADING_LINKS) {
+				SpaceImage *sima = sa->spacedata.first;
+
+				if (sima->iuser.scene && (sima->iuser.scene->toolsettings->uv_flag & UV_SHOW_SAME_IMAGE))
+					ED_region_tag_redraw(ar);
+			}
 			break;
 	}
 }
@@ -821,6 +862,10 @@ static void image_buttons_area_listener(bScreen *UNUSED(sc), ScrArea *UNUSED(sa)
 		case NC_NODE:
 			ED_region_tag_redraw(ar);
 			break;
+		case NC_GPENCIL:
+			if (ELEM(wmn->action, NA_EDITED, NA_SELECTED))
+				ED_region_tag_redraw(ar);
+			break;
 	}
 }
 
@@ -854,9 +899,9 @@ static void image_tools_area_draw(const bContext *C, ARegion *ar)
 				BKE_histogram_update_sample_line(&sima->sample_line_hist, ibuf, &scene->view_settings, &scene->display_settings);
 			}
 			if (sima->image->flag & IMA_VIEW_AS_RENDER)
-				scopes_update(&sima->scopes, ibuf, &scene->view_settings, &scene->display_settings);
+				ED_space_image_scopes_update(C, sima, ibuf, true);
 			else
-				scopes_update(&sima->scopes, ibuf, NULL, &scene->display_settings);
+				ED_space_image_scopes_update(C, sima, ibuf, false);
 		}
 	}
 	ED_space_image_release_buffer(sima, ibuf, lock);
@@ -869,7 +914,7 @@ static void image_tools_area_listener(bScreen *UNUSED(sc), ScrArea *UNUSED(sa), 
 	/* context changes */
 	switch (wmn->category) {
 		case NC_GPENCIL:
-			if (wmn->data == ND_DATA)
+			if (wmn->data == ND_DATA || ELEM(wmn->action, NA_EDITED, NA_SELECTED))
 				ED_region_tag_redraw(ar);
 			break;
 		case NC_BRUSH:

@@ -42,8 +42,6 @@
 #include "BKE_modifier.h"
 #include "BKE_deform.h"
 
-#include "bmesh.h"
-
 #include "MEM_guardedalloc.h"
 #include "depsgraph_private.h"
 
@@ -75,6 +73,7 @@ static void foreachObjectLink(ModifierData *md, Object *ob,
 }
 
 static void updateDepgraph(ModifierData *md, DagForest *forest,
+                           struct Main *UNUSED(bmain),
                            struct Scene *UNUSED(scene),
                            Object *UNUSED(ob),
                            DagNode *obNode)
@@ -290,7 +289,7 @@ static DerivedMesh *doMirrorOnAxis(MirrorModifierData *mmd,
 		/* slow - so only call if one or more merge verts are found,
 		 * users may leave this on and not realize there is nothing to merge - campbell */
 		if (tot_vtargetmap) {
-			result = CDDM_merge_verts(result, vtargetmap, tot_vtargetmap);
+			result = CDDM_merge_verts(result, vtargetmap, tot_vtargetmap, CDDM_MERGE_VERTS_DUMP_IF_MAPPED);
 		}
 		MEM_freeN(vtargetmap);
 	}

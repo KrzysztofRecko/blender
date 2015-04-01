@@ -175,8 +175,10 @@ private:
 	bool					m_showProperties;
 	/** Show background behind text for readability? */
 	bool					m_showBackground;
-
+	/** Show debug properties on the game display*/
 	bool					m_show_debug_properties;
+	/** Automatic add debug properties to the debug list*/
+	bool					m_autoAddDebugProperties;
 
 	/** record physics into keyframes */
 	bool					m_animation_record;
@@ -203,14 +205,12 @@ private:
 	void					PostRenderScene(KX_Scene* scene);
 	void					RenderDebugProperties();
 	void					RenderShadowBuffers(KX_Scene *scene);
-	void					SetBackGround(KX_WorldInfo* worldinfo);
 
 public:
 	KX_KetsjiEngine(class KX_ISystem* system);
 	virtual ~KX_KetsjiEngine();
 
 	// set the devices and stuff. the client must take care of creating these
-	void			SetWorldSettings(KX_WorldInfo* worldinfo);
 	void			SetKeyboardDevice(SCA_IInputDevice* keyboarddevice);
 	void			SetMouseDevice(SCA_IInputDevice* mousedevice);
 	void			SetNetworkDevice(NG_NetworkDeviceInterface* networkdevice);
@@ -222,6 +222,7 @@ public:
 	PyObject*		GetPyProfileDict();
 #endif
 	void			SetSceneConverter(KX_ISceneConverter* sceneconverter);
+	KX_ISceneConverter* GetSceneConverter() { return m_sceneconverter; }
 	void			SetAnimRecordMode(bool animation_record, int startFrame);
 
 	RAS_IRasterizer*		GetRasterizer() { return m_rasterizer; }
@@ -256,7 +257,7 @@ public:
 	void			ConvertAndAddScene(const STR_String& scenename,bool overlay);
 
 	void			RemoveScene(const STR_String& scenename);
-	void			ReplaceScene(const STR_String& oldscene,const STR_String& newscene);
+    bool			ReplaceScene(const STR_String& oldscene,const STR_String& newscene);
 	void			SuspendScene(const STR_String& scenename);
 	void			ResumeScene(const STR_String& scenename);
 
@@ -352,6 +353,46 @@ public:
 	static void SetExitKey(short key);
 
 	static short GetExitKey();
+
+	/**
+	 * \Sets the display for frame rate on or off.
+	 */
+	void SetShowFramerate(bool frameRate);
+
+	/**
+	 * \Gets the display for frame rate on or off.
+	 */
+	bool GetShowFramerate();
+
+	/**
+	 * \Sets the display for individual components on or off.
+	 */
+	void SetShowProfile(bool profile);
+
+	/**
+	 * \Gets the display for individual components on or off.
+	 */
+	bool GetShowProfile();
+
+	/**
+	 * \Sets the display of scene object debug properties on or off.
+	 */
+	void SetShowProperties(bool properties);
+
+	/**
+	 * \Gets the display of scene object debug properties on or off.
+	 */
+	bool GetShowProperties();
+
+	/**
+	 * \Sets if the auto adding of scene object debug properties on or off.
+	 */
+	bool GetAutoAddDebugProperties();
+
+	/**
+	 * \Sets the auto adding of scene object debug properties on or off.
+	 */
+	void SetAutoAddDebugProperties(bool add);
 
 	/**
 	 * Activates or deactivates timing information display.

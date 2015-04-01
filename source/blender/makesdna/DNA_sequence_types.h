@@ -94,6 +94,9 @@ typedef struct StripProxy {
 	                       // to build
 	short build_tc_flags;  // time code flags (see below) of all tc indices
 	                       // to build
+	short build_flags;
+	char storage;
+	char pad[5];
 } StripProxy;
 
 typedef struct Strip {
@@ -131,10 +134,11 @@ typedef struct Sequence {
 
 	int flag, type; /*flags bitmap (see below) and the type of sequence*/
 	int len; /* the length of the contents of this strip - before handles are applied */
-	int start, startofs, endofs;
-	int startstill, endstill;
+	int start; /* start frame of contents of strip in absolute frame coordinates. For metastrips start of first strip startdisp */
+	int startofs, endofs; /* frames after the first frame where display starts, frames before the last frame where display ends */
+	int startstill, endstill; /* frames that use the first frame before data begins, frames that use the last frame after data ends */
 	int machine, depth; /*machine - the strip channel, depth - the depth in the sequence when dealing with metastrips */
-	int startdisp, enddisp; /*starting and ending points in the sequence*/
+	int startdisp, enddisp; /* starting and ending points of the strip in the sequence*/
 	float sat;
 	float mul, handsize;
 
@@ -193,6 +197,8 @@ typedef struct MetaStack {
 	struct MetaStack *next, *prev;
 	ListBase *oldbasep;
 	Sequence *parseq;
+	/* the startdisp/enddisp when entering the meta */
+	int disp_range[2];
 } MetaStack;
 
 typedef struct Editing {
@@ -204,9 +210,10 @@ typedef struct Editing {
 	Sequence *act_seq;
 	char act_imagedir[1024]; /* 1024 = FILE_MAX */
 	char act_sounddir[1024]; /* 1024 = FILE_MAX */
+	char proxy_dir[1024]; /* 1024 = FILE_MAX */
 
 	int over_ofs, over_cfra;
-	int over_flag, pad;
+	int over_flag, proxy_storage;
 	rctf over_border;
 } Editing;
 
@@ -248,6 +255,11 @@ typedef struct SpeedControlVars {
 	int length;
 	int lastValidFrame;
 } SpeedControlVars;
+
+typedef struct GaussianBlurVars {
+	float size_x;
+	float size_y;
+} GaussianBlurVars;
 
 /* ***************** Sequence modifiers ****************** */
 
@@ -316,6 +328,10 @@ typedef struct SequencerScopes {
 #define SEQ_STRIP_OFSBOTTOM     0.2f
 #define SEQ_STRIP_OFSTOP        0.8f
 
+/* Editor->proxy_storage */
+/* store proxies in project directory */
+#define SEQ_EDIT_PROXY_DIR_STORAGE 1
+
 /* SpeedControlVars->flags */
 #define SEQ_SPEED_INTEGRATE      1
 /* #define SEQ_SPEED_BLEND          2 */ /* DEPRECATED */
@@ -344,9 +360,9 @@ enum {
 	SEQ_USE_TRANSFORM           = (1 << 16),
 	SEQ_USE_CROP                = (1 << 17),
 	/* SEQ_USE_COLOR_BALANCE       = (1 << 18), */ /* DEPRECATED */
-	SEQ_USE_PROXY_CUSTOM_DIR    = (1 << 19),
+	/* SEQ_USE_PROXY_CUSTOM_DIR    = (1 << 19), */ /* DEPRECATED */
 
-	SEQ_USE_PROXY_CUSTOM_FILE   = (1 << 21),
+	/* SEQ_USE_PROXY_CUSTOM_FILE   = (1 << 21), */ /* DEPRECATED */
 	SEQ_USE_EFFECT_DEFAULT_FADE = (1 << 22),
 	SEQ_USE_LINEAR_MODIFIERS    = (1 << 23),
 
@@ -355,8 +371,17 @@ enum {
 	SEQ_AUDIO_PITCH_ANIMATED    = (1 << 25),
 	SEQ_AUDIO_PAN_ANIMATED      = (1 << 26),
 	SEQ_AUDIO_DRAW_WAVEFORM     = (1 << 27),
+	
+	/* don't include Grease Pencil in OpenGL previews of Scene strips */
+	SEQ_SCENE_NO_GPENCIL        = (1 << 28),
 
 	SEQ_INVALID_EFFECT          = (1 << 31),
+};
+
+/* StripProxy->storage */
+enum {
+	SEQ_STORAGE_PROXY_CUSTOM_FILE   = (1 << 1), /* store proxy in custom directory */
+	SEQ_STORAGE_PROXY_CUSTOM_DIR    = (1 << 2), /* store proxy in custom file */
 };
 
 #if (DNA_DEPRECATED_GCC_POISON == 1)
@@ -386,6 +411,11 @@ enum {
 #define SEQ_PROXY_TC_INTERP_REC_DATE_FREE_RUN   4
 #define SEQ_PROXY_TC_RECORD_RUN_NO_GAPS         8
 #define SEQ_PROXY_TC_ALL                        15
+
+/* SeqProxy->build_flags */
+enum {
+	SEQ_PROXY_SKIP_EXISTING = 1,
+};
 
 /* seq->alpha_mode */
 enum {
@@ -421,7 +451,8 @@ enum {
 	SEQ_TYPE_SPEED       = 29,
 	SEQ_TYPE_MULTICAM    = 30,
 	SEQ_TYPE_ADJUSTMENT  = 31,
-	SEQ_TYPE_EFFECT_MAX  = 31
+	SEQ_TYPE_GAUSSIAN_BLUR = 40,
+	SEQ_TYPE_EFFECT_MAX  = 40
 };
 
 #define SEQ_MOVIECLIP_RENDER_UNDISTORTED (1 << 0)
@@ -434,7 +465,7 @@ enum {
  */
 
 
-#define SEQ_HAS_PATH(_seq) (ELEM4((_seq)->type, SEQ_TYPE_MOVIE, SEQ_TYPE_IMAGE, SEQ_TYPE_SOUND_RAM, SEQ_TYPE_SOUND_HD))
+#define SEQ_HAS_PATH(_seq) (ELEM((_seq)->type, SEQ_TYPE_MOVIE, SEQ_TYPE_IMAGE, SEQ_TYPE_SOUND_RAM, SEQ_TYPE_SOUND_HD))
 
 /* modifiers */
 

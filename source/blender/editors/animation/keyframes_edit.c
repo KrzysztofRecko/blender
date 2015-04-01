@@ -41,9 +41,7 @@
 
 #include "DNA_anim_types.h"
 #include "DNA_object_types.h"
-#include "DNA_node_types.h"
 #include "DNA_scene_types.h"
-#include "DNA_space_types.h"
 
 #include "BKE_fcurve.h"
 
@@ -548,6 +546,44 @@ static short ok_bezier_region_lasso(KeyframeEditData *ked, BezTriple *bezt)
 		return 0;
 }
 
+/**
+ * only called from #ok_bezier_region_circle
+ */
+static bool bezier_region_circle_test(
+        const struct KeyframeEdit_CircleData *data_circle,
+        const float xy[2])
+{
+	if (BLI_rctf_isect_pt_v(data_circle->rectf_scaled, xy)) {
+		float xy_view[2];
+
+		BLI_rctf_transform_pt_v(data_circle->rectf_view, data_circle->rectf_scaled, xy_view, xy);
+
+		xy_view[0] = xy_view[0] - data_circle->mval[0];
+		xy_view[1] = xy_view[1] - data_circle->mval[1];
+		return len_squared_v2(xy_view) < data_circle->radius_squared;
+	}
+	
+	return false;
+}
+
+
+static short ok_bezier_region_circle(KeyframeEditData *ked, BezTriple *bezt)
+{
+	/* rect is stored in data property (it's of type rectf, but may not be set) */
+	if (ked->data) {
+		short ok = 0;
+
+#define KEY_CHECK_OK(_index) bezier_region_circle_test(ked->data, bezt->vec[_index])
+		KEYFRAME_OK_CHECKS(KEY_CHECK_OK);
+#undef KEY_CHECK_OK
+
+		/* return ok flags */
+		return ok;
+	}
+	else
+		return 0;
+}
+
 
 KeyframeEditFunc ANIM_editkeyframes_ok(short mode)
 {
@@ -567,6 +603,8 @@ KeyframeEditFunc ANIM_editkeyframes_ok(short mode)
 			return ok_bezier_region;
 		case BEZT_OK_REGION_LASSO: /* only if the point falls within KeyframeEdit_LassoData defined data */
 			return ok_bezier_region_lasso;
+		case BEZT_OK_REGION_CIRCLE: /* only if the point falls within KeyframeEdit_LassoData defined data */
+			return ok_bezier_region_circle;
 		default: /* nothing was ok */
 			return NULL;
 	}
@@ -643,7 +681,7 @@ static short snap_bezier_nearestsec(KeyframeEditData *ked, BezTriple *bezt)
 	const float secf = (float)FPS;
 	
 	if (bezt->f2 & SELECT)
-		bezt->vec[1][0] = ((float)floor(bezt->vec[1][0] / secf + 0.5f) * secf);
+		bezt->vec[1][0] = (floorf(bezt->vec[1][0] / secf + 0.5f) * secf);
 	return 0;
 }
 
@@ -670,8 +708,8 @@ static short snap_bezier_horizontal(KeyframeEditData *UNUSED(ked), BezTriple *be
 	if (bezt->f2 & SELECT) {
 		bezt->vec[0][1] = bezt->vec[2][1] = bezt->vec[1][1];
 		
-		if (ELEM3(bezt->h1, HD_AUTO, HD_AUTO_ANIM, HD_VECT)) bezt->h1 = HD_ALIGN;
-		if (ELEM3(bezt->h2, HD_AUTO, HD_AUTO_ANIM, HD_VECT)) bezt->h2 = HD_ALIGN;
+		if (ELEM(bezt->h1, HD_AUTO, HD_AUTO_ANIM, HD_VECT)) bezt->h1 = HD_ALIGN;
+		if (ELEM(bezt->h2, HD_AUTO, HD_AUTO_ANIM, HD_VECT)) bezt->h2 = HD_ALIGN;
 	}
 	return 0;
 }
@@ -747,7 +785,8 @@ static short mirror_bezier_cframe(KeyframeEditData *ked, BezTriple *bezt)
 static short mirror_bezier_yaxis(KeyframeEditData *UNUSED(ked), BezTriple *bezt)
 {
 	if (bezt->f2 & SELECT) {
-		mirror_bezier_yaxis_ex(bezt, 0.0f);
+		/* Yes, names are inverted, we are mirroring accross y axis, hence along x axis... */
+		mirror_bezier_xaxis_ex(bezt, 0.0f);
 	}
 	
 	return 0;
@@ -756,7 +795,8 @@ static short mirror_bezier_yaxis(KeyframeEditData *UNUSED(ked), BezTriple *bezt)
 static short mirror_bezier_xaxis(KeyframeEditData *UNUSED(ked), BezTriple *bezt)
 {
 	if (bezt->f2 & SELECT) {
-		mirror_bezier_xaxis_ex(bezt, 0.0f);
+		/* Yes, names are inverted, we are mirroring accross x axis, hence along y axis... */
+		mirror_bezier_yaxis_ex(bezt, 0.0f);
 	}
 	
 	return 0;
@@ -776,7 +816,7 @@ static short mirror_bezier_value(KeyframeEditData *ked, BezTriple *bezt)
 {
 	/* value to mirror over is stored in the custom data -> first float value slot */
 	if (bezt->f2 & SELECT) {
-		mirror_bezier_xaxis_ex(bezt, ked->f1);
+		mirror_bezier_yaxis_ex(bezt, ked->f1);
 	}
 	
 	return 0;
@@ -810,9 +850,9 @@ KeyframeEditFunc ANIM_editkeyframes_mirror(short type)
  */
 #define ENSURE_HANDLES_MATCH(bezt)                                            \
 	if (bezt->h1 != bezt->h2) {                                               \
-		if (ELEM3(bezt->h1, HD_ALIGN, HD_AUTO, HD_AUTO_ANIM))                 \
+		if (ELEM(bezt->h1, HD_ALIGN, HD_AUTO, HD_AUTO_ANIM))                  \
 			bezt->h1 = HD_FREE;                                               \
-		if (ELEM3(bezt->h2, HD_ALIGN, HD_AUTO, HD_AUTO_ANIM))                 \
+		if (ELEM(bezt->h2, HD_ALIGN, HD_AUTO, HD_AUTO_ANIM))                  \
 			bezt->h2 = HD_FREE;                                               \
 	} (void)0
 

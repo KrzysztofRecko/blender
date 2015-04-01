@@ -39,10 +39,6 @@
 #include "BLI_fileops.h"
 #include "BLI_utildefines.h"
 
-#if defined(_MSC_VER) && (_MSC_VER <= 1500)
-#include "BLI_math_base.h"
-#endif
-
 #include "MEM_guardedalloc.h"
 
 /*
@@ -139,7 +135,7 @@ LogImageFile *cineonOpen(const unsigned char *byteStuff, int fromMemory, size_t 
 {
 	CineonMainHeader header;
 	LogImageFile *cineon = (LogImageFile *)MEM_mallocN(sizeof(LogImageFile), __func__);
-	char *filename = (char *)byteStuff;
+	const char *filename = (const char *)byteStuff;
 	int i;
 	unsigned int dataOffset;
 

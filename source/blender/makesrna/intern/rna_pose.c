@@ -140,7 +140,32 @@ static char *rna_PoseBone_path(PointerRNA *ptr)
 	return BLI_sprintfN("pose.bones[\"%s\"]", name_esc);
 }
 
+/* Bone groups only. */
+
+static bActionGroup *rna_bone_group_new(ID *id, bPose *pose, const char *name)
+{
+	bActionGroup *grp = BKE_pose_add_group(pose, name);
+	WM_main_add_notifier(NC_OBJECT | ND_POSE | NA_ADDED, id);
+	return grp;
+}
+
+static void rna_bone_group_remove(ID *id, bPose *pose, ReportList *reports, PointerRNA *grp_ptr)
+{
+	bActionGroup *grp = grp_ptr->data;
+	const int grp_idx = BLI_findindex(&pose->agroups, grp);
+
+	if (grp_idx == -1) {
+		BKE_reportf(reports, RPT_ERROR, "Bone group '%s' not found in this object", grp->name);
+		return;
+	}
+
+	BKE_pose_remove_group(pose, grp, grp_idx + 1);
+	WM_main_add_notifier(NC_OBJECT | ND_POSE | NA_REMOVED, id);
+}
+
+
 /* shared for actions groups and bone groups */
+
 void rna_ActionGroup_colorset_set(PointerRNA *ptr, int value)
 {
 	bActionGroup *grp = ptr->data;
@@ -152,6 +177,13 @@ void rna_ActionGroup_colorset_set(PointerRNA *ptr, int value)
 		/* sync colors stored with theme colors based on the index specified */
 		action_group_colors_sync(grp, NULL);
 	}
+}
+
+int rna_ActionGroup_is_custom_colorset_get(PointerRNA *ptr)
+{
+	bActionGroup *grp = ptr->data;
+	
+	return (grp->customCol < 0);
 }
 
 static void rna_BoneGroup_name_set(PointerRNA *ptr, const char *value)
@@ -226,7 +258,7 @@ static void rna_PoseChannel_rotation_axis_angle_set(PointerRNA *ptr, const float
 	
 	/* for now, assume that rotation mode is axis-angle */
 	pchan->rotAngle = value[0];
-	copy_v3_v3(pchan->rotAxis, (float *)&value[1]);
+	copy_v3_v3(pchan->rotAxis, &value[1]);
 	
 	/* TODO: validate axis? */
 }
@@ -389,7 +421,7 @@ static void rna_PoseChannel_bone_group_index_range(PointerRNA *ptr, int *min, in
 	bPose *pose = (ob) ? ob->pose : NULL;
 	
 	*min = 0;
-	*max = pose ? max_ii(0, BLI_countlist(&pose->agroups) - 1) : 0;
+	*max = pose ? max_ii(0, BLI_listbase_count(&pose->agroups) - 1) : 0;
 }
 
 static PointerRNA rna_Pose_active_bone_group_get(PointerRNA *ptr)
@@ -422,7 +454,7 @@ static void rna_Pose_active_bone_group_index_range(PointerRNA *ptr, int *min, in
 	bPose *pose = (bPose *)ptr->data;
 
 	*min = 0;
-	*max = max_ii(0, BLI_countlist(&pose->agroups) - 1);
+	*max = max_ii(0, BLI_listbase_count(&pose->agroups) - 1);
 }
 
 #if 0
@@ -649,6 +681,11 @@ void rna_def_actionbone_group_common(StructRNA *srna, int update_flag, const cha
 	RNA_def_property_enum_funcs(prop, NULL, "rna_ActionGroup_colorset_set", NULL);
 	RNA_def_property_ui_text(prop, "Color Set", "Custom color set to use");
 	RNA_def_property_update(prop, update_flag, update_cb);
+	
+	prop = RNA_def_property(srna, "is_custom_color_set", PROP_BOOLEAN, PROP_NONE);
+	RNA_def_property_boolean_funcs(prop, "rna_ActionGroup_is_custom_colorset_get", NULL);
+	RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+	RNA_def_property_ui_text(prop, "Custom Color Set", "Color set is user-defined instead of a fixed theme color set");
 	
 	/* TODO: editing the colors for this should result in changes to the color type... */
 	prop = RNA_def_property(srna, "colors", PROP_POINTER, PROP_NONE);
@@ -1241,13 +1278,29 @@ static void rna_def_bone_groups(BlenderRNA *brna, PropertyRNA *cprop)
 	StructRNA *srna;
 	PropertyRNA *prop;
 
-/*	FunctionRNA *func; */
-/*	PropertyRNA *parm; */
+	FunctionRNA *func;
+	PropertyRNA *parm;
 
 	RNA_def_property_srna(cprop, "BoneGroups");
 	srna = RNA_def_struct(brna, "BoneGroups", NULL);
 	RNA_def_struct_sdna(srna, "bPose");
 	RNA_def_struct_ui_text(srna, "Bone Groups", "Collection of bone groups");
+
+	func = RNA_def_function(srna, "new", "rna_bone_group_new");
+	RNA_def_function_ui_description(func, "Add a new bone group to the object");
+	RNA_def_function_flag(func, FUNC_USE_SELF_ID); /* ID needed for refresh */
+	RNA_def_string(func, "name", "Group", MAX_NAME, "", "Name of the new group");
+	/* return type */
+	parm = RNA_def_pointer(func, "group", "BoneGroup", "", "New bone group");
+	RNA_def_function_return(func, parm);
+
+	func = RNA_def_function(srna, "remove", "rna_bone_group_remove");
+	RNA_def_function_ui_description(func, "Remove a bone group from this object");
+	RNA_def_function_flag(func, FUNC_USE_REPORTS | FUNC_USE_SELF_ID); /* ID needed for refresh */
+	/* bone group to remove */
+	parm = RNA_def_pointer(func, "group", "BoneGroup", "", "Removed bone group");
+	RNA_def_property_flag(parm, PROP_REQUIRED | PROP_NEVER_NULL | PROP_RNAPTR);
+	RNA_def_property_clear_flag(parm, PROP_THICK_WRAP);
 
 	prop = RNA_def_property(srna, "active", PROP_POINTER, PROP_NONE);
 	RNA_def_property_struct_type(prop, "BoneGroup");

@@ -216,7 +216,7 @@ static bool actedit_get_context(bAnimContext *ac, SpaceAction *saction)
 /* Get data being edited in Graph Editor (depending on current 'mode') */
 static bool graphedit_get_context(bAnimContext *ac, SpaceIpo *sipo)
 {
-	/* init dopesheet data if non-existant (i.e. for old files) */
+	/* init dopesheet data if non-existent (i.e. for old files) */
 	if (sipo->ads == NULL) {
 		sipo->ads = MEM_callocN(sizeof(bDopeSheet), "GraphEdit DopeSheet");
 		sipo->ads->source = (ID *)ac->scene;
@@ -267,7 +267,7 @@ static bool graphedit_get_context(bAnimContext *ac, SpaceIpo *sipo)
 /* Get data being edited in Graph Editor (depending on current 'mode') */
 static bool nlaedit_get_context(bAnimContext *ac, SpaceNla *snla)
 {
-	/* init dopesheet data if non-existant (i.e. for old files) */
+	/* init dopesheet data if non-existent (i.e. for old files) */
 	if (snla->ads == NULL)
 		snla->ads = MEM_callocN(sizeof(bDopeSheet), "NlaEdit DopeSheet");
 	ac->ads = snla->ads;
@@ -423,6 +423,7 @@ bool ANIM_animdata_get_context(const bContext *C, bAnimContext *ac)
  *  - adtOk: line or block of code to execute for AnimData-blocks case (usually ANIMDATA_ADD_ANIMDATA)
  *  - nlaOk: line or block of code to execute for NLA tracks+strips case
  *  - driversOk: line or block of code to execute for Drivers case
+ *  - nlaKeysOk: line or block of code for NLA Strip Keyframes case
  *  - keysOk: line or block of code for Keyframes case
  *
  * The checks for the various cases are as follows:
@@ -433,9 +434,10 @@ bool ANIM_animdata_get_context(const bContext *C, bAnimContext *ac)
  *		converted to a new NLA strip, and the filtering options allow this
  *	2C) allow non-animated datablocks to be included so that datablocks can be added
  *	3) drivers: include drivers from animdata block (for Drivers mode in Graph Editor)
- *	4) normal keyframes: only when there is an active action
+ *  4A) nla strip keyframes: these are the per-strip controls for time and influence
+ *	4B) normal keyframes: only when there is an active action
  */
-#define ANIMDATA_FILTER_CASES(id, adtOk, nlaOk, driversOk, keysOk) \
+#define ANIMDATA_FILTER_CASES(id, adtOk, nlaOk, driversOk, nlaKeysOk, keysOk) \
 	{ \
 		if ((id)->adt) { \
 			if (!(filter_mode & ANIMFILTER_CURVE_VISIBLE) || !((id)->adt->flag & ADT_CURVES_NOT_VISIBLE)) { \
@@ -456,6 +458,9 @@ bool ANIM_animdata_get_context(const bContext *C, bAnimContext *ac)
 					} \
 				} \
 				else { \
+					if (ANIMDATA_HAS_NLA(id)) { \
+						nlaKeysOk \
+					} \
 					if (ANIMDATA_HAS_KEYS(id)) { \
 						keysOk \
 					} \
@@ -771,6 +776,31 @@ static bAnimListElem *make_new_animlistelem(void *data, short datatype, ID *owne
 				ale->adt = BKE_animdata_from_id(data);
 				break;
 			}
+			case ANIMTYPE_DSGPENCIL:
+			{
+				bGPdata *gpd = (bGPdata *)data;
+				AnimData *adt = gpd->adt;
+				
+				/* NOTE: we just reuse the same expand filter for this case */
+				ale->flag = EXPANDED_GPD(gpd);
+				
+				// XXX: currently, this is only used for access to its animation data
+				ale->key_data = (adt) ? adt->action : NULL;
+				ale->datatype = ALE_ACT;
+				
+				ale->adt = BKE_animdata_from_id(data);
+				break;
+			}
+			case ANIMTYPE_NLACONTROLS:
+			{
+				AnimData *adt = (AnimData *)data;
+				
+				ale->flag = adt->flag;
+				
+				ale->key_data = NULL;
+				ale->datatype = ALE_NONE;
+				break;
+			}
 			case ANIMTYPE_GROUP:
 			{
 				bActionGroup *agrp = (bActionGroup *)data;
@@ -962,7 +992,7 @@ static bool skip_fcurve_selected_data(bDopeSheet *ads, FCurve *fcu, ID *owner_id
 static bool skip_fcurve_with_name(bDopeSheet *ads, FCurve *fcu, ID *owner_id)
 {
 	bAnimListElem ale_dummy = {NULL};
-	bAnimChannelType *acf;
+	const bAnimChannelType *acf;
 	
 	/* create a dummy wrapper for the F-Curve */
 	ale_dummy.type = ANIMTYPE_FCURVE;
@@ -1255,7 +1285,7 @@ static size_t animfilter_nla(bAnimContext *UNUSED(ac), ListBase *anim_data, bDop
 		first = adt->nla_tracks.last;
 	}
 	else {
-		/* first track to include will the the first one (as per normal) */
+		/* first track to include will the first one (as per normal) */
 		first = adt->nla_tracks.first;
 	}
 	
@@ -1290,6 +1320,80 @@ static size_t animfilter_nla(bAnimContext *UNUSED(ac), ListBase *anim_data, bDop
 	return items;
 }
 
+/* Include the control FCurves per NLA Strip in the channel list
+ * NOTE: This is includes the expander too...
+ */
+static size_t animfilter_nla_controls(ListBase *anim_data, bDopeSheet *ads, AnimData *adt, int filter_mode, ID *owner_id)
+{
+	ListBase tmp_data = {NULL, NULL};
+	size_t tmp_items = 0;
+	size_t items = 0;
+	
+	/* add control curves from each NLA strip... */
+	/* NOTE: ANIMTYPE_FCURVES are created here, to avoid duplicating the code needed */
+	BEGIN_ANIMFILTER_SUBCHANNELS(((adt->flag & ADT_NLA_SKEYS_COLLAPSED) == 0))
+	{
+		NlaTrack *nlt;
+		NlaStrip *strip;
+		
+		/* for now, we only go one level deep - so controls on grouped FCurves are not handled */
+		for (nlt = adt->nla_tracks.first; nlt; nlt = nlt->next) {
+			for (strip = nlt->strips.first; strip; strip = strip->next) {
+				ListBase strip_curves = {NULL, NULL};
+				size_t strip_items = 0;
+				
+				/* create the raw items */
+				strip_items += animfilter_fcurves(&strip_curves, ads, strip->fcurves.first, NULL, filter_mode, owner_id);
+				
+				/* change their types and add extra data
+				 * - There is no point making a separate copy of animfilter_fcurves for this now/yet,
+				 *   unless we later get per-element control curves for other stuff too
+				 */
+				if (strip_items) {
+					bAnimListElem *ale, *ale_n = NULL;
+					
+					for (ale = strip_curves.first; ale; ale = ale_n) {
+						ale_n = ale->next;
+						
+						/* change the type to being a FCurve for editing NLA strip controls */
+						BLI_assert(ale->type == ANIMTYPE_FCURVE);
+						
+						ale->type = ANIMTYPE_NLACURVE;
+						ale->owner = strip;
+						
+						ale->adt  = NULL; /* XXX: This way, there are no problems with time mapping errors */
+					}
+				}
+				
+				/* add strip curves to the set of channels inside the group being collected */
+				BLI_movelisttolist(&tmp_data, &strip_curves);
+				BLI_assert(BLI_listbase_is_empty(&strip_curves));
+				tmp_items += strip_items;
+			}
+		}
+	}
+	END_ANIMFILTER_SUBCHANNELS;
+	
+	/* did we find anything? */
+	if (tmp_items) {
+		/* add the expander as a channel first */
+		if (filter_mode & ANIMFILTER_LIST_CHANNELS) {
+			/* currently these channels cannot be selected, so they should be skipped */
+			if ((filter_mode & (ANIMFILTER_SEL | ANIMFILTER_UNSEL)) == 0) {
+				ANIMCHANNEL_NEW_CHANNEL(adt, ANIMTYPE_NLACONTROLS, owner_id);
+			}
+		}
+		
+		/* now add the list of collected channels */
+		BLI_movelisttolist(anim_data, &tmp_data);
+		BLI_assert(BLI_listbase_is_empty(&tmp_data));
+		items += tmp_items;
+	}
+	
+	/* return the numebr of items added ot the list */
+	return items;
+}
+
 /* determine what animation data from AnimData block should get displayed */
 static size_t animfilter_block_data(bAnimContext *ac, ListBase *anim_data, bDopeSheet *ads, ID *id, int filter_mode)
 {
@@ -1316,6 +1420,9 @@ static size_t animfilter_block_data(bAnimContext *ac, ListBase *anim_data, bDope
 			},
 			{ /* Drivers */
 				items += animfilter_fcurves(anim_data, ads, adt->drivers.first, NULL, filter_mode, id);
+			},
+			{ /* NLA Control Keyframes */
+				items += animfilter_nla_controls(anim_data, ads, adt, filter_mode, id);
 			},
 			{ /* Keyframes */
 				items += animfilter_action(ac, anim_data, ads, adt->action, filter_mode, id);
@@ -1413,27 +1520,77 @@ static size_t animdata_filter_gpencil(ListBase *anim_data, void *UNUSED(data), i
 		/* only show if gpd is used by something... */
 		if (ID_REAL_USERS(gpd) < 1)
 			continue;
-			
-		/* add gpencil animation channels */
-		BEGIN_ANIMFILTER_SUBCHANNELS(EXPANDED_GPD(gpd))
-		{
-			tmp_items += animdata_filter_gpencil_data(&tmp_data, gpd, filter_mode);
-		}
-		END_ANIMFILTER_SUBCHANNELS;
 		
-		/* did we find anything? */
-		if (tmp_items) {
-			/* include data-expand widget first */
-			if (filter_mode & ANIMFILTER_LIST_CHANNELS) {
-				/* add gpd as channel too (if for drawing, and it has layers) */
-				ANIMCHANNEL_NEW_CHANNEL(gpd, ANIMTYPE_GPDATABLOCK, NULL);
-			}
-			
-			/* now add the list of collected channels */
-			BLI_movelisttolist(anim_data, &tmp_data);
-			BLI_assert(BLI_listbase_is_empty(&tmp_data));
-			items += tmp_items;
+		/* When asked from "AnimData" blocks (i.e. the top-level containers for normal animation),
+		 * for convenience, this will return GP Datablocks instead. This may cause issues down
+		 * the track, but for now, this will do...
+		 */
+		if (filter_mode & ANIMFILTER_ANIMDATA) {
+			/* just add GPD as a channel - this will add everything needed */
+			ANIMCHANNEL_NEW_CHANNEL(gpd, ANIMTYPE_GPDATABLOCK, NULL);
 		}
+		else {
+			/* add gpencil animation channels */
+			BEGIN_ANIMFILTER_SUBCHANNELS(EXPANDED_GPD(gpd))
+			{
+				tmp_items += animdata_filter_gpencil_data(&tmp_data, gpd, filter_mode);
+			}
+			END_ANIMFILTER_SUBCHANNELS;
+			
+			/* did we find anything? */
+			if (tmp_items) {
+				/* include data-expand widget first */
+				if (filter_mode & ANIMFILTER_LIST_CHANNELS) {
+					/* add gpd as channel too (if for drawing, and it has layers) */
+					ANIMCHANNEL_NEW_CHANNEL(gpd, ANIMTYPE_GPDATABLOCK, NULL);
+				}
+				
+				/* now add the list of collected channels */
+				BLI_movelisttolist(anim_data, &tmp_data);
+				BLI_assert(BLI_listbase_is_empty(&tmp_data));
+				items += tmp_items;
+			}
+		}
+	}
+	
+	/* return the number of items added to the list */
+	return items;
+}
+
+/* Helper for Grease Pencil data integrated with main DopeSheet */
+static size_t animdata_filter_ds_gpencil(bAnimContext *ac, ListBase *anim_data, bDopeSheet *ads, bGPdata *gpd, int filter_mode)
+{
+	ListBase tmp_data = {NULL, NULL};
+	size_t tmp_items = 0;
+	size_t items = 0;
+	
+	/* add relevant animation channels for Grease Pencil */
+	BEGIN_ANIMFILTER_SUBCHANNELS(EXPANDED_GPD(gpd))
+	{
+		/* add animation channels */
+		tmp_items += animfilter_block_data(ac, &tmp_data, ads, &gpd->id, filter_mode);
+		
+		/* add Grease Pencil layers */
+		// TODO: do these need a separate expander?
+		// XXX:  what order should these go in?
+	}
+	END_ANIMFILTER_SUBCHANNELS;
+	
+	/* did we find anything? */
+	if (tmp_items) {
+		/* include data-expand widget first */
+		if (filter_mode & ANIMFILTER_LIST_CHANNELS) {
+			/* check if filtering by active status */
+			// XXX: active check here needs checking
+			if (ANIMCHANNEL_ACTIVEOK(gpd)) {
+				ANIMCHANNEL_NEW_CHANNEL(gpd, ANIMTYPE_DSGPENCIL, gpd);
+			}
+		}
+		
+		/* now add the list of collected channels */
+		BLI_movelisttolist(anim_data, &tmp_data);
+		BLI_assert(BLI_listbase_is_empty(&tmp_data));
+		items += tmp_items;
 	}
 	
 	/* return the number of items added to the list */
@@ -1699,6 +1856,12 @@ static size_t animdata_filter_ds_textures(bAnimContext *ac, ListBase *anim_data,
 			mtex = (MTex **)(&wo->mtex);
 			break;
 		}
+		case ID_PA:
+		{
+			ParticleSettings *part = (ParticleSettings *)owner_id;
+			mtex = (MTex **)(&part->mtex);
+			break;
+		}
 		default: 
 		{
 			/* invalid/unsupported option */
@@ -1910,8 +2073,12 @@ static size_t animdata_filter_ds_particles(bAnimContext *ac, ListBase *anim_data
 		/* add particle-system's animation data to temp collection */
 		BEGIN_ANIMFILTER_SUBCHANNELS(FILTER_PART_OBJD(psys->part))
 		{
-			/* material's animation data */
+			/* particle system's animation data */
 			tmp_items += animfilter_block_data(ac, &tmp_data, ads, (ID *)psys->part, filter_mode);
+			
+			/* textures */
+			if (!(ads->filterflag & ADS_FILTER_NOTEX))
+				tmp_items += animdata_filter_ds_textures(ac, &tmp_data, ads, (ID *)psys->part, filter_mode);
 		}
 		END_ANIMFILTER_SUBCHANNELS;
 		
@@ -2139,6 +2306,7 @@ static size_t animdata_filter_ds_obanim(bAnimContext *ac, ListBase *anim_data, b
 			cdata = adt;
 			expanded = EXPANDED_DRVD(adt);
 		},
+		{ /* NLA Strip Controls - no dedicated channel for now (XXX) */ },
 		{ /* Keyframes */
 			type = ANIMTYPE_FILLACTD;
 			cdata = adt->action;
@@ -2215,6 +2383,11 @@ static size_t animdata_filter_dopesheet_ob(bAnimContext *ac, ListBase *anim_data
 		if ((ob->particlesystem.first) && !(ads->filterflag & ADS_FILTER_NOPART)) {
 			tmp_items += animdata_filter_ds_particles(ac, &tmp_data, ads, ob, filter_mode);
 		}
+		
+		/* grease pencil */
+		if ((ob->gpd) && !(ads->filterflag & ADS_FILTER_NOGPENCIL)) {
+			tmp_items += animdata_filter_ds_gpencil(ac, &tmp_data, ads, ob->gpd, filter_mode);
+		}
 	}
 	END_ANIMFILTER_SUBCHANNELS;
 	
@@ -2257,7 +2430,7 @@ static size_t animdata_filter_ds_world(bAnimContext *ac, ListBase *anim_data, bD
 		
 		/* textures for world */
 		if (!(ads->filterflag & ADS_FILTER_NOTEX))
-			items += animdata_filter_ds_textures(ac, &tmp_data, ads, (ID *)wo, filter_mode);
+			tmp_items += animdata_filter_ds_textures(ac, &tmp_data, ads, (ID *)wo, filter_mode);
 			
 		/* nodes */
 		if ((wo->nodetree) && !(ads->filterflag & ADS_FILTER_NONTREE)) 
@@ -2305,6 +2478,7 @@ static size_t animdata_filter_ds_scene(bAnimContext *ac, ListBase *anim_data, bD
 			cdata = adt;
 			expanded = EXPANDED_DRVD(adt);
 		},
+		{ /* NLA Strip Controls - no dedicated channel for now (XXX) */ },
 		{ /* Keyframes */
 			type = ANIMTYPE_FILLACTD;
 			cdata = adt->action;
@@ -2349,6 +2523,7 @@ static size_t animdata_filter_dopesheet_scene(bAnimContext *ac, ListBase *anim_d
 	BEGIN_ANIMFILTER_SUBCHANNELS(EXPANDED_SCEC(sce))
 	{
 		bNodeTree *ntree = sce->nodetree;
+		bGPdata *gpd = sce->gpd;
 		World *wo = sce->world;
 		
 		/* Action, Drivers, or NLA for Scene */
@@ -2369,6 +2544,11 @@ static size_t animdata_filter_dopesheet_scene(bAnimContext *ac, ListBase *anim_d
 		/* line styles */
 		if ((ads->filterflag & ADS_FILTER_NOLINESTYLE) == 0) {
 			tmp_items += animdata_filter_ds_linestyle(ac, &tmp_data, ads, sce, filter_mode);
+		}
+		
+		/* grease pencil */
+		if ((gpd) && !(ads->filterflag & ADS_FILTER_NOGPENCIL)) {
+			tmp_items += animdata_filter_ds_gpencil(ac, &tmp_data, ads, gpd, filter_mode);
 		}
 		
 		/* TODO: one day, when sequencer becomes its own datatype, perhaps it should be included here */
@@ -2595,7 +2775,7 @@ static size_t animdata_filter_remove_duplis(ListBase *anim_data)
 		 *	- just use ale->data for now, though it would be nicer to involve 
 		 *	  ale->type in combination too to capture corner cases (where same data performs differently)
 		 */
-		if (BLI_gset_reinsert(gs, ale->data, NULL)) {
+		if (BLI_gset_add(gs, ale->data)) {
 			/* this entry is 'unique' and can be kept */
 			items++;
 		}

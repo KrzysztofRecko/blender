@@ -414,10 +414,10 @@ static void bm_decim_triangulate_end(BMesh *bm)
 								BM_vert_in_edge(e, l_b->next->v) ? l_b->prev->v : l_b->next->v,
 							};
 
-							BLI_assert(ELEM3(vquad[0], vquad[1], vquad[2], vquad[3]) == false);
-							BLI_assert(ELEM3(vquad[1], vquad[0], vquad[2], vquad[3]) == false);
-							BLI_assert(ELEM3(vquad[2], vquad[1], vquad[0], vquad[3]) == false);
-							BLI_assert(ELEM3(vquad[3], vquad[1], vquad[2], vquad[0]) == false);
+							BLI_assert(ELEM(vquad[0], vquad[1], vquad[2], vquad[3]) == false);
+							BLI_assert(ELEM(vquad[1], vquad[0], vquad[2], vquad[3]) == false);
+							BLI_assert(ELEM(vquad[2], vquad[1], vquad[0], vquad[3]) == false);
+							BLI_assert(ELEM(vquad[3], vquad[1], vquad[2], vquad[0]) == false);
 
 							if (is_quad_convex_v3(vquad[0]->co, vquad[1]->co, vquad[2]->co, vquad[3]->co)) {
 								/* highly unlikely to fail, but prevents possible double-ups */
@@ -519,13 +519,17 @@ static void bm_edge_collapse_loop_customdata(BMesh *bm, BMLoop *l, BMVert *v_cle
 				if (CustomData_layer_has_math(&bm->ldata, i)) {
 					const int offset = bm->ldata.layers[i].offset;
 					const int type = bm->ldata.layers[i].type;
-					void *cd_src[2] = {(char *)src[0] + offset,
-					                   (char *)src[1] + offset};
-					void *cd_iter = (char *)l_iter->head.data + offset;
+					const void *cd_src[2] = {
+					    POINTER_OFFSET(src[0], offset),
+					    POINTER_OFFSET(src[1], offset),
+					};
+					void *cd_iter = POINTER_OFFSET(l_iter->head.data, offset);
 
 					/* detect seams */
 					if (CustomData_data_equals(type, cd_src[0], cd_iter)) {
-						CustomData_bmesh_interp_n(&bm->ldata, cd_src, w, NULL, 2, l_iter->head.data, i);
+						CustomData_bmesh_interp_n(
+						        &bm->ldata, cd_src, w, NULL, ARRAY_SIZE(cd_src),
+						        POINTER_OFFSET(l_iter->head.data, offset), i);
 #ifdef USE_SEAM
 						is_seam = false;
 #endif
@@ -719,6 +723,7 @@ static bool bm_edge_collapse(BMesh *bm, BMEdge *e_clear, BMVert *v_clear, int r_
 		BLI_assert(ok == true);
 		BLI_assert(l_a->f->len == 3);
 		BLI_assert(l_b->f->len == 3);
+		UNUSED_VARS_NDEBUG(ok);
 
 		/* keep 'v_clear' 0th */
 		if (BM_vert_in_edge(l_a->prev->e, v_clear)) {

@@ -30,12 +30,13 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "BLI_utildefines.h"
 #include "BLI_string.h"
 #include "BLI_path_util.h"
 #include "BLI_fileops.h"
-#include "BLI_md5.h"
+#include "BLI_hash_md5.h"
 #include "BLI_system.h"
 #include BLI_SYSTEM_PID_H
 
@@ -197,19 +198,6 @@ static void escape_uri_string(const char *string, char *escaped_string, int esca
 	*q = '\0';
 }
 
-static void to_hex_char(char *hexbytes, const unsigned char *bytes, int len)
-{
-	const unsigned char *p;
-	char *q;
-
-	for (q = hexbytes, p = bytes; len; p++) {
-		const unsigned char c = (unsigned char) *p;
-		len--;
-		*q++ = hex[c >> 4];
-		*q++ = hex[c & 15];
-	}
-}
-
 /** ----- end of adapted code from glib --- */
 
 static int uri_from_filename(const char *path, char *uri)
@@ -256,11 +244,9 @@ static void thumbname_from_uri(const char *uri, char *thumb, const int thumb_len
 	char hexdigest[33];
 	unsigned char digest[16];
 
-	md5_buffer(uri, strlen(uri), digest);
+	BLI_hash_md5_buffer(uri, strlen(uri), digest);
 	hexdigest[0] = '\0';
-	to_hex_char(hexdigest, digest, 16);
-	hexdigest[32] = '\0';
-	BLI_snprintf(thumb, thumb_len, "%s.png", hexdigest);
+	BLI_snprintf(thumb, thumb_len, "%s.png", BLI_hash_md5_to_hexdigest(digest, hexdigest));
 
 	// printf("%s: '%s' --> '%s'\n", __func__, uri, thumb);
 }
@@ -357,8 +343,9 @@ ImBuf *IMB_thumb_create(const char *path, ThumbSize size, ThumbSource source, Im
 				}
 
 				if (img != NULL) {
-					BLI_stat(path, &info);
-					BLI_snprintf(mtime, sizeof(mtime), "%ld", (long int)info.st_mtime);
+					if (BLI_stat(path, &info) != -1) {
+						BLI_snprintf(mtime, sizeof(mtime), "%ld", (long int)info.st_mtime);
+					}
 					BLI_snprintf(cwidth, sizeof(cwidth), "%d", img->x);
 					BLI_snprintf(cheight, sizeof(cheight), "%d", img->y);
 				}
@@ -377,8 +364,9 @@ ImBuf *IMB_thumb_create(const char *path, ThumbSize size, ThumbSource source, Im
 					}
 					IMB_free_anim(anim);
 				}
-				BLI_stat(path, &info);
-				BLI_snprintf(mtime, sizeof(mtime), "%ld", (long int)info.st_mtime);
+				if (BLI_stat(path, &info) != -1) {
+					BLI_snprintf(mtime, sizeof(mtime), "%ld", (long int)info.st_mtime);
+				}
 			}
 			if (!img) return NULL;
 
@@ -475,7 +463,7 @@ ImBuf *IMB_thumb_manage(const char *path, ThumbSize size, ThumbSource source)
 	BLI_stat_t st;
 	ImBuf *img = NULL;
 	
-	if (BLI_stat(path, &st)) {
+	if (BLI_stat(path, &st) == -1) {
 		return NULL;
 	}
 	if (!uri_from_filename(path, uri)) {

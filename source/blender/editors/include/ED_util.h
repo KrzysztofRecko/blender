@@ -31,22 +31,16 @@
 #ifndef __ED_UTIL_H__
 #define __ED_UTIL_H__
 
-struct Scene;
-struct Object;
 struct bContext;
-struct ARegion;
-struct uiBlock;
 struct wmOperator;
 struct wmOperatorType;
-struct BMEditMesh;
-struct Mesh;
 
 /* ed_util.c */
 
 void    ED_editors_init(struct bContext *C);
 void    ED_editors_exit(struct bContext *C);
 
-void    ED_editors_flush_edits(const struct bContext *C, bool for_render);
+bool    ED_editors_flush_edits(const struct bContext *C, bool for_render);
 
 /* ************** Undo ************************ */
 

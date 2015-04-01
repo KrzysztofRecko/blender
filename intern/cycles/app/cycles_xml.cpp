@@ -11,7 +11,7 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License
+ * limitations under the License.
  */
 
 #include <stdio.h>
@@ -225,21 +225,21 @@ static ShaderSocketType xml_read_socket_type(pugi::xml_node node, const char *na
 
 	if(attr) {
 		string value = attr.value();
-		if (string_iequals(value, "float"))
+		if(string_iequals(value, "float"))
 			return SHADER_SOCKET_FLOAT;
-		else if (string_iequals(value, "int"))
+		else if(string_iequals(value, "int"))
 			return SHADER_SOCKET_INT;
-		else if (string_iequals(value, "color"))
+		else if(string_iequals(value, "color"))
 			return SHADER_SOCKET_COLOR;
-		else if (string_iequals(value, "vector"))
+		else if(string_iequals(value, "vector"))
 			return SHADER_SOCKET_VECTOR;
-		else if (string_iequals(value, "point"))
+		else if(string_iequals(value, "point"))
 			return SHADER_SOCKET_POINT;
-		else if (string_iequals(value, "normal"))
+		else if(string_iequals(value, "normal"))
 			return SHADER_SOCKET_NORMAL;
-		else if (string_iequals(value, "closure color"))
+		else if(string_iequals(value, "closure color"))
 			return SHADER_SOCKET_CLOSURE;
-		else if (string_iequals(value, "string"))
+		else if(string_iequals(value, "string"))
 			return SHADER_SOCKET_STRING;
 		else
 			fprintf(stderr, "Unknown shader socket type \"%s\" for attribute \"%s\".\n", value.c_str(), name);
@@ -299,12 +299,12 @@ static void xml_read_integrator(const XMLReadState& state, pugi::xml_node node)
 	xml_read_bool(&integrator->transparent_shadows, node, "transparent_shadows");
 	
 	/* Volume */
-	xml_read_int(&integrator->volume_homogeneous_sampling, node, "volume_homogeneous_sampling");
 	xml_read_float(&integrator->volume_step_size, node, "volume_step_size");
 	xml_read_int(&integrator->volume_max_steps, node, "volume_max_steps");
 	
 	/* Various Settings */
-	xml_read_bool(&integrator->no_caustics, node, "no_caustics");
+	xml_read_bool(&integrator->caustics_reflective, node, "caustics_reflective");
+	xml_read_bool(&integrator->caustics_refractive, node, "caustics_refractive");
 	xml_read_float(&integrator->filter_glossy, node, "filter_glossy");
 	
 	xml_read_int(&integrator->seed, node, "seed");
@@ -329,6 +329,7 @@ static void xml_read_camera(const XMLReadState& state, pugi::xml_node node)
 	xml_read_float(&cam->aperturesize, node, "aperturesize"); // 0.5*focallength/fstop
 	xml_read_float(&cam->focaldistance, node, "focaldistance");
 	xml_read_float(&cam->shuttertime, node, "shuttertime");
+	xml_read_float(&cam->aperture_ratio, node, "aperture_ratio");
 
 	if(xml_equal_string(node, "type", "orthographic"))
 		cam->type = CAMERA_ORTHOGRAPHIC;
@@ -418,25 +419,25 @@ static void xml_read_shader_graph(const XMLReadState& state, Shader *shader, pug
 			 * Socket names must be stored in the extra lists instead. */
 			/* read input values */
 			for(pugi::xml_node param = node.first_child(); param; param = param.next_sibling()) {
-				if (string_iequals(param.name(), "input")) {
+				if(string_iequals(param.name(), "input")) {
 					string name;
-					if (!xml_read_string(&name, param, "name"))
+					if(!xml_read_string(&name, param, "name"))
 						continue;
 					
 					ShaderSocketType type = xml_read_socket_type(param, "type");
-					if (type == SHADER_SOCKET_UNDEFINED)
+					if(type == SHADER_SOCKET_UNDEFINED)
 						continue;
 					
 					osl->input_names.push_back(ustring(name));
 					osl->add_input(osl->input_names.back().c_str(), type);
 				}
-				else if (string_iequals(param.name(), "output")) {
+				else if(string_iequals(param.name(), "output")) {
 					string name;
-					if (!xml_read_string(&name, param, "name"))
+					if(!xml_read_string(&name, param, "name"))
 						continue;
 					
 					ShaderSocketType type = xml_read_socket_type(param, "type");
-					if (type == SHADER_SOCKET_UNDEFINED)
+					if(type == SHADER_SOCKET_UNDEFINED)
 						continue;
 					
 					osl->output_names.push_back(ustring(name));
@@ -509,8 +510,10 @@ static void xml_read_shader_graph(const XMLReadState& state, Shader *shader, pug
 		else if(string_iequals(node.name(), "mapping")) {
 			snode = new MappingNode();
 		}
-		else if(string_iequals(node.name(), "ward_bsdf")) {
-			snode = new WardBsdfNode();
+		else if(string_iequals(node.name(), "anisotropic_bsdf")) {
+			AnisotropicBsdfNode *aniso = new AnisotropicBsdfNode();
+			xml_read_enum(&aniso->distribution, AnisotropicBsdfNode::distribution_enum, node, "distribution");
+			snode = aniso;
 		}
 		else if(string_iequals(node.name(), "diffuse_bsdf")) {
 			snode = new DiffuseBsdfNode();
@@ -631,6 +634,12 @@ static void xml_read_shader_graph(const XMLReadState& state, Shader *shader, pug
 			snode = new CombineHSVNode();
 		}
 		else if(string_iequals(node.name(), "separate_hsv")) {
+			snode = new SeparateHSVNode();
+		}
+		else if(string_iequals(node.name(), "combine_xyz")) {
+			snode = new CombineHSVNode();
+		}
+		else if(string_iequals(node.name(), "separate_xyz")) {
 			snode = new SeparateHSVNode();
 		}
 		else if(string_iequals(node.name(), "hsv")) {
@@ -793,7 +802,17 @@ static void xml_read_shader(const XMLReadState& state, pugi::xml_node node)
 	xml_read_string(&shader->name, node, "name");
 	xml_read_bool(&shader->use_mis, node, "use_mis");
 	xml_read_bool(&shader->use_transparent_shadow, node, "use_transparent_shadow");
+
+	/* Volume */
 	xml_read_bool(&shader->heterogeneous_volume, node, "heterogeneous_volume");
+	xml_read_int(&shader->volume_interpolation_method, node, "volume_interpolation_method");
+
+	if(xml_equal_string(node, "volume_sampling_method", "distance"))
+		shader->volume_sampling_method = VOLUME_SAMPLING_DISTANCE;
+	else if(xml_equal_string(node, "volume_sampling_method", "equiangular"))
+		shader->volume_sampling_method = VOLUME_SAMPLING_EQUIANGULAR;
+	else if(xml_equal_string(node, "volume_sampling_method", "multiple_importance"))
+		shader->volume_sampling_method = VOLUME_SAMPLING_MULTIPLE_IMPORTANCE;
 
 	xml_read_shader_graph(state, shader, node);
 	state.scene->shaders.push_back(shader);
@@ -806,6 +825,14 @@ static void xml_read_background(const XMLReadState& state, pugi::xml_node node)
 	Shader *shader = state.scene->shaders[state.scene->default_background];
 	
 	xml_read_bool(&shader->heterogeneous_volume, node, "heterogeneous_volume");
+	xml_read_int(&shader->volume_interpolation_method, node, "volume_interpolation_method");
+
+	if(xml_equal_string(node, "volume_sampling_method", "distance"))
+		shader->volume_sampling_method = VOLUME_SAMPLING_DISTANCE;
+	else if(xml_equal_string(node, "volume_sampling_method", "equiangular"))
+		shader->volume_sampling_method = VOLUME_SAMPLING_EQUIANGULAR;
+	else if(xml_equal_string(node, "volume_sampling_method", "multiple_importance"))
+		shader->volume_sampling_method = VOLUME_SAMPLING_MULTIPLE_IMPORTANCE;
 
 	xml_read_shader_graph(state, shader, node);
 }

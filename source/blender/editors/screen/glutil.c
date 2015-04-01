@@ -45,10 +45,11 @@
 #include "BIF_gl.h"
 #include "BIF_glutil.h"
 
-#include "GPU_extensions.h"
 
 #include "IMB_colormanagement.h"
 #include "IMB_imbuf_types.h"
+
+#include "UI_interface.h"
 
 #ifndef GL_CLAMP_TO_EDGE
 #define GL_CLAMP_TO_EDGE                        0x812F
@@ -222,15 +223,15 @@ void fdrawcheckerboard(float x1, float y1, float x2, float y2)
 	glDisable(GL_POLYGON_STIPPLE);
 }
 
-void sdrawline(short x1, short y1, short x2, short y2)
+void sdrawline(int x1, int y1, int x2, int y2)
 {
-	short v[2];
+	int v[2];
 	
 	glBegin(GL_LINE_STRIP);
 	v[0] = x1; v[1] = y1;
-	glVertex2sv(v);
+	glVertex2iv(v);
 	v[0] = x2; v[1] = y2;
-	glVertex2sv(v);
+	glVertex2iv(v);
 	glEnd();
 }
 
@@ -244,25 +245,25 @@ void sdrawline(short x1, short y1, short x2, short y2)
  *     x1,y1-- x2,y1
  */
 
-static void sdrawtripoints(short x1, short y1, short x2, short y2)
+static void sdrawtripoints(int x1, int y1, int x2, int y2)
 {
-	short v[2];
+	int v[2];
 	v[0] = x1; v[1] = y1;
-	glVertex2sv(v);
+	glVertex2iv(v);
 	v[0] = x1; v[1] = y2;
-	glVertex2sv(v);
+	glVertex2iv(v);
 	v[0] = x2; v[1] = y1;
-	glVertex2sv(v);
+	glVertex2iv(v);
 }
 
-void sdrawtri(short x1, short y1, short x2, short y2)
+void sdrawtri(int x1, int y1, int x2, int y2)
 {
 	glBegin(GL_LINE_STRIP);
 	sdrawtripoints(x1, y1, x2, y2);
 	glEnd();
 }
 
-void sdrawtrifill(short x1, short y1, short x2, short y2)
+void sdrawtrifill(int x1, int y1, int x2, int y2)
 {
 	glBegin(GL_TRIANGLES);
 	sdrawtripoints(x1, y1, x2, y2);
@@ -270,22 +271,22 @@ void sdrawtrifill(short x1, short y1, short x2, short y2)
 }
 #endif
 
-void sdrawbox(short x1, short y1, short x2, short y2)
+void sdrawbox(int x1, int y1, int x2, int y2)
 {
-	short v[2];
+	int v[2];
 	
 	glBegin(GL_LINE_STRIP);
 	
 	v[0] = x1; v[1] = y1;
-	glVertex2sv(v);
+	glVertex2iv(v);
 	v[0] = x1; v[1] = y2;
-	glVertex2sv(v);
+	glVertex2iv(v);
 	v[0] = x2; v[1] = y2;
-	glVertex2sv(v);
+	glVertex2iv(v);
 	v[0] = x2; v[1] = y1;
-	glVertex2sv(v);
+	glVertex2iv(v);
 	v[0] = x1; v[1] = y1;
-	glVertex2sv(v);
+	glVertex2iv(v);
 	
 	glEnd();
 }
@@ -337,7 +338,7 @@ void sdrawXORline(int x0, int y0, int x1, int y1)
 
 void sdrawXORline4(int nr, int x0, int y0, int x1, int y1)
 {
-	static short old[4][2][2];
+	static int old[4][2][2];
 	static char flags[4] = {0, 0, 0, 0};
 	
 	/* with builtin memory, max 4 lines */
@@ -348,8 +349,8 @@ void sdrawXORline4(int nr, int x0, int y0, int x1, int y1)
 	if (nr == -1) { /* flush */
 		for (nr = 0; nr < 4; nr++) {
 			if (flags[nr]) {
-				glVertex2sv(old[nr][0]);
-				glVertex2sv(old[nr][1]);
+				glVertex2iv(old[nr][0]);
+				glVertex2iv(old[nr][1]);
 				flags[nr] = 0;
 			}
 		}
@@ -357,8 +358,8 @@ void sdrawXORline4(int nr, int x0, int y0, int x1, int y1)
 	else {
 		if (nr >= 0 && nr < 4) {
 			if (flags[nr]) {
-				glVertex2sv(old[nr][0]);
-				glVertex2sv(old[nr][1]);
+				glVertex2iv(old[nr][0]);
+				glVertex2iv(old[nr][1]);
 			}
 
 			old[nr][0][0] = x0;
@@ -838,7 +839,7 @@ void gla2DDrawTranslatePt(gla2DDrawInfo *di, float wo_x, float wo_y, int *r_sc_x
 }
 
 /**
- * Translate the \a world point from world coordiantes into screen space.
+ * Translate the \a world point from world coordinates into screen space.
  */
 void gla2DDrawTranslatePtv(gla2DDrawInfo *di, float world[2], int screen_r[2])
 {
@@ -847,7 +848,7 @@ void gla2DDrawTranslatePtv(gla2DDrawInfo *di, float world[2], int screen_r[2])
 }
 
 /**
- * Restores the previous OpenGL state and free's the auxilary gla data.
+ * Restores the previous OpenGL state and frees the auxiliary gla data.
  */
 void glaEnd2DDraw(gla2DDrawInfo *di)
 {
@@ -1135,7 +1136,44 @@ void glaDrawImBuf_glsl_ctx(const bContext *C, ImBuf *ibuf, float x, float y, int
 
 void cpack(unsigned int x)
 {
-	glColor3ub( ( (x)        & 0xFF),
-	            (((x) >>  8) & 0xFF),
-	            (((x) >> 16) & 0xFF) );
+	glColor3ub(( (x)        & 0xFF),
+	           (((x) >>  8) & 0xFF),
+	           (((x) >> 16) & 0xFF));
+}
+
+void glaDrawBorderCorners(const rcti *border, float zoomx, float zoomy)
+{
+	float delta_x = 4.0f * UI_DPI_FAC / zoomx;
+	float delta_y = 4.0f * UI_DPI_FAC / zoomy;
+
+	delta_x = min_ff(delta_x, border->xmax - border->xmin);
+	delta_y = min_ff(delta_y, border->ymax - border->ymin);
+
+	/* left bottom corner */
+	glBegin(GL_LINE_STRIP);
+	glVertex2f(border->xmin, border->ymin + delta_y);
+	glVertex2f(border->xmin, border->ymin);
+	glVertex2f(border->xmin + delta_x, border->ymin);
+	glEnd();
+
+	/* left top corner */
+	glBegin(GL_LINE_STRIP);
+	glVertex2f(border->xmin, border->ymax - delta_y);
+	glVertex2f(border->xmin, border->ymax);
+	glVertex2f(border->xmin + delta_x, border->ymax);
+	glEnd();
+
+	/* right bottom corner */
+	glBegin(GL_LINE_STRIP);
+	glVertex2f(border->xmax - delta_x, border->ymin);
+	glVertex2f(border->xmax, border->ymin);
+	glVertex2f(border->xmax, border->ymin + delta_y);
+	glEnd();
+
+	/* right top corner */
+	glBegin(GL_LINE_STRIP);
+	glVertex2f(border->xmax - delta_x, border->ymax);
+	glVertex2f(border->xmax, border->ymax);
+	glVertex2f(border->xmax, border->ymax - delta_y);
+	glEnd();
 }

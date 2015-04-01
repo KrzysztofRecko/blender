@@ -87,6 +87,7 @@ enum {
 
 	TH_GRID,
 	TH_WIRE,
+	TH_WIRE_INNER,
 	TH_WIRE_EDIT,
 	TH_SELECT,
 	TH_ACTIVE,
@@ -106,9 +107,12 @@ enum {
 	TH_FACE_SELECT,
 	TH_NORMAL,
 	TH_VNORMAL,
+	TH_LNORMAL,
 	TH_FACE_DOT,
 	TH_FACEDOT_SIZE,
 	TH_CFRAME,
+	TH_TIME_KEYFRAME,
+	TH_TIME_GP_KEYFRAME,
 	TH_NURB_ULINE,
 	TH_NURB_VLINE,
 	TH_NURB_SEL_ULINE,
@@ -205,6 +209,10 @@ enum {
 	TH_HANDLE_VERTEX_SELECT,
 	TH_HANDLE_VERTEX_SIZE,
 	
+	TH_GP_VERTEX,
+	TH_GP_VERTEX_SELECT,
+	TH_GP_VERTEX_SIZE,
+	
 	TH_DOPESHEET_CHANNELOB,
 	TH_DOPESHEET_CHANNELSUBOB,
 	
@@ -237,6 +245,9 @@ enum {
 	TH_STITCH_PREVIEW_UNSTITCHABLE,
 	TH_STITCH_PREVIEW_ACTIVE,
 
+	TH_PAINT_CURVE_HANDLE,
+	TH_PAINT_CURVE_PIVOT,
+
 	TH_UV_SHADOW,
 	TH_UV_OTHERS,
 
@@ -261,6 +272,8 @@ enum {
 	TH_NLA_SOUND,
 	TH_NLA_SOUND_SEL,
 	
+	TH_WIDGET_EMBOSS,
+
 	TH_AXIS_X,		/* X/Y/Z Axis */
 	TH_AXIS_Y,
 	TH_AXIS_Z,
@@ -280,13 +293,19 @@ enum {
 	TH_INFO_DEBUG,
 	TH_INFO_DEBUG_TEXT,
 	TH_VIEW_OVERLAY,
+	
+	TH_V3D_CLIPPING_BORDER
 };
 /* XXX WARNING: previous is saved in file, so do not change order! */
 
 /* specific defines per space should have higher define values */
 
 struct bTheme;
-struct PointerRNA;
+
+struct bThemeState {
+	struct bTheme *theme;
+	int spacetype, regionid;
+};
 
 // THE CODERS API FOR THEMES:
 
@@ -341,11 +360,17 @@ void    UI_GetColorPtrBlendShade3ubv(const unsigned char cp1[3], const unsigned 
 // clear the openGL ClearColor using the input colorid
 void    UI_ThemeClearColor(int colorid);
 
+// clear the openGL ClearColor using the input colorid using optional transparency
+void    UI_ThemeClearColorAlpha(int colorid, float alpha);
+
 // internal (blender) usage only, for init and set active
 void    UI_SetTheme(int spacetype, int regionid);
 
 // get current theme
 struct bTheme *UI_GetTheme(void);
+
+void UI_Theme_Store(struct bThemeState *theme_state);
+void UI_Theme_Restore(struct bThemeState *theme_state);
 
 // return shadow width outside menus and popups */
 int UI_ThemeMenuShadowWidth(void);

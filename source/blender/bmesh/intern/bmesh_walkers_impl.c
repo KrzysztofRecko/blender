@@ -33,7 +33,6 @@
 #include "BKE_customdata.h"
 
 #include "bmesh.h"
-#include "intern/bmesh_private.h"
 #include "intern/bmesh_walkers_private.h"
 
 /* pop into stack memory (common operation) */
@@ -738,7 +737,7 @@ static void *bmw_LoopWalker_step(BMWalker *walker)
 		    (owalk.is_single == false && vert_edge_tot > 2) ||
 
 		    /* initial edge was a boundary, so is this edge and vertex is only apart of this face
-		     * this lets us walk over the the boundary of an ngon which is handy */
+		     * this lets us walk over the boundary of an ngon which is handy */
 		    (owalk.is_single == true && vert_edge_tot == 2 && BM_edge_is_boundary(e)))
 		{
 			/* find next boundary edge in the fan */
@@ -919,8 +918,8 @@ static void *bmw_FaceLoopWalker_step(BMWalker *walker)
 		}
 
 		/* both may already exist */
-		BLI_gset_reinsert(walker->visit_set_alt, l->e, NULL);
-		BLI_gset_reinsert(walker->visit_set, l->f, NULL);
+		BLI_gset_add(walker->visit_set_alt, l->e);
+		BLI_gset_add(walker->visit_set, l->f);
 	}
 
 	return f;
@@ -1352,4 +1351,4 @@ BMWalker *bm_walker_types[] = {
 	&bmw_ConnectedVertexWalker_Type,    /* BMW_CONNECTED_VERTEX */
 };
 
-const int bm_totwalkers = sizeof(bm_walker_types) / sizeof(*bm_walker_types);
+const int bm_totwalkers = ARRAY_SIZE(bm_walker_types);

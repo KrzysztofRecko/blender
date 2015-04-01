@@ -11,7 +11,7 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License
+ * limitations under the License.
  */
 
 CCL_NAMESPACE_BEGIN
@@ -65,7 +65,7 @@ ccl_device float4 svm_image_texture(KernelGlobals *kg, int id, float x, float y,
 
 	float4 r;
 	int ix, iy, nix, niy;
-	if (interpolation == INTERPOLATION_CLOSEST) {
+	if(interpolation == INTERPOLATION_CLOSEST) {
 		svm_image_texture_frac(x*width, &ix);
 		svm_image_texture_frac(y*height, &iy);
 
@@ -134,8 +134,8 @@ ccl_device float4 svm_image_texture(KernelGlobals *kg, int id, float x, float y,
 {
 #ifdef __KERNEL_CPU__
 #ifdef __KERNEL_SSE2__
-	__m128 r_m128;
-	float4 &r = (float4 &)r_m128;
+	ssef r_ssef;
+	float4 &r = (float4 &)r_ssef;
 	r = kernel_tex_image_interp(id, x, y);
 #else
 	float4 r = kernel_tex_image_interp(id, x, y);
@@ -252,9 +252,9 @@ ccl_device float4 svm_image_texture(KernelGlobals *kg, int id, float x, float y,
 		case 96: r = kernel_tex_image_interp(__tex_image_096, x, y); break;
 		case 97: r = kernel_tex_image_interp(__tex_image_097, x, y); break;
 		case 98: r = kernel_tex_image_interp(__tex_image_098, x, y); break;
-		case 99: r = kernel_tex_image_interp(__tex_image_099, x, y); break;
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 300)
+		case 99: r = kernel_tex_image_interp(__tex_image_099, x, y); break;
 		case 100: r = kernel_tex_image_interp(__tex_image_100, x, y); break;
 		case 101: r = kernel_tex_image_interp(__tex_image_101, x, y); break;
 		case 102: r = kernel_tex_image_interp(__tex_image_102, x, y); break;
@@ -318,14 +318,14 @@ ccl_device float4 svm_image_texture(KernelGlobals *kg, int id, float x, float y,
 	float alpha = r.w;
 
 	if(use_alpha && alpha != 1.0f && alpha != 0.0f) {
-		r_m128 = _mm_div_ps(r_m128, _mm_set1_ps(alpha));
+		r_ssef = r_ssef / ssef(alpha);
 		if(id >= TEX_NUM_FLOAT_IMAGES)
-			r_m128 = _mm_min_ps(r_m128, _mm_set1_ps(1.0f));
+			r_ssef = min(r_ssef, ssef(1.0f));
 		r.w = alpha;
 	}
 
 	if(srgb) {
-		r_m128 = color_srgb_to_scene_linear(r_m128);
+		r_ssef = color_srgb_to_scene_linear(r_ssef);
 		r.w = alpha;
 	}
 #else
@@ -354,6 +354,12 @@ ccl_device float4 svm_image_texture(KernelGlobals *kg, int id, float x, float y,
 
 #endif
 
+/* Remap coordnate from 0..1 box to -1..-1 */
+ccl_device_inline float3 texco_remap_square(float3 co)
+{
+	return (co - make_float3(0.5f, 0.5f, 0.5f)) * 2.0f;
+}
+
 ccl_device void svm_node_tex_image(KernelGlobals *kg, ShaderData *sd, float *stack, uint4 node)
 {
 	uint id = node.y;
@@ -362,8 +368,20 @@ ccl_device void svm_node_tex_image(KernelGlobals *kg, ShaderData *sd, float *sta
 	decode_node_uchar4(node.z, &co_offset, &out_offset, &alpha_offset, &srgb);
 
 	float3 co = stack_load_float3(stack, co_offset);
+	float2 tex_co;
 	uint use_alpha = stack_valid(alpha_offset);
-	float4 f = svm_image_texture(kg, id, co.x, co.y, srgb, use_alpha);
+	if(node.w == NODE_IMAGE_PROJ_SPHERE) {
+		co = texco_remap_square(co);
+		tex_co = map_to_sphere(co);
+	}
+	else if(node.w == NODE_IMAGE_PROJ_TUBE) {
+		co = texco_remap_square(co);
+		tex_co = map_to_tube(co);
+	}
+	else {
+		tex_co = make_float2(co.x, co.y);
+	}
+	float4 f = svm_image_texture(kg, id, tex_co.x, tex_co.y, srgb, use_alpha);
 
 	if(stack_valid(out_offset))
 		stack_store_float3(stack, out_offset, make_float3(f.x, f.y, f.z));
@@ -435,6 +453,10 @@ ccl_device void svm_node_tex_image_box(KernelGlobals *kg, ShaderData *sd, float 
 			weight.z = ((2.0f - limit)*N.z + (limit - 1.0f))/(2.0f*limit - 1.0f);
 		}
 	}
+	else {
+		/* Desperate mode, no valid choice anyway, fallback to one side.*/
+		weight.x = 1.0f;
+	}
 
 	/* now fetch textures */
 	uint co_offset, out_offset, alpha_offset, srgb;
@@ -458,7 +480,6 @@ ccl_device void svm_node_tex_image_box(KernelGlobals *kg, ShaderData *sd, float 
 	if(stack_valid(alpha_offset))
 		stack_store_float(stack, alpha_offset, f.w);
 }
-
 
 ccl_device void svm_node_tex_environment(KernelGlobals *kg, ShaderData *sd, float *stack, uint4 node)
 {

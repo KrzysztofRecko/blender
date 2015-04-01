@@ -11,7 +11,7 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License
+ * limitations under the License.
  */
 
 CCL_NAMESPACE_BEGIN
@@ -27,13 +27,13 @@ ccl_device void svm_node_camera(KernelGlobals *kg, ShaderData *sd, float *stack,
 	zdepth = vector.z;
 	distance = len(vector);
 
-	if (stack_valid(out_vector))
+	if(stack_valid(out_vector))
 		stack_store_float3(stack, out_vector, normalize(vector));
 
-	if (stack_valid(out_zdepth))
+	if(stack_valid(out_zdepth))
 		stack_store_float(stack, out_zdepth, zdepth);
 
-	if (stack_valid(out_distance))
+	if(stack_valid(out_distance))
 		stack_store_float(stack, out_distance, distance);
 }
 

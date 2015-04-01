@@ -11,7 +11,7 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License
+ * limitations under the License.
  */
 
 #ifndef __SVM_H__
@@ -87,7 +87,7 @@ ccl_device_inline int stack_load_int(float *stack, uint a)
 	return __float_as_int(stack[a]);
 }
 
-ccl_device_inline float stack_load_int_default(float *stack, uint a, uint value)
+ccl_device_inline int stack_load_int_default(float *stack, uint a, uint value)
 {
 	return (a == (uint)SVM_STACK_INVALID)? (int)value: stack_load_int(stack, a);
 }
@@ -164,11 +164,12 @@ CCL_NAMESPACE_END
 #include "svm_mapping.h"
 #include "svm_normal.h"
 #include "svm_wave.h"
+#include "svm_math_util.h"
 #include "svm_math.h"
 #include "svm_mix.h"
 #include "svm_ramp.h"
-#include "svm_sepcomb_rgb.h"
 #include "svm_sepcomb_hsv.h"
+#include "svm_sepcomb_vector.h"
 #include "svm_musgrave.h"
 #include "svm_sky.h"
 #include "svm_tex_coord.h"
@@ -236,7 +237,7 @@ ccl_device_noinline void svm_eval_nodes(KernelGlobals *kg, ShaderData *sd, Shade
 				if(stack_load_float(stack, node.z) == 1.0f)
 					offset += node.y;
 				break;
-#ifdef __IMAGE_TEXTURES__
+#ifdef __TEXTURES__
 			case NODE_TEX_IMAGE:
 				svm_node_tex_image(kg, sd, stack, node);
 				break;
@@ -246,8 +247,6 @@ ccl_device_noinline void svm_eval_nodes(KernelGlobals *kg, ShaderData *sd, Shade
 			case NODE_TEX_ENVIRONMENT:
 				svm_node_tex_environment(kg, sd, stack, node);
 				break;
-#endif
-#ifdef __PROCEDURAL_TEXTURES__
 			case NODE_TEX_SKY:
 				svm_node_tex_sky(kg, sd, stack, node, &offset);
 				break;
@@ -327,11 +326,11 @@ ccl_device_noinline void svm_eval_nodes(KernelGlobals *kg, ShaderData *sd, Shade
 			case NODE_MIX:
 				svm_node_mix(kg, sd, stack, node.y, node.z, node.w, &offset);
 				break;
-			case NODE_SEPARATE_RGB:
-				svm_node_separate_rgb(sd, stack, node.y, node.z, node.w);
+			case NODE_SEPARATE_VECTOR:
+				svm_node_separate_vector(sd, stack, node.y, node.z, node.w);
 				break;
-			case NODE_COMBINE_RGB:
-				svm_node_combine_rgb(sd, stack, node.y, node.z, node.w);
+			case NODE_COMBINE_VECTOR:
+				svm_node_combine_vector(sd, stack, node.y, node.z, node.w);
 				break;
 			case NODE_SEPARATE_HSV:
 				svm_node_separate_hsv(kg, sd, stack, node.y, node.z, node.w, &offset);
@@ -362,7 +361,7 @@ ccl_device_noinline void svm_eval_nodes(KernelGlobals *kg, ShaderData *sd, Shade
 				break;
 #ifdef __EXTRA_NODES__
 			case NODE_WIREFRAME:
-				svm_node_wireframe(kg, sd, stack, node.y, node.z, node.w);
+				svm_node_wireframe(kg, sd, stack, node);
 				break;
 			case NODE_WAVELENGTH:
 				svm_node_wavelength(sd, stack, node.y, node.z);
@@ -396,14 +395,14 @@ ccl_device_noinline void svm_eval_nodes(KernelGlobals *kg, ShaderData *sd, Shade
 				svm_node_min_max(kg, sd, stack, node.y, node.z, &offset);
 				break;
 			case NODE_TEX_COORD:
-				svm_node_tex_coord(kg, sd, path_flag, stack, node.y, node.z);
+				svm_node_tex_coord(kg, sd, path_flag, stack, node, &offset);
 				break;
 #ifdef __EXTRA_NODES__
 			case NODE_TEX_COORD_BUMP_DX:
-				svm_node_tex_coord_bump_dx(kg, sd, path_flag, stack, node.y, node.z);
+				svm_node_tex_coord_bump_dx(kg, sd, path_flag, stack, node, &offset);
 				break;
 			case NODE_TEX_COORD_BUMP_DY:
-				svm_node_tex_coord_bump_dy(kg, sd, path_flag, stack, node.y, node.z);
+				svm_node_tex_coord_bump_dy(kg, sd, path_flag, stack, node, &offset);
 				break;
 			case NODE_CLOSURE_SET_NORMAL:
 				svm_node_set_normal(kg, sd, stack, node.y, node.z );
@@ -420,17 +419,13 @@ ccl_device_noinline void svm_eval_nodes(KernelGlobals *kg, ShaderData *sd, Shade
 			case NODE_LIGHT_FALLOFF:
 				svm_node_light_falloff(sd, stack, node);
 				break;
-#endif			
-#ifdef __ANISOTROPIC__
+#endif
 			case NODE_TANGENT:
 				svm_node_tangent(kg, sd, stack, node);
 				break;
-#endif			
-#ifdef __NORMAL_MAP__
 			case NODE_NORMAL_MAP:
 				svm_node_normal_map(kg, sd, stack, node);
-				break;
-#endif			
+				break;	
 			case NODE_END:
 			default:
 				return;

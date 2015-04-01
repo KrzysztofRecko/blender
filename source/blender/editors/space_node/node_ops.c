@@ -58,7 +58,7 @@ void node_operatortypes(void)
 	WM_operatortype_append(NODE_OT_select_border);
 	WM_operatortype_append(NODE_OT_select_circle);
 	WM_operatortype_append(NODE_OT_select_lasso);
-	WM_operatortype_append(NODE_OT_select_same_type);
+	WM_operatortype_append(NODE_OT_select_grouped);
 	WM_operatortype_append(NODE_OT_select_same_type_step);
 	
 	WM_operatortype_append(NODE_OT_find_node);
@@ -111,7 +111,6 @@ void node_operatortypes(void)
 	WM_operatortype_append(NODE_OT_output_file_move_active_socket);
 	
 	WM_operatortype_append(NODE_OT_parent_set);
-	WM_operatortype_append(NODE_OT_parent_clear);
 	WM_operatortype_append(NODE_OT_join);
 	WM_operatortype_append(NODE_OT_attach);
 	WM_operatortype_append(NODE_OT_detach);
@@ -122,6 +121,7 @@ void node_operatortypes(void)
 	WM_operatortype_append(NODE_OT_shader_script_update);
 
 	WM_operatortype_append(NODE_OT_viewer_border);
+	WM_operatortype_append(NODE_OT_clear_viewer_border);
 
 	WM_operatortype_append(NODE_OT_tree_socket_add);
 	WM_operatortype_append(NODE_OT_tree_socket_remove);
@@ -146,6 +146,10 @@ void ED_operatormacros_node(void)
 	RNA_boolean_set(mot->ptr, "release_confirm", true);
 	WM_operatortype_macro_define(ot, "NODE_OT_attach");
 
+	/* Note: Currently not in a default keymap or menu due to messy keymaps
+	 * and tricky invoke functionality.
+	 * Kept around in case users want to make own shortcuts.
+	 */
 	ot = WM_operatortype_append_macro("NODE_OT_detach_translate_attach", "Detach and Move",
 	                                  "Detach nodes, move and attach to frame",
 	                                  OPTYPE_UNDO | OPTYPE_REGISTER);
@@ -266,7 +270,7 @@ void node_keymap(struct wmKeyConfig *keyconf)
 	WM_keymap_add_item(keymap, "NODE_OT_duplicate_move_keep_inputs", DKEY, KM_PRESS, KM_SHIFT | KM_CTRL, 0);
 	
 	WM_keymap_add_item(keymap, "NODE_OT_parent_set", PKEY, KM_PRESS, KM_CTRL, 0);
-	WM_keymap_add_item(keymap, "NODE_OT_parent_clear", PKEY, KM_PRESS, KM_ALT, 0);
+	WM_keymap_add_item(keymap, "NODE_OT_detach", PKEY, KM_PRESS, KM_ALT, 0);
 	WM_keymap_add_item(keymap, "NODE_OT_join", JKEY, KM_PRESS, KM_CTRL, 0);
 	
 	WM_keymap_add_item(keymap, "NODE_OT_hide_toggle", HKEY, KM_PRESS, 0, 0);
@@ -292,7 +296,10 @@ void node_keymap(struct wmKeyConfig *keyconf)
 
 	WM_keymap_add_item(keymap, "NODE_OT_select_linked_to", LKEY, KM_PRESS, KM_SHIFT, 0);
 	WM_keymap_add_item(keymap, "NODE_OT_select_linked_from", LKEY, KM_PRESS, 0, 0);
-	WM_keymap_add_item(keymap, "NODE_OT_select_same_type", GKEY, KM_PRESS, KM_SHIFT, 0);
+	kmi = WM_keymap_add_item(keymap, "NODE_OT_select_grouped", GKEY, KM_PRESS, KM_SHIFT, 0);
+	RNA_boolean_set(kmi->ptr, "extend", false);
+	kmi = WM_keymap_add_item(keymap, "NODE_OT_select_grouped", GKEY, KM_PRESS, KM_SHIFT | KM_CTRL, 0);
+	RNA_boolean_set(kmi->ptr, "extend", true);
 
 	kmi = WM_keymap_add_item(keymap, "NODE_OT_select_same_type_step", RIGHTBRACKETKEY, KM_PRESS, KM_SHIFT, 0);
 	RNA_boolean_set(kmi->ptr, "prev", false);
@@ -307,7 +314,7 @@ void node_keymap(struct wmKeyConfig *keyconf)
 	WM_keymap_add_item(keymap, "NODE_OT_group_separate", PKEY, KM_PRESS, 0, 0);
 	kmi = WM_keymap_add_item(keymap, "NODE_OT_group_edit", TABKEY, KM_PRESS, 0, 0);
 	RNA_boolean_set(kmi->ptr, "exit", false);
-	kmi = WM_keymap_add_item(keymap, "NODE_OT_group_edit", TABKEY, KM_PRESS, KM_SHIFT, 0);
+	kmi = WM_keymap_add_item(keymap, "NODE_OT_group_edit", TABKEY, KM_PRESS, KM_CTRL, 0);
 	RNA_boolean_set(kmi->ptr, "exit", true);
 
 	WM_keymap_add_item(keymap, "NODE_OT_read_renderlayers", RKEY, KM_PRESS, KM_CTRL, 0);
@@ -321,6 +328,7 @@ void node_keymap(struct wmKeyConfig *keyconf)
 	WM_keymap_add_item(keymap, "NODE_OT_clipboard_paste", VKEY, KM_PRESS, KM_OSKEY, 0);
 #endif
 	WM_keymap_add_item(keymap, "NODE_OT_viewer_border", BKEY, KM_PRESS, KM_CTRL, 0);
+	WM_keymap_add_item(keymap, "NODE_OT_clear_viewer_border", BKEY, KM_PRESS, KM_ALT | KM_CTRL, 0);
 
 	transform_keymap_for_space(keyconf, keymap, SPACE_NODE);
 }

@@ -1086,8 +1086,9 @@ static void mouse_action_keys(bAnimContext *ac, const int mval[2], short select_
 	View2D *v2d = &ac->ar->v2d;
 	bDopeSheet *ads = NULL;
 	int channel_index;
-	short found = 0;
-	float selx = 0.0f;
+	bool found = false;
+	float frame = 0.0f; /* frame of keyframe under mouse - NLA corrections not applied/included */
+	float selx = 0.0f;  /* frame of keyframe under mouse */
 	float x, y;
 	rctf rectf;
 	
@@ -1179,7 +1180,8 @@ static void mouse_action_keys(bAnimContext *ac, const int mval[2], short select_
 				 * requiring to map each frame once again...
 				 */
 				selx = BKE_nla_tweakedit_remap(adt, ak->cfra, NLATIME_CONVERT_UNMAP);
-				found = 1;
+				frame = ak->cfra;
+				found = true;
 				break;
 			}
 			else if (ak->cfra < rectf.xmin)
@@ -1219,11 +1221,11 @@ static void mouse_action_keys(bAnimContext *ac, const int mval[2], short select_
 					agrp->flag |= AGRP_SELECTED;
 					ANIM_set_active_channel(ac, ac->data, ac->datatype, filter, agrp, ANIMTYPE_GROUP);
 				}
-				else if (ale->type == ANIMTYPE_FCURVE) {
+				else if (ELEM(ale->type, ANIMTYPE_FCURVE, ANIMTYPE_NLACURVE)) {
 					FCurve *fcu = ale->data;
 					
 					fcu->flag |= FCURVE_SELECTED;
-					ANIM_set_active_channel(ac, ac->data, ac->datatype, filter, fcu, ANIMTYPE_FCURVE);
+					ANIM_set_active_channel(ac, ac->data, ac->datatype, filter, fcu, ale->type);
 				}
 			}
 		}
@@ -1258,8 +1260,11 @@ static void mouse_action_keys(bAnimContext *ac, const int mval[2], short select_
 		if (found) {
 			/* apply selection to keyframes */
 			if (column) {
-				/* select all keyframes in the same frame as the one we hit on the active channel */
-				actkeys_mselect_column(ac, select_mode, selx);
+				/* select all keyframes in the same frame as the one we hit on the active channel 
+				 * [T41077]: "frame" not "selx" here (i.e. no NLA corrections yet) as the code here
+				 *            does that itself again as it needs to work on multiple datablocks 
+				 */
+				actkeys_mselect_column(ac, select_mode, frame);
 			}
 			else if (same_channel) {
 				/* select all keyframes in the active channel */

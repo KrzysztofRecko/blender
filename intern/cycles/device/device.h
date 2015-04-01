@@ -11,7 +11,7 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License
+ * limitations under the License.
  */
 
 #ifndef __DEVICE_H__
@@ -72,8 +72,8 @@ public:
 /* Device */
 
 struct DeviceDrawParams {
-	boost::function<void(void)> bind_display_space_shader_cb;
-	boost::function<void(void)> unbind_display_space_shader_cb;
+	function<void(void)> bind_display_space_shader_cb;
+	function<void(void)> unbind_display_space_shader_cb;
 };
 
 class Device {
@@ -106,9 +106,15 @@ public:
 	virtual void const_copy_to(const char *name, void *host, size_t size) = 0;
 
 	/* texture memory */
-	virtual void tex_alloc(const char *name, device_memory& mem,
-		InterpolationType interpolation = INTERPOLATION_NONE, bool periodic = false) {};
-	virtual void tex_free(device_memory& mem) {};
+	virtual void tex_alloc(const char * /*name*/,
+	                       device_memory& /*mem*/,
+	                       InterpolationType interpolation = INTERPOLATION_NONE,
+	                       bool periodic = false)
+	{
+		(void)interpolation;  /* Ignored. */
+		(void)periodic;  /* Ignored. */
+	};
+	virtual void tex_free(device_memory& /*mem*/) {};
 
 	/* pixel memory */
 	virtual void pixels_alloc(device_memory& mem);
@@ -119,9 +125,10 @@ public:
 	virtual void *osl_memory() { return NULL; }
 
 	/* load/compile kernels, must be called before adding tasks */ 
-	virtual bool load_kernels(bool experimental) { return true; }
+	virtual bool load_kernels(bool /*experimental*/) { return true; }
 
 	/* tasks */
+	virtual int get_split_task_count(DeviceTask& task) = 0;
 	virtual void task_add(DeviceTask& task) = 0;
 	virtual void task_wait() = 0;
 	virtual void task_cancel() = 0;
@@ -137,8 +144,8 @@ public:
 #endif
 
 	/* multi device */
-	virtual void map_tile(Device *sub_device, RenderTile& tile) {}
-	virtual int device_number(Device *sub_device) { return 0; }
+	virtual void map_tile(Device * /*sub_device*/, RenderTile& /*tile*/) {}
+	virtual int device_number(Device * /*sub_device*/) { return 0; }
 
 	/* static */
 	static Device *create(DeviceInfo& info, Stats &stats, bool background = true);
@@ -147,6 +154,7 @@ public:
 	static string string_from_type(DeviceType type);
 	static vector<DeviceType>& available_types();
 	static vector<DeviceInfo>& available_devices();
+	static string device_capabilities();
 };
 
 CCL_NAMESPACE_END

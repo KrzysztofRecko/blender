@@ -11,13 +11,13 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License
+ * limitations under the License.
  */
 
 /* CPU kernel entry points */
 
-#include "kernel.h"
 #include "kernel_compat_cpu.h"
+#include "kernel.h"
 #include "kernel_math.h"
 #include "kernel_types.h"
 #include "kernel_globals.h"
@@ -55,7 +55,7 @@ void kernel_tex_copy(KernelGlobals *kg, const char *name, device_ptr mem, size_t
 		int id = atoi(name + strlen("__tex_image_float_"));
 		int array_index = id;
 
-		if (array_index >= 0 && array_index < MAX_FLOAT_IMAGES) {
+		if(array_index >= 0 && array_index < MAX_FLOAT_IMAGES) {
 			tex = &kg->texture_float_images[array_index];
 		}
 
@@ -70,7 +70,7 @@ void kernel_tex_copy(KernelGlobals *kg, const char *name, device_ptr mem, size_t
 		int id = atoi(name + strlen("__tex_image_"));
 		int array_index = id - MAX_FLOAT_IMAGES;
 
-		if (array_index >= 0 && array_index < MAX_BYTE_IMAGES) {
+		if(array_index >= 0 && array_index < MAX_BYTE_IMAGES) {
 			tex = &kg->texture_byte_images[array_index];
 		}
 
@@ -120,12 +120,12 @@ void kernel_cpu_convert_to_half_float(KernelGlobals *kg, uchar4 *rgba, float *bu
 
 /* Shader Evaluation */
 
-void kernel_cpu_shader(KernelGlobals *kg, uint4 *input, float4 *output, int type, int i)
+void kernel_cpu_shader(KernelGlobals *kg, uint4 *input, float4 *output, int type, int i, int offset, int sample)
 {
 	if(type >= SHADER_EVAL_BAKE)
-		kernel_bake_evaluate(kg, input, output, (ShaderEvalType)type, i);
+		kernel_bake_evaluate(kg, input, output, (ShaderEvalType)type, i, offset, sample);
 	else
-		kernel_shader_evaluate(kg, input, output, (ShaderEvalType)type, i);
+		kernel_shader_evaluate(kg, input, output, (ShaderEvalType)type, i, sample);
 }
 
 CCL_NAMESPACE_END

@@ -11,7 +11,7 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License
+ * limitations under the License.
  */
 
 #include "device.h"
@@ -269,7 +269,7 @@ public:
 				lock.unlock();
 
 				TileList::iterator it = tile_list_find(the_tiles, tile);
-				if (it != the_tiles.end()) {
+				if(it != the_tiles.end()) {
 					tile.buffers = it->buffers;
 					the_tiles.erase(it);
 				}
@@ -297,6 +297,11 @@ public:
 		thread_scoped_lock lock(rpc_lock);
 		RPCSend snd(socket, &error_func, "task_cancel");
 		snd.write();
+	}
+
+	int get_split_task_count(DeviceTask& task)
+	{
+		return 1;
 	}
 
 private:

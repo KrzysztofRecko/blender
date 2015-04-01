@@ -11,7 +11,7 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License
+ * limitations under the License.
  */
 
 #ifndef __NODES_H__
@@ -218,9 +218,13 @@ public:
 	bool scattering;
 };
 
-class WardBsdfNode : public BsdfNode {
+class AnisotropicBsdfNode : public BsdfNode {
 public:
-	SHADER_NODE_CLASS(WardBsdfNode)
+	SHADER_NODE_CLASS(AnisotropicBsdfNode)
+
+	ustring distribution;
+	static ShaderEnum distribution_enum;
+
 	void attributes(Shader *shader, AttributeRequestSet *attributes);
 };
 
@@ -353,8 +357,11 @@ public:
 	SHADER_NODE_CLASS(TextureCoordinateNode)
 	void attributes(Shader *shader, AttributeRequestSet *attributes);
 	bool has_spatial_varying() { return true; }
-	
+	bool has_object_dependency() { return use_transform; }
+
 	bool from_dupli;
+	bool use_transform;
+	Transform ob_tfm;
 };
 
 class UVMapNode : public ShaderNode {
@@ -451,6 +458,11 @@ public:
 	SHADER_NODE_CLASS(CombineHSVNode)
 };
 
+class CombineXYZNode : public ShaderNode {
+public:
+	SHADER_NODE_CLASS(CombineXYZNode)
+};
+
 class GammaNode : public ShaderNode {
 public:
 	SHADER_NODE_CLASS(GammaNode)
@@ -469,6 +481,11 @@ public:
 class SeparateHSVNode : public ShaderNode {
 public:
 	SHADER_NODE_CLASS(SeparateHSVNode)
+};
+
+class SeparateXYZNode : public ShaderNode {
+public:
+	SHADER_NODE_CLASS(SeparateXYZNode)
 };
 
 class HSVNode : public ShaderNode {

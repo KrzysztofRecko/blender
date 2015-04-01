@@ -120,6 +120,14 @@ class USERPREF_MT_splash(Menu):
         row.menu("USERPREF_MT_appconfigs", text="Preset")
 
 
+# only for addons
+class USERPREF_MT_splash_footer(Menu):
+    bl_label = ""
+
+    def draw(self, context):
+        pass
+
+
 class USERPREF_PT_interface(Panel):
     bl_space_type = 'USER_PREFERENCES'
     bl_label = "Interface"
@@ -162,6 +170,12 @@ class USERPREF_PT_interface(Panel):
         sub.prop(view, "mini_axis_brightness", text="Brightness")
 
         col.separator()
+
+        if sys.platform[:3] == "win":
+            col.label("Warnings")
+            col.prop(view, "use_quit_dialog")
+            col.prop(view, "use_gl_warn_support")
+
         row.separator()
         row.separator()
 
@@ -217,13 +231,18 @@ class USERPREF_PT_interface(Panel):
         sub.prop(view, "open_sublevel_delay", text="Sub Level")
 
         col.separator()
+        col.label(text="Pie Menus:")
+        sub = col.column(align=True)
+        sub.prop(view, "pie_animation_timeout")
+        sub.prop(view, "pie_initial_timeout")
+        sub.prop(view, "pie_menu_radius")
+        sub.prop(view, "pie_menu_threshold")
+        sub.prop(view, "pie_menu_confirm")
+        col.separator()
         col.separator()
         col.separator()
 
         col.prop(view, "show_splash")
-
-        if sys.platform[:3] == "win":
-            col.prop(view, "use_quit_dialog")
 
 
 class USERPREF_PT_edit(Panel):
@@ -376,6 +395,11 @@ class USERPREF_PT_system(Panel):
         col = colsplit.column()
         col.label(text="General:")
         col.prop(system, "dpi")
+        col.label("Virtual Pixel Mode:")
+        col.prop(system, "virtual_pixel_mode", text="")
+
+        col.separator()
+
         col.prop(system, "frame_server_port")
         col.prop(system, "scrollback", text="Console Scrollback")
 
@@ -416,6 +440,11 @@ class USERPREF_PT_system(Panel):
         col.prop(system, "use_mipmaps")
         col.prop(system, "use_gpu_mipmap")
         col.prop(system, "use_16bit_textures")
+
+        if system.is_occlusion_query_supported():
+            col.separator()
+            col.label(text="Selection")
+            col.prop(system, "select_method", text="")
 
         col.separator()
 
@@ -487,8 +516,10 @@ class USERPREF_PT_system(Panel):
         sub.active = system.use_weight_color_range
         sub.template_color_ramp(system, "weight_color_range", expand=True)
 
+        column.separator()
+        column.prop(system, "font_path_ui")
+
         if bpy.app.build_options.international:
-            column.separator()
             column.prop(system, "use_international_fonts")
             if system.use_international_fonts:
                 column.prop(system, "language")
@@ -673,6 +704,9 @@ class USERPREF_PT_theme(Panel):
             col.label(text="Menu:")
             self._theme_widget_style(col, ui.wcol_menu)
 
+            col.label(text="Pie Menu:")
+            self._theme_widget_style(col, ui.wcol_pie_menu)
+
             col.label(text="Pulldown:")
             self._theme_widget_style(col, ui.wcol_pulldown)
 
@@ -721,7 +755,7 @@ class USERPREF_PT_theme(Panel):
             col.separator()
             col.separator()
 
-            col.label("Menu Shadow:")
+            col.label("Styles:")
 
             row = col.row()
 
@@ -739,11 +773,6 @@ class USERPREF_PT_theme(Panel):
             colsub = padding.column()
             colsub.row().prop(ui, "menu_shadow_width")
 
-            col.separator()
-            col.separator()
-
-            col.label("Icons:")
-
             row = col.row()
 
             subsplit = row.split(percentage=0.95)
@@ -751,16 +780,14 @@ class USERPREF_PT_theme(Panel):
             padding = subsplit.split(percentage=0.15)
             colsub = padding.column()
             colsub = padding.column()
-            # Not working yet.
-            #~ colsub.active = False
-            #~ colsub.row().prop(ui, "icon_file")
+            colsub.row().prop(ui, "icon_alpha")
 
             subsplit = row.split(percentage=0.85)
 
             padding = subsplit.split(percentage=0.15)
             colsub = padding.column()
             colsub = padding.column()
-            colsub.row().prop(ui, "icon_alpha")
+            colsub.row().prop(ui, "widget_emboss")
 
             col.separator()
             col.separator()
@@ -863,6 +890,7 @@ class USERPREF_PT_file(Panel):
         sub.label(text="Scripts:")
         sub.label(text="Sounds:")
         sub.label(text="Temp:")
+        sub.label(text="Render Cache:")
         sub.label(text="I18n Branches:")
         sub.label(text="Image Editor:")
         sub.label(text="Animation Player:")
@@ -874,6 +902,7 @@ class USERPREF_PT_file(Panel):
         sub.prop(paths, "script_directory", text="")
         sub.prop(paths, "sound_directory", text="")
         sub.prop(paths, "temporary_directory", text="")
+        sub.prop(paths, "render_cache_directory", text="")
         sub.prop(paths, "i18n_branches_directory", text="")
         sub.prop(paths, "image_editor", text="")
         subsplit = sub.split(percentage=0.3)
@@ -1142,7 +1171,7 @@ class USERPREF_MT_addons_dev_guides(Menu):
 
 class USERPREF_PT_addons(Panel):
     bl_space_type = 'USER_PREFERENCES'
-    bl_label = "Addons"
+    bl_label = "Add-ons"
     bl_region_type = 'WINDOW'
     bl_options = {'HIDE_HEADER'}
 

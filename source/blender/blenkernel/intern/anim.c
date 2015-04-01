@@ -513,7 +513,7 @@ void calc_curvepath(Object *ob, ListBase *nurbs)
 	dist = (float *)MEM_mallocN(sizeof(float) * (tot + 1), "calcpathdist");
 
 	/* all lengths in *dist */
-	bevp = bevpfirst = (BevPoint *)(bl + 1);
+	bevp = bevpfirst = bl->bevpoints;
 	fp = dist;
 	*fp = 0.0f;
 	for (a = 0; a < tot; a++) {
@@ -626,6 +626,9 @@ int where_on_path(Object *ob, float ctime, float vec[4], float dir[3], float qua
 	if (!bl) return 0;
 	if (!bl->nr) return 0;
 	if (bl->poly > -1) cycl = 1;
+
+	/* values below zero for non-cyclic curves give strange results */
+	BLI_assert(cycl || ctime >= 0.0f);
 
 	ctime *= (path->len - 1);
 	

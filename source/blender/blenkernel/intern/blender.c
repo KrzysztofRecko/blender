@@ -61,6 +61,7 @@
 #include "IMB_imbuf.h"
 #include "IMB_moviecache.h"
 
+#include "BKE_appdir.h"
 #include "BKE_blender.h"
 #include "BKE_bpath.h"
 #include "BKE_brush.h"
@@ -80,6 +81,7 @@
 #include "BKE_sound.h"
 
 #include "RE_pipeline.h"
+#include "RE_render_ext.h"
 
 #include "BLF_api.h"
 
@@ -119,6 +121,7 @@ void free_blender(void)
 	DAG_exit();
 
 	BKE_brush_system_exit();
+	RE_exit_texture_rng();	
 
 	BLI_callback_global_finalize();
 
@@ -143,10 +146,6 @@ void initglobals(void)
 	else
 		BLI_snprintf(versionstr, sizeof(versionstr), "v%d.%02d", BLENDER_VERSION / 100, BLENDER_VERSION % 100);
 
-#ifdef _WIN32
-	G.windowstate = 0;
-#endif
-
 #ifndef WITH_PYTHON_SECURITY /* default */
 	G.f |= G_SCRIPT_AUTOEXEC;
 #else
@@ -170,7 +169,7 @@ static void clear_global(void)
 static bool clean_paths_visit_cb(void *UNUSED(userdata), char *path_dst, const char *path_src)
 {
 	strcpy(path_dst, path_src);
-	BLI_clean(path_dst);
+	BLI_path_native_slash(path_dst);
 	return !STREQ(path_dst, path_src);
 }
 
@@ -182,8 +181,19 @@ static void clean_paths(Main *main)
 	BKE_bpath_traverse_main(main, clean_paths_visit_cb, BKE_BPATH_TRAVERSE_SKIP_MULTIFILE, NULL);
 
 	for (scene = main->scene.first; scene; scene = scene->id.next) {
-		BLI_clean(scene->r.pic);
+		BLI_path_native_slash(scene->r.pic);
 	}
+}
+
+static bool wm_scene_is_visible(wmWindowManager *wm, Scene *scene)
+{
+	wmWindow *win;
+	for (win = wm->windows.first; win; win = win->next) {
+		if (win->screen->scene == scene) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /* context matching */
@@ -197,29 +207,52 @@ static void setup_app_data(bContext *C, BlendFileData *bfd, const char *filepath
 	bScreen *curscreen = NULL;
 	Scene *curscene = NULL;
 	int recover;
-	char mode;
+	enum {
+		LOAD_UI = 1,
+		LOAD_UI_OFF,
+		LOAD_UNDO,
+	} mode;
 
-	/* 'u' = undo save, 'n' = no UI load */
-	if (BLI_listbase_is_empty(&bfd->main->screen)) mode = 'u';
-	else if (G.fileflags & G_FILE_NO_UI) mode = 'n';
-	else mode = 0;
+	if (BLI_listbase_is_empty(&bfd->main->screen)) {
+		mode = LOAD_UNDO;
+	}
+	else if (G.fileflags & G_FILE_NO_UI) {
+		mode = LOAD_UI_OFF;
+	}
+	else {
+		mode = LOAD_UI;
+	}
 
 	recover = (G.fileflags & G_FILE_RECOVER);
 
 	/* Free all render results, without this stale data gets displayed after loading files */
-	if (mode != 'u') {
+	if (mode != LOAD_UNDO) {
 		RE_FreeAllRenderResults();
 	}
 
 	/* Only make filepaths compatible when loading for real (not undo) */
-	if (mode != 'u') {
+	if (mode != LOAD_UNDO) {
 		clean_paths(bfd->main);
 	}
 
 	/* XXX here the complex windowmanager matching */
 	
 	/* no load screens? */
-	if (mode) {
+	if (mode != LOAD_UI) {
+		/* Logic for 'track_undo_scene' is to keep using the scene which the active screen has,
+		 * as long as the scene associated with the undo operation is visible in one of the open windows.
+		 *
+		 * - 'curscreen->scene' - scene the user is currently looking at.
+		 * - 'bfd->curscene' - scene undo-step was created in.
+		 *
+		 * This means users can have 2+ windows open and undo in both without screens switching.
+		 * But if they close one of the screens,
+		 * undo will ensure that the scene being operated on will be activated
+		 * (otherwise we'd be undoing on an off-screen scene which isn't acceptable).
+		 * see: T43424
+		 */
+		bool track_undo_scene;
+
 		/* comes from readfile.c */
 		SWAP(ListBase, G.main->wm, bfd->main->wm);
 		SWAP(ListBase, G.main->screen, bfd->main->screen);
@@ -229,15 +262,36 @@ static void setup_app_data(bContext *C, BlendFileData *bfd, const char *filepath
 		curscreen = CTX_wm_screen(C);
 		/* but use new Scene pointer */
 		curscene = bfd->curscene;
+
+		track_undo_scene = (mode == LOAD_UNDO && curscreen && bfd->main->wm.first);
+
 		if (curscene == NULL) curscene = bfd->main->scene.first;
 		/* empty file, we add a scene to make Blender work */
 		if (curscene == NULL) curscene = BKE_scene_add(bfd->main, "Empty");
-		
-		/* and we enforce curscene to be in current screen */
-		if (curscreen) curscreen->scene = curscene;  /* can run in bgmode */
+
+		if (track_undo_scene) {
+			/* keep the old (free'd) scene, let 'blo_lib_link_screen_restore'
+			 * replace it with 'curscene' if its needed */
+		}
+		else {
+			/* and we enforce curscene to be in current screen */
+			if (curscreen) {
+				/* can run in bgmode */
+				curscreen->scene = curscene;
+			}
+		}
 
 		/* clear_global will free G.main, here we can still restore pointers */
 		blo_lib_link_screen_restore(bfd->main, curscreen, curscene);
+		curscene = curscreen->scene;
+
+		if (track_undo_scene) {
+			wmWindowManager *wm = bfd->main->wm.first;
+			if (wm_scene_is_visible(wm, bfd->curscene) == false) {
+				curscene = bfd->curscene;
+				curscreen->scene = curscene;
+			}
+		}
 	}
 	
 	/* free G.main Main database */
@@ -251,7 +305,7 @@ static void setup_app_data(bContext *C, BlendFileData *bfd, const char *filepath
 
 	CTX_data_main_set(C, G.main);
 
-	sound_init_main(G.main);
+	BKE_sound_init_main(G.main);
 	
 	if (bfd->user) {
 		
@@ -259,17 +313,26 @@ static void setup_app_data(bContext *C, BlendFileData *bfd, const char *filepath
 		BKE_userdef_free();
 		
 		U = *bfd->user;
+
+		/* Security issue: any blend file could include a USER block.
+		 *
+		 * Currently we load prefs from BLENDER_STARTUP_FILE and later on load BLENDER_USERPREF_FILE,
+		 * to load the preferences defined in the users home dir.
+		 *
+		 * This means we will never accidentally (or maliciously)
+		 * enable scripts auto-execution by loading a '.blend' file.
+		 */
+		U.flag |= USER_SCRIPT_AUTOEXEC_DISABLE;
+
 		MEM_freeN(bfd->user);
 	}
 	
 	/* case G_FILE_NO_UI or no screens in file */
-	if (mode) {
+	if (mode != LOAD_UI) {
 		/* leave entire context further unaltered? */
 		CTX_data_scene_set(C, curscene);
 	}
 	else {
-		G.winpos = bfd->winpos;
-		G.displaymode = bfd->displaymode;
 		G.fileflags = bfd->fileflags;
 		CTX_wm_manager_set(C, G.main->wm.first);
 		CTX_wm_screen_set(C, bfd->curscreen);
@@ -277,6 +340,7 @@ static void setup_app_data(bContext *C, BlendFileData *bfd, const char *filepath
 		CTX_wm_area_set(C, NULL);
 		CTX_wm_region_set(C, NULL);
 		CTX_wm_menu_set(C, NULL);
+		curscene = bfd->curscene;
 	}
 	
 	/* this can happen when active scene was lib-linked, and doesn't exist anymore */
@@ -289,6 +353,9 @@ static void setup_app_data(bContext *C, BlendFileData *bfd, const char *filepath
 		CTX_wm_screen(C)->scene = CTX_data_scene(C);
 		curscene = CTX_data_scene(C);
 	}
+
+	BLI_assert(curscene == CTX_data_scene(C));
+
 
 	/* special cases, override loaded flags: */
 	if (G.f != bfd->globalf) {
@@ -332,7 +399,7 @@ static void setup_app_data(bContext *C, BlendFileData *bfd, const char *filepath
 	
 	/* baseflags, groups, make depsgraph, etc */
 	/* first handle case if other windows have different scenes visible */
-	if (mode == 0) {
+	if (mode == LOAD_UI) {
 		wmWindowManager *wm = G.main->wm.first;
 		
 		if (wm) {
@@ -340,14 +407,14 @@ static void setup_app_data(bContext *C, BlendFileData *bfd, const char *filepath
 			
 			for (win = wm->windows.first; win; win = win->next) {
 				if (win->screen && win->screen->scene) /* zealous check... */
-					if (win->screen->scene != CTX_data_scene(C))
+					if (win->screen->scene != curscene)
 						BKE_scene_set_background(G.main, win->screen->scene);
 			}
 		}
 	}
-	BKE_scene_set_background(G.main, CTX_data_scene(C));
+	BKE_scene_set_background(G.main, curscene);
 
-	if (mode != 'u') {
+	if (mode != LOAD_UNDO) {
 		IMB_colormanagement_check_file_config(G.main);
 	}
 
@@ -384,6 +451,7 @@ void BKE_userdef_free(void)
 	wmKeyMapItem *kmi;
 	wmKeyMapDiffItem *kmdi;
 	bAddon *addon, *addon_next;
+	uiFont *font;
 
 	for (km = U.user_keymaps.first; km; km = km->next) {
 		for (kmdi = km->diff_items.first; kmdi; kmdi = kmdi->next) {
@@ -412,6 +480,12 @@ void BKE_userdef_free(void)
 		}
 		MEM_freeN(addon);
 	}
+
+	for (font = U.uifonts.first; font; font = font->next) {
+		BLF_unload_id(font->blf_id);
+	}
+
+	BLF_default_set(-1);
 
 	BLI_freelistN(&U.autoexec_paths);
 
@@ -459,7 +533,9 @@ int BKE_read_file(bContext *C, const char *filepath, ReportList *reports)
 	return (bfd ? retval : BKE_READ_FILE_FAIL);
 }
 
-int BKE_read_file_from_memory(bContext *C, const void *filebuf, int filelength, ReportList *reports, int update_defaults)
+bool BKE_read_file_from_memory(
+        bContext *C, const void *filebuf, int filelength,
+        ReportList *reports, bool update_defaults)
 {
 	BlendFileData *bfd;
 
@@ -469,14 +545,17 @@ int BKE_read_file_from_memory(bContext *C, const void *filebuf, int filelength, 
 			BLO_update_defaults_startup_blend(bfd->main);
 		setup_app_data(C, bfd, "<memory2>");
 	}
-	else
+	else {
 		BKE_reports_prepend(reports, "Loading failed: ");
+	}
 
-	return (bfd ? 1 : 0);
+	return (bfd != NULL);
 }
 
 /* memfile is the undo buffer */
-int BKE_read_file_from_memfile(bContext *C, MemFile *memfile, ReportList *reports)
+bool BKE_read_file_from_memfile(
+        bContext *C, MemFile *memfile,
+        ReportList *reports)
 {
 	BlendFileData *bfd;
 
@@ -490,10 +569,11 @@ int BKE_read_file_from_memfile(bContext *C, MemFile *memfile, ReportList *report
 		
 		setup_app_data(C, bfd, "<memory1>");
 	}
-	else
+	else {
 		BKE_reports_prepend(reports, "Loading failed: ");
+	}
 
-	return (bfd ? 1 : 0);
+	return (bfd != NULL);
 }
 
 /* only read the userdef from a .blend */
@@ -539,7 +619,7 @@ int BKE_write_file_userdef(const char *filepath, ReportList *reports)
 
 static void (*blender_test_break_cb)(void) = NULL;
 
-void set_blender_test_break_cb(void (*func)(void) )
+void set_blender_test_break_cb(void (*func)(void))
 {
 	blender_test_break_cb = func;
 }
@@ -661,7 +741,7 @@ void BKE_write_undo(bContext *C, const char *name)
 		counter = counter % U.undosteps;
 	
 		BLI_snprintf(numstr, sizeof(numstr), "%d.blend", counter);
-		BLI_make_file_string("/", filepath, BLI_temporary_dir(), numstr);
+		BLI_make_file_string("/", filepath, BKE_tempdir_session(), numstr);
 	
 		/* success = */ /* UNUSED */ BLO_write_file(CTX_data_main(C), filepath, fileflags, NULL, NULL);
 		
@@ -808,13 +888,13 @@ bool BKE_undo_save_file(const char *filename)
 	int file, oflags;
 
 	if ((U.uiflag & USER_GLOBALUNDO) == 0) {
-		return 0;
+		return false;
 	}
 
 	uel = curundo;
 	if (uel == NULL) {
 		fprintf(stderr, "No undo buffer to save recovery file\n");
-		return 0;
+		return false;
 	}
 
 	/* note: This is currently used for autosave and 'quit.blend', where _not_ following symlinks is OK,
@@ -836,7 +916,7 @@ bool BKE_undo_save_file(const char *filename)
 	if (file == -1) {
 		fprintf(stderr, "Unable to save '%s': %s\n",
 		        filename, errno ? strerror(errno) : "Unknown error opening file");
-		return 0;
+		return false;
 	}
 
 	for (chunk = uel->memfile.chunks.first; chunk; chunk = chunk->next) {
@@ -850,9 +930,9 @@ bool BKE_undo_save_file(const char *filename)
 	if (chunk) {
 		fprintf(stderr, "Unable to save '%s': %s\n",
 		        filename, errno ? strerror(errno) : "Unknown error writing file");
-		return 0;
+		return false;
 	}
-	return 1;
+	return true;
 }
 
 /* sets curscene */

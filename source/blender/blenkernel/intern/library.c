@@ -71,6 +71,7 @@
 #include "BLI_blenlib.h"
 #include "BLI_utildefines.h"
 
+#include "BLI_threads.h"
 #include "BLF_translation.h"
 
 #include "BKE_action.h"
@@ -103,6 +104,7 @@
 #include "BKE_mask.h"
 #include "BKE_node.h"
 #include "BKE_object.h"
+#include "BKE_paint.h"
 #include "BKE_particle.h"
 #include "BKE_packedFile.h"
 #include "BKE_speaker.h"
@@ -137,7 +139,7 @@ void BKE_id_lib_local_paths(Main *bmain, Library *lib, ID *id)
 	BKE_bpath_traverse_id(bmain, id,
 	                      BKE_bpath_relocate_visitor,
 	                      BKE_BPATH_TRAVERSE_SKIP_MULTIFILE,
-	                      bpath_user_data);
+	                      (void *)bpath_user_data);
 }
 
 void id_lib_extern(ID *id)
@@ -349,7 +351,7 @@ bool id_copy(ID *id, ID **newid, bool test)
 		case ID_VF:
 			return false;  /* not implemented */
 		case ID_TXT:
-			if (!test) *newid = (ID *)BKE_text_copy((Text *)id);
+			if (!test) *newid = (ID *)BKE_text_copy(G.main, (Text *)id);
 			return true;
 		case ID_SCRIPT:
 			return false;  /* deprecated */
@@ -376,12 +378,13 @@ bool id_copy(ID *id, ID **newid, bool test)
 		case ID_WM:
 			return false;  /* can't be copied from here */
 		case ID_GD:
-			return false;  /* not implemented */
+			if (!test) *newid = (ID *)gpencil_data_duplicate((bGPdata *)id, false);
+			return true;
 		case ID_MSK:
 			if (!test) *newid = (ID *)BKE_mask_copy((Mask *)id);
 			return true;
 		case ID_LS:
-			if (!test) *newid = (ID *)BKE_copy_linestyle((FreestyleLineStyle *)id);
+			if (!test) *newid = (ID *)BKE_linestyle_copy(G.main, (FreestyleLineStyle *)id);
 			return true;
 	}
 	
@@ -514,6 +517,10 @@ ListBase *which_libbase(Main *mainlib, short type)
 			return &(mainlib->mask);
 		case ID_LS:
 			return &(mainlib->linestyle);
+		case ID_PAL:
+			return &(mainlib->palettes);
+		case ID_PC:
+			return &(mainlib->paintcurves);
 	}
 	return NULL;
 }
@@ -595,22 +602,26 @@ int set_listbasepointers(Main *main, ListBase **lb)
 	lb[a++] = &(main->text);
 	lb[a++] = &(main->sound);
 	lb[a++] = &(main->group);
+	lb[a++] = &(main->palettes);
+	lb[a++] = &(main->paintcurves);
 	lb[a++] = &(main->brush);
 	lb[a++] = &(main->script);
 	lb[a++] = &(main->particle);
 	lb[a++] = &(main->speaker);
 
 	lb[a++] = &(main->world);
+	lb[a++] = &(main->movieclip);
 	lb[a++] = &(main->screen);
 	lb[a++] = &(main->object);
 	lb[a++] = &(main->linestyle); /* referenced by scenes */
 	lb[a++] = &(main->scene);
 	lb[a++] = &(main->library);
 	lb[a++] = &(main->wm);
-	lb[a++] = &(main->movieclip);
 	lb[a++] = &(main->mask);
 	
 	lb[a] = NULL;
+
+	BLI_assert(a + 1 == MAX_LIBARRAY);
 
 	return a;
 }
@@ -730,6 +741,12 @@ static ID *alloc_libblock_notest(short type)
 		case ID_LS:
 			id = MEM_callocN(sizeof(FreestyleLineStyle), "Freestyle Line Style");
 			break;
+		case ID_PAL:
+			id = MEM_callocN(sizeof(Palette), "Palette");
+			break;
+		case ID_PC:
+			id = MEM_callocN(sizeof(PaintCurve), "Paint Curve");
+			break;
 	}
 	return id;
 }
@@ -747,12 +764,14 @@ void *BKE_libblock_alloc(Main *bmain, short type, const char *name)
 	
 	id = alloc_libblock_notest(type);
 	if (id) {
+		BKE_main_lock(bmain);
 		BLI_addtail(lb, id);
 		id->us = 1;
 		id->icon_id = 0;
 		*( (short *)id->name) = type;
 		new_id(lb, id, name);
 		/* alphabetic insertion: is in new_id */
+		BKE_main_unlock(bmain);
 	}
 	DAG_id_type_tag(bmain, type);
 	return id;
@@ -826,6 +845,7 @@ void *BKE_libblock_copy_nolib(ID *id, const bool do_action)
 
 	id->newid = idn;
 	idn->flag |= LIB_NEW;
+	idn->us = 1;
 
 	BKE_libblock_copy_data(idn, id, do_action);
 
@@ -881,10 +901,8 @@ static void animdata_dtar_clear_cb(ID *UNUSED(id), AnimData *adt, void *userdata
 	}
 }
 
-void BKE_libblock_free_data(ID *id)
+void BKE_libblock_free_data(Main *bmain, ID *id)
 {
-	Main *bmain = G.main;  /* should eventually be an arg */
-	
 	if (id->properties) {
 		IDP_FreeProperty(id->properties);
 		MEM_freeN(id->properties);
@@ -1003,17 +1021,26 @@ void BKE_libblock_free_ex(Main *bmain, void *idv, bool do_id_user)
 			BKE_mask_free(bmain, (Mask *)id);
 			break;
 		case ID_LS:
-			BKE_free_linestyle((FreestyleLineStyle *)id);
+			BKE_linestyle_free((FreestyleLineStyle *)id);
+			break;
+		case ID_PAL:
+			BKE_palette_free((Palette *)id);
+			break;
+		case ID_PC:
+			BKE_paint_curve_free((PaintCurve *)id);
 			break;
 	}
 
 	/* avoid notifying on removed data */
+	BKE_main_lock(bmain);
+
 	if (free_notifier_reference_cb)
 		free_notifier_reference_cb(id);
 
 	BLI_remlink(lb, id);
 
-	BKE_libblock_free_data(id);
+	BKE_libblock_free_data(bmain, id);
+	BKE_main_unlock(bmain);
 
 	MEM_freeN(id);
 }
@@ -1043,7 +1070,10 @@ void BKE_libblock_free_us(Main *bmain, void *idv)      /* test users */
 Main *BKE_main_new(void)
 {
 	Main *bmain = MEM_callocN(sizeof(Main), "new main");
-	bmain->eval_ctx = MEM_callocN(sizeof(EvaluationContext), "EvaluationContext");
+	bmain->eval_ctx = MEM_callocN(sizeof(EvaluationContext),
+	                              "EvaluationContext");
+	bmain->lock = MEM_mallocN(sizeof(SpinLock), "main lock");
+	BLI_spin_init((SpinLock *)bmain->lock);
 	return bmain;
 }
 
@@ -1106,19 +1136,34 @@ void BKE_main_free(Main *mainvar)
 		}
 	}
 
+	BLI_spin_end((SpinLock *)mainvar->lock);
+	MEM_freeN(mainvar->lock);
 	MEM_freeN(mainvar->eval_ctx);
 	MEM_freeN(mainvar);
 }
 
-/* ***************** ID ************************ */
-
-
-ID *BKE_libblock_find_name(const short type, const char *name)      /* type: "OB" or "MA" etc */
+void BKE_main_lock(struct Main *bmain)
 {
-	ListBase *lb = which_libbase(G.main, type);
+	BLI_spin_lock((SpinLock *) bmain->lock);
+}
+
+void BKE_main_unlock(struct Main *bmain)
+{
+	BLI_spin_unlock((SpinLock *) bmain->lock);
+}
+
+/* ***************** ID ************************ */
+ID *BKE_libblock_find_name_ex(struct Main *bmain, const short type, const char *name)
+{
+	ListBase *lb = which_libbase(bmain, type);
 	BLI_assert(lb != NULL);
 	return BLI_findstring(lb, name, offsetof(ID, name) + 2);
 }
+ID *BKE_libblock_find_name(const short type, const char *name)
+{
+	return BKE_libblock_find_name_ex(G.main, type, name);
+}
+
 
 void id_sort_by_name(ListBase *lb, ID *id)
 {
@@ -1158,7 +1203,7 @@ static ID *is_dupid(ListBase *lb, ID *id, const char *name)
 			/* do not test alphabetic! */
 			/* optimized */
 			if (idtest->name[2] == name[0]) {
-				if (strcmp(name, idtest->name + 2) == 0) break;
+				if (STREQ(name, idtest->name + 2)) break;
 			}
 		}
 	}
@@ -1216,7 +1261,7 @@ static bool check_for_dupid(ListBase *lb, ID *id, char *name)
 			if ( (id != idtest) &&
 			     (idtest->lib == NULL) &&
 			     (*name == *(idtest->name + 2)) &&
-			     (strncmp(name, idtest->name + 2, left_len) == 0) &&
+			     STREQLEN(name, idtest->name + 2, left_len) &&
 			     (BLI_split_name_num(leftest, &nrtest, idtest->name + 2, '.') == left_len)
 			     )
 			{
@@ -1527,7 +1572,7 @@ void test_idbutton(char *name)
 	ID *idtest;
 	
 
-	lb = which_libbase(G.main, GS(name) );
+	lb = which_libbase(G.main, GS(name));
 	if (lb == NULL) return;
 	
 	/* search for id */
@@ -1546,7 +1591,7 @@ void rename_id(ID *id, const char *name)
 	ListBase *lb;
 
 	BLI_strncpy(id->name + 2, name, sizeof(id->name) - 2);
-	lb = which_libbase(G.main, GS(id->name) );
+	lb = which_libbase(G.main, GS(id->name));
 	
 	new_id(lb, id, name);
 }

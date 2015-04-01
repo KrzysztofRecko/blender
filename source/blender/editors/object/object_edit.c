@@ -42,6 +42,8 @@
 #include "BLI_utildefines.h"
 #include "BLI_ghash.h"
 
+#include "BLF_translation.h"
+
 #include "DNA_armature_types.h"
 #include "DNA_curve_types.h"
 #include "DNA_group_types.h"
@@ -64,6 +66,7 @@
 #include "BKE_effect.h"
 #include "BKE_depsgraph.h"
 #include "BKE_image.h"
+#include "BKE_lattice.h"
 #include "BKE_library.h"
 #include "BKE_main.h"
 #include "BKE_material.h"
@@ -139,7 +142,9 @@ static int object_hide_view_clear_exec(bContext *C, wmOperator *UNUSED(op))
 	/* XXX need a context loop to handle such cases */
 	for (base = FIRSTBASE; base; base = base->next) {
 		if ((base->lay & v3d->lay) && base->object->restrictflag & OB_RESTRICT_VIEW) {
-			base->flag |= SELECT;
+			if (!(base->object->restrictflag & OB_RESTRICT_SELECT)) {
+				base->flag |= SELECT;
+			}
 			base->object->flag = base->flag;
 			base->object->restrictflag &= ~OB_RESTRICT_VIEW; 
 			changed = true;
@@ -361,6 +366,11 @@ static bool ED_object_editmode_load_ex(Object *obedit, const bool freedata)
 		if (freedata) free_editMball(obedit);
 	}
 
+	/* Tag update so no access to freed data referenced from
+	 * derived cache will happen.
+	 */
+	DAG_id_tag_update((ID *)obedit->data, 0);
+
 	return true;
 }
 
@@ -447,7 +457,7 @@ void ED_object_editmode_enter(bContext *C, int flag)
 		base = scene->basact;
 	}
 
-	if (ELEM3(NULL, base, base->object, base->object->data)) return;
+	if (ELEM(NULL, base, base->object, base->object->data)) return;
 
 	ob = base->object;
 
@@ -561,8 +571,8 @@ static int editmode_toggle_exec(bContext *C, wmOperator *op)
 	ToolSettings *toolsettings =  CTX_data_tool_settings(C);
 
 	if (!is_mode_set) {
-		Scene *scene = CTX_data_scene(C);
-		if (!ED_object_mode_compat_set(C, scene->basact->object, mode_flag, op->reports)) {
+		Object *ob = CTX_data_active_object(C);
+		if (!ED_object_mode_compat_set(C, ob, mode_flag, op->reports)) {
 			return OPERATOR_CANCELLED;
 		}
 	}
@@ -589,7 +599,7 @@ static int editmode_toggle_poll(bContext *C)
 	if ((ob->restrictflag & OB_RESTRICT_VIEW) && !(ob->mode & OB_MODE_EDIT))
 		return 0;
 
-	return (ELEM7(ob->type, OB_MESH, OB_ARMATURE, OB_FONT, OB_MBALL, OB_LATTICE, OB_SURF, OB_CURVE));
+	return OB_TYPE_SUPPORT_EDITMODE(ob->type);
 }
 
 void OBJECT_OT_editmode_toggle(wmOperatorType *ot)
@@ -760,7 +770,7 @@ static void copy_texture_space(Object *to, Object *ob)
 		texflag = ((Mesh *)ob->data)->texflag;
 		poin2 = ((Mesh *)ob->data)->loc;
 	}
-	else if (ELEM3(ob->type, OB_CURVE, OB_SURF, OB_FONT)) {
+	else if (ELEM(ob->type, OB_CURVE, OB_SURF, OB_FONT)) {
 		texflag = ((Curve *)ob->data)->texflag;
 		poin2 = ((Curve *)ob->data)->loc;
 	}
@@ -775,7 +785,7 @@ static void copy_texture_space(Object *to, Object *ob)
 		((Mesh *)to->data)->texflag = texflag;
 		poin1 = ((Mesh *)to->data)->loc;
 	}
-	else if (ELEM3(to->type, OB_CURVE, OB_SURF, OB_FONT)) {
+	else if (ELEM(to->type, OB_CURVE, OB_SURF, OB_FONT)) {
 		((Curve *)to->data)->texflag = texflag;
 		poin1 = ((Curve *)to->data)->loc;
 	}
@@ -1112,7 +1122,7 @@ void ED_object_check_force_modifiers(Main *bmain, Scene *scene, Object *object)
 	/* add/remove modifier as needed */
 	if (!md) {
 		if (pd && (pd->shape == PFIELD_SHAPE_SURFACE) && ELEM(pd->forcefield, PFIELD_GUIDE, PFIELD_TEXTURE) == 0)
-			if (ELEM4(object->type, OB_MESH, OB_SURF, OB_FONT, OB_CURVE))
+			if (ELEM(object->type, OB_MESH, OB_SURF, OB_FONT, OB_CURVE))
 				ED_object_modifier_add(NULL, bmain, scene, object, NULL, eModifierType_Surface);
 	}
 	else {
@@ -1340,7 +1350,7 @@ static int shade_smooth_exec(bContext *C, wmOperator *op)
 	ID *data;
 	Curve *cu;
 	Nurb *nu;
-	int clear = (strcmp(op->idname, "OBJECT_OT_shade_flat") == 0);
+	int clear = (STREQ(op->idname, "OBJECT_OT_shade_flat"));
 	bool done = false, linked_data = false;
 
 	CTX_DATA_BEGIN(C, Object *, ob, selected_editable_objects)
@@ -1453,7 +1463,7 @@ static void UNUSED_FUNCTION(image_aspect) (Scene *scene, View3D *v3d)
 									BKE_mesh_texspace_get(ob->data, NULL, NULL, size);
 									space = size[0] / size[1];
 								}
-								else if (ELEM3(ob->type, OB_CURVE, OB_FONT, OB_SURF)) {
+								else if (ELEM(ob->type, OB_CURVE, OB_FONT, OB_SURF)) {
 									float size[3];
 									BKE_curve_texspace_get(ob->data, NULL, NULL, size);
 									space = size[0] / size[1];
@@ -1500,7 +1510,7 @@ static EnumPropertyItem *object_mode_set_itemsf(bContext *C, PointerRNA *UNUSED(
 			if ((input->value == OB_MODE_EDIT && OB_TYPE_SUPPORT_EDITMODE(ob->type)) ||
 			    (input->value == OB_MODE_POSE && (ob->type == OB_ARMATURE)) ||
 			    (input->value == OB_MODE_PARTICLE_EDIT && use_mode_particle_edit) ||
-			    (ELEM4(input->value, OB_MODE_SCULPT, OB_MODE_VERTEX_PAINT,
+			    (ELEM(input->value, OB_MODE_SCULPT, OB_MODE_VERTEX_PAINT,
 			           OB_MODE_WEIGHT_PAINT, OB_MODE_TEXTURE_PAINT) && (ob->type == OB_MESH)) ||
 			    (input->value == OB_MODE_OBJECT))
 			{
@@ -1620,20 +1630,20 @@ static int object_mode_set_exec(bContext *C, wmOperator *op)
 	/* Exit current mode if it's not the mode we're setting */
 	if (mode != OB_MODE_OBJECT && (ob->mode != mode || toggle)) {
 		/* Enter new mode */
-		WM_operator_name_call(C, object_mode_op_string(mode), WM_OP_EXEC_REGION_WIN, NULL);
+		ED_object_toggle_modes(C, mode);
 	}
 
 	if (toggle) {
 		/* Special case for Object mode! */
 		if (mode == OB_MODE_OBJECT && restore_mode == OB_MODE_OBJECT && ob->restore_mode != OB_MODE_OBJECT) {
-			WM_operator_name_call(C, object_mode_op_string(ob->restore_mode), WM_OP_EXEC_REGION_WIN, NULL);
+			ED_object_toggle_modes(C, ob->restore_mode);
 		}
 		else if (ob->mode == mode) {
 			/* For toggling, store old mode so we know what to go back to */
 			ob->restore_mode = restore_mode;
 		}
 		else if (ob->restore_mode != OB_MODE_OBJECT && ob->restore_mode != mode) {
-			WM_operator_name_call(C, object_mode_op_string(ob->restore_mode), WM_OP_EXEC_REGION_WIN, NULL);
+			ED_object_toggle_modes(C, ob->restore_mode);
 		}
 	}
 
@@ -1669,24 +1679,12 @@ void OBJECT_OT_mode_set(wmOperatorType *ot)
 
 void ED_object_toggle_modes(bContext *C, int mode)
 {
-	/* Couldn't we use object_mode_op_string() here?
-	 * Also, if several bits are set in mode, several toggle ops will be called, is this expected?
-	 * If so, would be nice to explain why. ;) --mont29
-	 */
-	if (mode & OB_MODE_SCULPT)
-		WM_operator_name_call(C, "SCULPT_OT_sculptmode_toggle", WM_OP_EXEC_REGION_WIN, NULL);
-	if (mode & OB_MODE_VERTEX_PAINT)
-		WM_operator_name_call(C, "PAINT_OT_vertex_paint_toggle", WM_OP_EXEC_REGION_WIN, NULL);
-	if (mode & OB_MODE_WEIGHT_PAINT)
-		WM_operator_name_call(C, "PAINT_OT_weight_paint_toggle", WM_OP_EXEC_REGION_WIN, NULL);
-	if (mode & OB_MODE_TEXTURE_PAINT)
-		WM_operator_name_call(C, "PAINT_OT_texture_paint_toggle", WM_OP_EXEC_REGION_WIN, NULL);
-	if (mode & OB_MODE_PARTICLE_EDIT)
-		WM_operator_name_call(C, "PARTICLE_OT_particle_edit_toggle", WM_OP_EXEC_REGION_WIN, NULL);
-	if (mode & OB_MODE_POSE)
-		WM_operator_name_call(C, "OBJECT_OT_posemode_toggle", WM_OP_EXEC_REGION_WIN, NULL);
-	if (mode & OB_MODE_EDIT)
-		WM_operator_name_call(C, "OBJECT_OT_editmode_toggle", WM_OP_EXEC_REGION_WIN, NULL);
+	if (mode != OB_MODE_OBJECT) {
+		const char *opstring = object_mode_op_string(mode);
+		if (opstring) {
+			WM_operator_name_call(C, opstring, WM_OP_EXEC_REGION_WIN, NULL);
+		}
+	}
 }
 
 /************************ Game Properties ***********************/
@@ -1706,7 +1704,7 @@ static int game_property_new_exec(bContext *C, wmOperator *op)
 		BLI_strncpy(prop->name, name, sizeof(prop->name));
 	}
 
-	BKE_bproperty_unique(NULL, prop, 0); // make_unique_prop_names(prop->name);
+	BLI_uniquename(&ob->prop, prop, DATA_("Property"), '.', offsetof(bProperty, name), sizeof(prop->name));
 
 	WM_event_add_notifier(C, NC_LOGIC, NULL);
 	return OPERATOR_FINISHED;
@@ -2001,4 +1999,68 @@ void OBJECT_OT_game_physics_copy(struct wmOperatorType *ot)
 	
 	/* flags */
 	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
+/* generic utility function */
+
+bool ED_object_editmode_calc_active_center(Object *obedit, const bool select_only, float r_center[3])
+{
+	switch (obedit->type) {
+		case OB_MESH:
+		{
+			BMEditMesh *em = BKE_editmesh_from_object(obedit);
+			BMEditSelection ese;
+
+			if (BM_select_history_active_get(em->bm, &ese)) {
+				BM_editselection_center(&ese, r_center);
+				return true;
+			}
+			break;
+		}
+		case OB_ARMATURE:
+		{
+			bArmature *arm = obedit->data;
+			EditBone *ebo = arm->act_edbone;
+
+			if (ebo && (!select_only || (ebo->flag & (BONE_SELECTED | BONE_ROOTSEL)))) {
+				copy_v3_v3(r_center, ebo->head);
+				return true;
+			}
+
+			break;
+		}
+		case OB_CURVE:
+		case OB_SURF:
+		{
+			Curve *cu = obedit->data;
+
+			if (ED_curve_active_center(cu, r_center)) {
+				return true;
+			}
+			break;
+		}
+		case OB_MBALL:
+		{
+			MetaBall *mb = obedit->data;
+			MetaElem *ml_act = mb->lastelem;
+
+			if (ml_act && (!select_only || (ml_act->flag & SELECT))) {
+				copy_v3_v3(r_center, &ml_act->x);
+				return true;
+			}
+			break;
+		}
+		case OB_LATTICE:
+		{
+			BPoint *actbp = BKE_lattice_active_point_get(obedit->data);
+
+			if (actbp) {
+				copy_v3_v3(r_center, actbp->vec);
+				return true;
+			}
+			break;
+		}
+	}
+
+	return false;
 }

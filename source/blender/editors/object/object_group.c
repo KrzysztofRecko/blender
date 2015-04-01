@@ -61,47 +61,6 @@
 
 /********************* 3d view operators ***********************/
 
-static bool group_link_early_exit_check(Group *group, Object *object)
-{
-	GroupObject *group_object;
-
-	for (group_object = group->gobject.first; group_object; group_object = group_object->next) {
-		if (group_object->ob == object) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-static bool check_object_instances_group_recursive(Object *object, Group *group)
-{
-	if (object->dup_group) {
-		Group *dup_group = object->dup_group;
-		if ((dup_group->id.flag & LIB_DOIT) == 0) {
-			/* Cycle already exists in groups, let's prevent further crappyness */
-			return true;
-		}
-		/* flag the object to identify cyclic dependencies in further dupli groups */
-		dup_group->id.flag &= ~LIB_DOIT;
-		
-		if (dup_group == group)
-			return true;
-		else {
-			GroupObject *gob;
-			for (gob = dup_group->gobject.first; gob; gob = gob->next) {
-				if (check_object_instances_group_recursive(gob->ob, group))
-					return true;
-			}
-		}
-		
-		/* un-flag the object, it's allowed to have the same group multiple times in parallel */
-		dup_group->id.flag |= LIB_DOIT;
-	}
-	
-	return false;
-}
-
 /* can be called with C == NULL */
 static EnumPropertyItem *group_object_active_itemf(bContext *C, PointerRNA *UNUSED(ptr), PropertyRNA *UNUSED(prop), bool *r_free)
 {
@@ -185,15 +144,12 @@ static int objects_add_active_exec(bContext *C, wmOperator *op)
 		if (!BKE_group_object_exists(group, ob))
 			continue;
 
-		/* for recursive check */
-		BKE_main_id_tag_listbase(&bmain->group, true);
-
 		CTX_DATA_BEGIN (C, Base *, base, selected_editable_bases)
 		{
-			if (group_link_early_exit_check(group, base->object))
+			if (BKE_group_object_exists(group, base->object))
 				continue;
 
-			if (!check_object_instances_group_recursive(base->object, group)) {
+			if (!BKE_group_object_cyclic_check(bmain, base->object, group)) {
 				BKE_group_object_add(group, base->object, scene, base);
 				updated = true;
 			}
@@ -486,7 +442,7 @@ static int group_link_exec(bContext *C, wmOperator *op)
 	 * we could sckip all the dependency check and just consider
 	 * operator is finished.
 	 */
-	if (group_link_early_exit_check(group, ob)) {
+	if (BKE_group_object_exists(group, ob)) {
 		return OPERATOR_FINISHED;
 	}
 
@@ -495,8 +451,7 @@ static int group_link_exec(bContext *C, wmOperator *op)
 	 * It is also  bad idea to add object to group which is in group which
 	 * contains our current object.
 	 */
-	BKE_main_id_tag_listbase(&bmain->group, true);
-	if (check_object_instances_group_recursive(ob, group)) {
+	if (BKE_group_object_cyclic_check(bmain, ob, group)) {
 		BKE_report(op->reports, RPT_ERROR, "Could not add the group because of dependency cycle detected");
 		return OPERATOR_CANCELLED;
 	}
@@ -563,3 +518,67 @@ void OBJECT_OT_group_remove(wmOperatorType *ot)
 	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
+
+static int group_unlink_exec(bContext *C, wmOperator *UNUSED(op))
+{
+	Group *group = CTX_data_pointer_get_type(C, "group", &RNA_Group).data;
+
+	if (!group)
+		return OPERATOR_CANCELLED;
+
+	BKE_group_unlink(group);
+
+	WM_event_add_notifier(C, NC_OBJECT | ND_DRAW, NULL);
+
+	return OPERATOR_FINISHED;
+}
+
+void OBJECT_OT_group_unlink(wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "Unlink Group";
+	ot->idname = "OBJECT_OT_group_unlink";
+	ot->description = "Unlink the group from all objects";
+
+	/* api callbacks */
+	ot->exec = group_unlink_exec;
+	ot->poll = ED_operator_objectmode;
+
+	/* flags */
+	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
+static int select_grouped_exec(bContext *C, wmOperator *UNUSED(op))  /* Select objects in the same group as the active */
+{
+	Group *group = CTX_data_pointer_get_type(C, "group", &RNA_Group).data;
+
+	if (!group)
+		return OPERATOR_CANCELLED;
+
+	CTX_DATA_BEGIN (C, Base *, base, visible_bases)
+	{
+		if (!(base->flag & SELECT) && BKE_group_object_exists(group, base->object)) {
+			ED_base_object_select(base, BA_SELECT);
+		}
+	}
+	CTX_DATA_END;
+
+	WM_event_add_notifier(C, NC_OBJECT | ND_DRAW, NULL);
+
+	return OPERATOR_FINISHED;
+}
+
+void OBJECT_OT_grouped_select(wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "Select Grouped";
+	ot->idname = "OBJECT_OT_grouped_select";
+	ot->description = "Select all objects in group";
+
+	/* api callbacks */
+	ot->exec = select_grouped_exec;
+	ot->poll = ED_operator_objectmode;
+
+	/* flags */
+	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}

@@ -156,7 +156,9 @@ KX_Scene::KX_Scene(class SCA_IInputDevice* keyboarddevice,
 	m_networkDeviceInterface(ndi),
 	m_active_camera(NULL),
 	m_ueberExecutionPriority(0),
-	m_blenderScene(scene)
+	m_blenderScene(scene),
+	m_isActivedHysteresis(false),
+	m_lodHysteresisValue(0)
 {
 	m_suspendedtime = 0.0;
 	m_suspendeddelta = 0.0;
@@ -218,7 +220,7 @@ KX_Scene::KX_Scene(class SCA_IInputDevice* keyboarddevice,
 
 	m_bucketmanager=new RAS_BucketManager();
 	
-	bool showObstacleSimulation = scene->gm.flag & GAME_SHOW_OBSTACLE_SIMULATION;
+	bool showObstacleSimulation = (scene->gm.flag & GAME_SHOW_OBSTACLE_SIMULATION) != 0;
 	switch (scene->gm.obstacleSimulation)
 	{
 	case OBSTSIMULATION_TOI_rays:
@@ -532,6 +534,8 @@ KX_GameObject* KX_Scene::AddNodeReplicaObject(class SG_IObject* node, class CVal
 	m_objectlist->Add(newobj->AddRef());
 	if (newobj->GetGameObjectType()==SCA_IObject::OBJ_LIGHT)
 		m_lightlist->Add(newobj->AddRef());
+	else if (newobj->GetGameObjectType()==SCA_IObject::OBJ_TEXT)
+		AddFont((KX_FontObject*)newobj);
 	newobj->AddMeshUser();
 
 	// logic cannot be replicated, until the whole hierarchy is replicated.
@@ -595,7 +599,9 @@ KX_GameObject* KX_Scene::AddNodeReplicaObject(class SG_IObject* node, class CVal
 void KX_Scene::ReplicateLogic(KX_GameObject* newobj)
 {
 	/* add properties to debug list, for added objects and DupliGroups */
-	AddObjectDebugProperties(newobj);
+	if (KX_GetActiveEngine()->GetAutoAddDebugProperties()) {
+		AddObjectDebugProperties(newobj);
+	}
 	// also relink the controller to sensors/actuators
 	SCA_ControllerList& controllers = newobj->GetControllers();
 	//SCA_SensorList&     sensors     = newobj->GetSensors();
@@ -844,6 +850,12 @@ void KX_Scene::DupliGroupRecurse(CValue* obj, int level)
 	// now look if object in the hierarchy have dupli group and recurse
 	for (git = m_logicHierarchicalGameObjects.begin();!(git==m_logicHierarchicalGameObjects.end());++git)
 	{
+		/* Replicate all constraints. */
+		if ((*git)->GetPhysicsController()) {
+			(*git)->GetPhysicsController()->ReplicateConstraints((*git), m_logicHierarchicalGameObjects);
+			(*git)->ClearConstraints();
+		}
+
 		if ((*git) != groupobj && (*git)->IsDupliGroup())
 			// can't instantiate group immediately as it destroys m_logicHierarchicalGameObjects
 			duplilist.push_back((*git));
@@ -865,8 +877,6 @@ SCA_IObject* KX_Scene::AddReplicaObject(class CValue* originalobject,
 	m_map_gameobject_to_replica.clear();
 	m_groupGameObjects.clear();
 
-	// todo: place a timebomb in the object, for temporarily objects :)
-	// lifespan of zero means 'this object lives forever'
 	KX_GameObject* originalobj = (KX_GameObject*) originalobject;
 	KX_GameObject* parentobj = (KX_GameObject*) parentobject;
 
@@ -875,9 +885,10 @@ SCA_IObject* KX_Scene::AddReplicaObject(class CValue* originalobject,
 	// lets create a replica
 	KX_GameObject* replica = (KX_GameObject*) AddNodeReplicaObject(NULL,originalobj);
 
+	// add a timebomb to this object
+	// lifespan of zero means 'this object lives forever'
 	if (lifespan > 0)
 	{
-		// add a timebomb to this object
 		// for now, convert between so called frames and realtime
 		m_tempObjectList->Add(replica->AddRef());
 		// this convert the life from frames to sort-of seconds, hard coded 0.02 that assumes we have 50 frames per second
@@ -913,7 +924,6 @@ SCA_IObject* KX_Scene::AddReplicaObject(class CValue* originalobject,
 	
 	// get the rootnode's scale
 	MT_Vector3 newscale = parentobj->GetSGNode()->GetRootSGParent()->GetLocalScale();
-
 	// set the replica's relative scale with the rootnode's scale
 	replica->NodeSetRelativeScale(newscale);
 
@@ -1005,7 +1015,7 @@ int KX_Scene::NewRemoveObject(class CValue* gameobj)
 	int ret;
 	KX_GameObject* newobj = (KX_GameObject*) gameobj;
 
-	/* remove property to debug list */
+	/* remove property from debug list */
 	RemoveObjectDebugProperties(newobj);
 
 	/* Invalidate the python reference, since the object may exist in script lists
@@ -1038,6 +1048,7 @@ int KX_Scene::NewRemoveObject(class CValue* gameobj)
 		 !(itc==controllers.end());itc++)
 	{
 		m_logicmgr->RemoveController(*itc);
+		(*itc)->ReParent(NULL);
 	}
 
 	SCA_ActuatorList& actuators = newobj->GetActuators();
@@ -1499,6 +1510,15 @@ void KX_Scene::CalculateVisibleMeshes(RAS_IRasterizer* rasty,KX_Camera* cam, int
 	bool dbvt_culling = false;
 	if (m_dbvt_culling) 
 	{
+		/* Reset KX_GameObject m_bCulled to true before doing culling
+		 * since DBVT culling will only set it to false.
+		 * This is similar to what RAS_BucketManager does for RAS_MeshSlot culling.
+		 */
+		for (int i = 0; i < m_objectlist->GetCount(); i++) {
+			KX_GameObject *gameobj = static_cast<KX_GameObject*>(m_objectlist->GetValue(i));
+			gameobj->SetCulled(true);
+		}
+
 		// test culling through Bullet
 		MT_Vector4 planes[6];
 		// get the clip planes
@@ -1571,7 +1591,7 @@ void KX_Scene::AddAnimatedObject(CValue* gameobj)
 
 static void update_anim_thread_func(TaskPool *pool, void *taskdata, int UNUSED(threadid))
 {
-	KX_GameObject *gameobj, *child;
+	KX_GameObject *gameobj, *child, *parent;
 	CListValue *children;
 	bool needs_update;
 	double curtime = *(double*)BLI_task_pool_userdata(pool);
@@ -1615,8 +1635,11 @@ static void update_anim_thread_func(TaskPool *pool, void *taskdata, int UNUSED(t
 	if (needs_update) {
 		gameobj->UpdateActionManager(curtime);
 		children = gameobj->GetChildren();
+		parent = gameobj->GetParent();
 
-		if (gameobj->GetDeformer())
+		// Only do deformers here if they are not parented to an armature, otherwise the armature will
+		// handle updating its children
+		if (gameobj->GetDeformer() && (!parent || (parent && parent->GetGameObjectType() != SCA_IObject::OBJ_ARMATURE)))
 			gameobj->GetDeformer()->Update();
 
 		for (int j=0; j<children->GetCount(); ++j) {
@@ -1740,6 +1763,26 @@ void KX_Scene::UpdateObjectLods(void)
 			gameobj->UpdateLod(cam_pos);
 		}
 	}
+}
+
+void KX_Scene::SetLodHysteresis(bool active)
+{
+	m_isActivedHysteresis = active;
+}
+
+bool KX_Scene::IsActivedLodHysteresis(void)
+{
+	return m_isActivedHysteresis;
+}
+
+void KX_Scene::SetLodHysteresisValue(int hysteresisvalue)
+{
+	m_lodHysteresisValue = hysteresisvalue;
+}
+
+int KX_Scene::GetLodHysteresisValue(void)
+{
+	return m_lodHysteresisValue;
 }
 
 void KX_Scene::UpdateObjectActivity(void) 
@@ -2004,7 +2047,11 @@ bool KX_Scene::MergeScene(KX_Scene *other)
 	{
 		KX_GameObject* gameobj = (KX_GameObject*)other->GetObjectList()->GetValue(i);
 		MergeScene_GameObject(gameobj, this, other);
-		AddObjectDebugProperties(gameobj); // add properties to debug list for LibLoad objects
+
+		/* add properties to debug list for LibLoad objects */
+		if (KX_GetActiveEngine()->GetAutoAddDebugProperties()) {
+			AddObjectDebugProperties(gameobj);
+		}
 
 		gameobj->UpdateBuckets(false); /* only for active objects */
 	}
@@ -2294,6 +2341,19 @@ PyObject *KX_Scene::pyattr_get_lights(void *self_v, const KX_PYATTRIBUTE_DEF *at
 	return self->GetLightList()->GetProxy();
 }
 
+PyObject *KX_Scene::pyattr_get_world(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef)
+{
+	KX_Scene* self = static_cast<KX_Scene*>(self_v);
+	KX_WorldInfo *world = self->GetWorldInfo();
+
+	if (world->GetName() != "") {
+		return world->GetProxy();
+	}
+	else {
+		Py_RETURN_NONE;
+	}
+}
+
 PyObject *KX_Scene::pyattr_get_cameras(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef)
 {
 	/* With refcounts in this case...
@@ -2417,6 +2477,7 @@ PyAttributeDef KX_Scene::Attributes[] = {
 	KX_PYATTRIBUTE_RO_FUNCTION("objectsInactive",	KX_Scene, pyattr_get_objects_inactive),
 	KX_PYATTRIBUTE_RO_FUNCTION("lights",			KX_Scene, pyattr_get_lights),
 	KX_PYATTRIBUTE_RO_FUNCTION("cameras",			KX_Scene, pyattr_get_cameras),
+	KX_PYATTRIBUTE_RO_FUNCTION("world",				KX_Scene, pyattr_get_world),
 	KX_PYATTRIBUTE_RW_FUNCTION("active_camera",		KX_Scene, pyattr_get_active_camera, pyattr_set_active_camera),
 	KX_PYATTRIBUTE_RW_FUNCTION("pre_draw",			KX_Scene, pyattr_get_drawing_callback_pre, pyattr_set_drawing_callback_pre),
 	KX_PYATTRIBUTE_RW_FUNCTION("post_draw",			KX_Scene, pyattr_get_drawing_callback_post, pyattr_set_drawing_callback_post),
@@ -2477,16 +2538,18 @@ KX_PYMETHODDEF_DOC(KX_Scene, restart,
 
 KX_PYMETHODDEF_DOC(KX_Scene, replace,
 				   "replace(newScene)\n"
-				   "Replaces this scene with another one.\n")
+                   "Replaces this scene with another one.\n"
+                   "Return True if the new scene exists and scheduled for replacement, False otherwise.\n")
 {
 	char* name;
 	
 	if (!PyArg_ParseTuple(args, "s:replace", &name))
 		return NULL;
 	
-	KX_GetActiveEngine()->ReplaceScene(m_sceneName, name);
+    if (KX_GetActiveEngine()->ReplaceScene(m_sceneName, name))
+        Py_RETURN_TRUE;
 	
-	Py_RETURN_NONE;
+    Py_RETURN_FALSE;
 }
 
 KX_PYMETHODDEF_DOC(KX_Scene, suspend,

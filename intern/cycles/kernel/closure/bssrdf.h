@@ -11,7 +11,7 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License
+ * limitations under the License.
  */
 
 #ifndef __KERNEL_BSSRDF_H__
@@ -157,7 +157,7 @@ ccl_device float bssrdf_cubic_quintic_root_find(float xi)
 	float x = 0.25f;
 	int i;
 
-	for (i = 0; i < max_iteration_count; i++) {
+	for(i = 0; i < max_iteration_count; i++) {
 		float x2 = x*x;
 		float x3 = x2*x;
 		float nx = (1.0f - x);
