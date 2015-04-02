@@ -882,7 +882,7 @@ static bool is_boundary_edge(CHUNK *chunk, const int one[3], const int two[3])
 	return false;
 }
 
-static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, int *r_vid, bool *r_is_common)
+static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, unsigned int *r_vid, bool *r_is_common)
 {
 	int one[3], two[3], index;
 	EDGELIST *q, **table;
@@ -937,12 +937,12 @@ static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, int *r_vid
 static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 {
 	float v[3], no[3];
-	int vid;
+	unsigned int vid;
 	bool is_common;
 	
 	if (setedge(chunk, c1, c2, &vid, &is_common)) {
-		if (is_common) return -vid - 2; /* for common vertices */
-		else return vid;
+		if (is_common) return -(int)vid - 2; /* for common vertices */
+		else return (int)vid;
 	}
 
 	converge(chunk, c1, c2, v);  /* position */
@@ -950,8 +950,8 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 
 	copytovertices(chunk, v, no, vid, is_common);
 
-	if (is_common) return -vid - 2;
-	else return vid;
+	if (is_common) return -(int)vid - 2;
+	else return (int)vid;
 }
 
 /**
@@ -1022,7 +1022,7 @@ static void draw_cube(CHUNK *chunk, int i, int j, int k)
 
 	float n[3] = { 0.0f, 0.0f, 0.0f };
 	float v[8][3];
-	int vids[8];
+	int vids[8], l;
 	v[0][0] = ((float)i - 0.5f) * process->size;
 	v[0][1] = ((float)j - 0.5f) * process->size;
 	v[0][2] = ((float)k - 0.5f) * process->size;
@@ -1055,9 +1055,9 @@ static void draw_cube(CHUNK *chunk, int i, int j, int k)
 	v[7][1] = ((float)(j + 1) - 0.5f) * process->size;
 	v[7][2] = ((float)(k + 1) - 0.5f) * process->size;
 
-	for (int i = 0; i < 8; i++) {
-		vids[i] = addtovertices(chunk, false);
-		copytovertices(chunk, v[i], n, vids[i], false);
+	for (l = 0; l < 8; l++) {
+		vids[l] = addtovertices(chunk, false);
+		copytovertices(chunk, v[l], n, vids[l], false);
 	}
 
 	make_face(chunk, vids[0], vids[2], vids[4], vids[1]);
@@ -1177,7 +1177,7 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
 	}
 }
 
-static void do_queued_cubes(TaskPool *pool, void *data, int threadid)
+static void do_queued_cubes(TaskPool *UNUSED(pool), void *data, int UNUSED(threadid))
 {
 	CHUNK *chunk = (CHUNK*)data;
 	CUBE c;
@@ -1248,14 +1248,14 @@ static void init_chunk_bb(CHUNK *chunk)
 	float step[3];
 	PROCESS *process = chunk->process;
 
-	chunk->lat_pos[0] = chunk->index % process->chunk_res;
-	chunk->lat_pos[1] = (chunk->index / process->chunk_res) % process->chunk_res;
-	chunk->lat_pos[2] = chunk->index / process->chunk_res / process->chunk_res;
+	chunk->lat_pos[0] = chunk->index % (int)process->chunk_res;
+	chunk->lat_pos[1] = (chunk->index / (int)process->chunk_res) % (int)process->chunk_res;
+	chunk->lat_pos[2] = chunk->index / (int)process->chunk_res / (int)process->chunk_res;
 
 	for (i = 0; i < 3; i++) {
 		step[i] = (process->allbb.max[i] - process->allbb.min[i]) / (float)process->chunk_res;
-		chunk->bb.min[i] = process->allbb.min[i] + step[i] * chunk->lat_pos[i];
-		chunk->bb.max[i] = process->allbb.min[i] + step[i] * (chunk->lat_pos[i] + 1);
+		chunk->bb.min[i] = process->allbb.min[i] + step[i] * (float)chunk->lat_pos[i];
+		chunk->bb.max[i] = process->allbb.min[i] + step[i] * (float)(chunk->lat_pos[i] + 1);
 	}
 
 	prev_lattice(chunk->max_lat, chunk->bb.max, process->size);
@@ -1263,15 +1263,15 @@ static void init_chunk_bb(CHUNK *chunk)
 
 	for (i = 0; i < 3; i++) {
 		if (chunk->lat_pos[i] == 0) chunk->min_lat[i]--;
-		chunk->bb.max[i] = (chunk->max_lat[i] + 0.5f) * process->size + process->delta * 2.0f;
-		chunk->bb.min[i] = (chunk->min_lat[i] - 0.5f) * process->size - process->delta * 2.0f;
+		chunk->bb.max[i] = ((float)chunk->max_lat[i] + 0.5f) * process->size + process->delta * 2.0f;
+		chunk->bb.min[i] = ((float)chunk->min_lat[i] - 0.5f) * process->size - process->delta * 2.0f;
 	}
 }
 
 static void set_chunk_neighbors(CHUNK *chunk)
 {
 	int i, index, res, ne_lat[6][3];
-	res = chunk->process->chunk_res;
+	res = (int)chunk->process->chunk_res;
 
 	for (i = 0; i < 6; i++) {
 		VECCOPY(ne_lat[i], chunk->lat_pos);
@@ -1300,7 +1300,7 @@ static void set_chunk_neighbors(CHUNK *chunk)
 /**
  * Initialize chunk.
  */
-static void init_chunk(TaskPool *pool, void *data, int threadid)
+static void init_chunk(TaskPool *UNUSED(pool), void *data, int UNUSED(threadid))
 {
 	unsigned int i;
 	Box allbb;
@@ -1373,7 +1373,7 @@ static void polygonize(PROCESS *process)
 
 	for (i = 0; i < process->num_chunks; i++) {
 		process->chunks[i] = MEM_callocN(sizeof(CHUNK), "Chunk");
-		process->chunks[i]->index = i;
+		process->chunks[i]->index = (int)i;
 		process->chunks[i]->process = process;
 		BLI_mutex_init(&process->chunks[i]->cube_queue_lock);
 	}
@@ -1407,13 +1407,13 @@ static DispList* make_displist(PROCESS *process)
 
 	/* count vertices from all chunks */
 	for (i = 0; i < process->num_chunks; i++) {
-		process->chunks[i]->vertex_offset = dl->nr;
+		process->chunks[i]->vertex_offset = (unsigned int)dl->nr;
 		dl->nr += (int)process->chunks[i]->curvertex;
 		dl->parts += (int)process->chunks[i]->curindex;
 	}
 
 	/* copy vertex coordinates - first common, and then from chunks */
-	dl->verts = MEM_callocN(sizeof(float[3]) * dl->nr, "verts");
+	dl->verts = MEM_callocN(sizeof(float[3]) * (size_t)dl->nr, "verts");
 	for (i = 0; i < process->curvertex; i++) {
 		copy_v3_v3(&dl->verts[i * 3], process->co[i]);
 	}
@@ -1424,19 +1424,19 @@ static DispList* make_displist(PROCESS *process)
 	}
 
 	/* copy indices */
-	dl->index = MEM_callocN(sizeof(int[4]) * dl->parts, "indices");
+	dl->index = MEM_callocN(sizeof(int[4]) * (size_t)dl->parts, "indices");
 	for (i = 0, k = 0; i < process->num_chunks; i++) {
 		for (j = 0; j < process->chunks[i]->curindex; j++) {
 			const int *ind = process->chunks[i]->indices[j];
-			dl->index[k++] = ind[0] < 0 ? -(ind[0]) - 2 : ind[0] + process->chunks[i]->vertex_offset;
-			dl->index[k++] = ind[1] < 0 ? -(ind[1]) - 2 : ind[1] + process->chunks[i]->vertex_offset;
-			dl->index[k++] = ind[2] < 0 ? -(ind[2]) - 2 : ind[2] + process->chunks[i]->vertex_offset;
-			dl->index[k++] = ind[3] < 0 ? -(ind[3]) - 2 : ind[3] + process->chunks[i]->vertex_offset;
+			dl->index[k++] = ind[0] < 0 ? -(ind[0]) - 2 : ind[0] + (int)process->chunks[i]->vertex_offset;
+			dl->index[k++] = ind[1] < 0 ? -(ind[1]) - 2 : ind[1] + (int)process->chunks[i]->vertex_offset;
+			dl->index[k++] = ind[2] < 0 ? -(ind[2]) - 2 : ind[2] + (int)process->chunks[i]->vertex_offset;
+			dl->index[k++] = ind[3] < 0 ? -(ind[3]) - 2 : ind[3] + (int)process->chunks[i]->vertex_offset;
 		}
 	}
 
 	/* copy or make normals */
-	dl->nors = MEM_callocN(sizeof(float[3]) * dl->nr, "nors");
+	dl->nors = MEM_callocN(sizeof(float[3]) * (size_t)dl->nr, "nors");
 #ifdef MB_ACCUM_NORMAL
 	for (i = 0; i < (unsigned int)dl->parts; i++) {
 		float n[3];
