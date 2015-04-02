@@ -905,7 +905,7 @@ static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, unsigned i
 
 	for (; q != NULL; q = q->next) {
 		if (equal_v3_v3_int(one, q->a) && equal_v3_v3_int(two, q->b)) {
-			*r_vid = q->vid;
+			*r_vid = (unsigned int)q->vid;
 
 			if (*r_is_common) BLI_mutex_unlock(&chunk->process->edge_lock);
 
@@ -920,7 +920,7 @@ static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, unsigned i
 
 	copy_v3_v3_int(q->a, one);
 	copy_v3_v3_int(q->b, two);
-	q->vid = *r_vid;
+	q->vid = (int)*r_vid;
 	q->next = table[index];
 	table[index] = q;
 
@@ -1056,8 +1056,8 @@ static void draw_cube(CHUNK *chunk, int i, int j, int k)
 	v[7][2] = ((float)(k + 1) - 0.5f) * process->size;
 
 	for (l = 0; l < 8; l++) {
-		vids[l] = addtovertices(chunk, false);
-		copytovertices(chunk, v[l], n, vids[l], false);
+		vids[l] = (int)addtovertices(chunk, false);
+		copytovertices(chunk, v[l], n, (unsigned int)vids[l], false);
 	}
 
 	make_face(chunk, vids[0], vids[2], vids[4], vids[1]);
