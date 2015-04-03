@@ -1242,6 +1242,50 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 			}
 }
 
+static void precompute(CHUNK *chunk, const unsigned int em)
+{
+	CORNER *c;
+	int index, it[3], lbn[3], rtf[3];
+	const MLSmall *ml = chunk->mainb[em];
+	bool make;
+
+	next_lattice(lbn, ml->bb->min, chunk->process->size);
+	next_lattice(rtf, ml->bb->max, chunk->process->size);
+
+	DO_MIN(chunk->max_lat, rtf);
+	DO_MAX(chunk->min_lat, lbn);
+
+	for (it[0] = lbn[0]; it[0] < rtf[0]; it[0]++)
+		for (it[1] = lbn[1]; it[1] < rtf[1]; it[1]++)
+			for (it[2] = lbn[2]; it[2] < rtf[2]; it[2]++) {
+				make = true;
+				index = HASH(it[0], it[1], it[2]);
+				c = chunk->corners[index];
+
+				for (; c != NULL; c = c->next) {
+					if (equal_v3_v3_int(it, c->lat)) {
+						c->value -= densfunc(ml, UNPACK3(c->co));
+						make = false; 
+						break;
+					}
+				}
+				if (make) {
+					c = BLI_memarena_alloc(chunk->mem, sizeof(CORNER));
+
+					VECCOPY(c->lat, it);
+
+					c->co[0] = ((float)it[0] - 0.5f) * chunk->process->size;
+					c->co[1] = ((float)it[1] - 0.5f) * chunk->process->size;
+					c->co[2] = ((float)it[2] - 0.5f) * chunk->process->size;
+					c->value = chunk->process->thresh;// - 1.0f;
+					c->value -= densfunc(ml, UNPACK3(c->co));
+
+					c->next = chunk->corners[index];
+					chunk->corners[index] = c;
+				}
+			}
+}
+
 static void init_chunk_bb(CHUNK *chunk)
 {
 	unsigned int i;
@@ -1348,6 +1392,12 @@ static void init_chunk(TaskPool *UNUSED(pool), void *data, int UNUSED(threadid))
 		chunk->bvh_queue = MEM_callocN(sizeof(MetaballBVHNode *) * chunk->bvh_queue_size, "Metaball BVH Queue");
 		chunk->cube_queue_mem = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Chunk's memory for additional cubes");
 		chunk->cubes = NULL;
+
+#ifdef MB_PRECOMPUTE
+		for (i = 0; i < chunk->elem; i++) {
+			precompute(chunk, i);
+		}
+#endif
 
 		for (i = 0; i < chunk->elem; i++) {
 			find_first_points(chunk, i);
