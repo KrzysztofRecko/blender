@@ -616,7 +616,11 @@ static CORNER *setcorner(CHUNK *chunk, const int i, const int j, const int k)
 	c->co[1] = ((float)j - 0.5f) * chunk->process->size;
 	c->co[2] = ((float)k - 0.5f) * chunk->process->size;
 
+#ifdef MB_PRECOMPUTE
+	c->value = chunk->process->thresh;
+#else
 	c->value = metaball(chunk, c->co[0], c->co[1], c->co[2]);
+#endif
 
 	c->next = chunk->corners[index];
 	chunk->corners[index] = c;
