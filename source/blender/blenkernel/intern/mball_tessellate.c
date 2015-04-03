@@ -58,6 +58,7 @@
 
 //#define MB_ACCUM_NORMAL
 //#define MB_LINEAR_CONVERGE
+//#define MB_PRECOMPUTE
 
 /* Data types */
 
@@ -243,9 +244,7 @@ static void build_bvh_spatial(
 	/* Maximum bvh queue size is number of nodes which are made, equals calls to this function. */
 	chunk->bvh_queue_size++;
 
-	dim[0] = allbox->max[0] - allbox->min[0];
-	dim[1] = allbox->max[1] - allbox->min[1];
-	dim[2] = allbox->max[2] - allbox->min[2];
+	VECSUB(dim, allbox->max, allbox->min);
 
 	s = 0;
 	if (dim[1] > dim[0] && dim[1] > dim[2]) s = 1;
