@@ -33,51 +33,13 @@
 #include "BLI_utildefines.h"
 #include "BLI_string.h"
 #include "BLI_rand.h"
+#include "BLI_linklist.h"
 
 #include "BKE_cdderivedmesh.h"
 #include "BKE_particle.h"
 #include "BKE_deform.h"
 
 #include "MOD_util.h"
-
-GFList *newGFList(int value)
-{
-	GFList *mnewGFList = MEM_mallocN(sizeof(GFList), __func__);
-	mnewGFList->index = value;
-	mnewGFList->next = NULL;
-	return mnewGFList;
-}
-
-void deleteGFList(GFList *l)
-{
-	if (l) {
-		if (l->next) {
-			deleteGFList(l->next);
-		}
-		MEM_SAFE_FREE(l);
-	}
-}
-
-void addNodeGFList(GFList *l, int value)
-{
-	if (l) {
-		if (l->next) {
-			addNodeGFList(l->next, value);
-		}
-		else{
-			l->next = newGFList(value);
-		}
-	}
-}
-
-int getSizeGFList(GFList *l) {
-	if (l) {
-		return 1 + getSizeGFList(l->next);
-	}
-	else{
-		return 0;
-	}
-}
 
 void estimateNumberGFVerticesEdges(int ve[2], LaplacianSystem *sys, float h)
 {
@@ -105,12 +67,13 @@ void estimateNumberGFVerticesEdges(int ve[2], LaplacianSystem *sys, float h)
 GradientFlowMesh *newGradientFlowMesh(int totalvert, int totaledge)
 {
 	GradientFlowMesh *gfmesh = MEM_mallocN(sizeof(GradientFlowMesh), "GradientFlowMesh");
-	gfmesh->mvert = MEM_mallocN(sizeof(GradientFlowVert)* totalvert, "GradientFlowVert");
-	gfmesh->medge = MEM_mallocN(sizeof(GradientFlowEdge)* totalvert, "GradientFlowEdge");
+	gfmesh->mvert = MEM_mallocN(sizeof(GFVert) * totalvert, "GFVert");
+	gfmesh->medge = MEM_mallocN(sizeof(GFEdge) * totaledge, "GFEdge");
 	gfmesh->totvert = 0;
 	gfmesh->totedge = 0;
 	gfmesh->allocvert = totalvert;
 	gfmesh->allocedge = totaledge;
+
 	return gfmesh;
 }
 
@@ -123,189 +86,43 @@ void deleteGradientFlowMesh(GradientFlowMesh * gfmesh)
 	}
 }
 
-int addGFVertGFMesh(GradientFlowMesh *gfmesh, GradientFlowVert gfvert)
-{
-	return addVertGFMesh(gfmesh, gfvert.co, gfvert.ori_e);
-}
-
-int addVertGFMesh(GradientFlowMesh *gfmesh, float co[3], int index_edge)
+GFVertID addVertGFMesh(GradientFlowMesh *gfmesh, float co[3], int index_edge)
 {
 	if (gfmesh->totvert == gfmesh->allocvert) {
-		gfmesh->mvert = MEM_reallocN(gfmesh->mvert, sizeof(GradientFlowVert)* (gfmesh->allocvert + MOD_QUADREMESH_ALLOC_BLOCK));
 		gfmesh->allocvert += MOD_QUADREMESH_ALLOC_BLOCK;
+		gfmesh->mvert = MEM_reallocN(gfmesh->mvert, sizeof(GFVert) * gfmesh->allocvert);
 	}
+
 	copy_v3_v3(gfmesh->mvert[gfmesh->totvert].co, co);
-	gfmesh->mvert[gfmesh->totvert].ori_e = index_edge;
+	gfmesh->mvert[gfmesh->totvert].idev = index_edge;
 	gfmesh->totvert++;
+
 	return gfmesh->totvert - 1;
 }
 
-int addGFEdgeGFMesh(GradientFlowMesh *gfmesh, GradientFlowEdge gfedge)
+GFVertID addGFVertGFMesh(GradientFlowMesh *gfmesh, GFVert gfvert)
 {
-	return addEdgeGFMesh(gfmesh, gfedge.v1, gfedge.v2, gfedge.ori_f);
+	return addVertGFMesh(gfmesh, gfvert.co, gfvert.idev);
 }
 
-int addEdgeGFMesh(GradientFlowMesh *gfmesh, int index_v1, int index_v2, int index_face)
+GFEdgeID addEdgeGFMesh(GradientFlowMesh *gfmesh, int index_v1, int index_v2, int index_face)
 {
-	GradientFlowEdge *temp;
-	//printf("addEdgeGFMesh 0\n");
 	if (gfmesh->totedge == gfmesh->allocedge) {
-		//printf("addEdgeGFMesh 1\n");
-		//printf("addEdgeGFMesh 1.1 s=%d\n", gfmesh->allocedge);
 		gfmesh->allocedge += MOD_QUADREMESH_ALLOC_BLOCK;
-		//printf("addEdgeGFMesh 1.2 s=%d\n", gfmesh->allocedge);
-		temp = MEM_mallocN(sizeof(GradientFlowEdge)* gfmesh->allocedge, __func__);
-		//printf("addEdgeGFMesh 1.3\n");
-		memcpy(temp, gfmesh->medge, sizeof(GradientFlowEdge)* gfmesh->allocedge);
-		//printf("addEdgeGFMesh 1.4\n");
-		//MEM_SAFE_FREE(gfmesh->medge);
-		//printf("addEdgeGFMesh 1.5\n");
-		gfmesh->medge = temp;
-		temp = NULL;
-		//gfmesh->medge = MEM_reallocN(gfmesh->medge, sizeof(GradientFlowEdge) * gfmesh->allocedge);
-
-		//printf("addEdgeGFMesh 2\n");
+		gfmesh->medge = MEM_reallocN(gfmesh->medge, sizeof(GFEdge) * gfmesh->allocedge);
 	}
-	//printf("addEdgeGFMesh 3\n");
-	gfmesh->medge[gfmesh->totedge].ori_f = index_face;
+
+	gfmesh->medge[gfmesh->totedge].face = index_face;
 	gfmesh->medge[gfmesh->totedge].v1 = index_v1;
 	gfmesh->medge[gfmesh->totedge].v2 = index_v2;
 	gfmesh->totedge++;
-	//printf("addEdgeGFMesh 4\n");
+
 	return gfmesh->totedge - 1;
 }
 
-GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys, float *mhfunction, float(*mgfield)[3])
+GFEdgeID addGFEdgeGFMesh(GradientFlowMesh *gfmesh, GFEdge gfedge)
 {
-	int ve[2], i;
-	int *lverts, sizeverts[2];	
-	GradientFlowVert *mv;
-	GradientFlowSystem *gfsys = MEM_mallocN(sizeof(GradientFlowSystem), "GradientFlowSystem");
-	lverts = NULL;
-
-	//printf("newGradientFlowSystem 0 \n");
-	estimateNumberGFVerticesEdges(ve, sys, sys->h);
-	//printf("newGradientFlowSystem 1 \n");
-	gfsys->mesh = newGradientFlowMesh(ve[0], ve[1]);
-	//printf("newGradientFlowSystem 2 \n");
-	gfsys->ringf_list = MEM_mallocN(sizeof(GFList *) * sys->total_faces, "GFListFaces");
-	gfsys->ringe_list = MEM_mallocN(sizeof(GFList *) * sys->total_edges, "GFListEdges");
-	//printf("newGradientFlowSystem 3 \n");
-	gfsys->heap_seeds = BLI_heap_new();
-	//printf("newGradientFlowSystem 4 \n");
-	gfsys->totalf = sys->total_faces;
-	gfsys->totale = sys->total_edges;
-	//printf("newGradientFlowSystem 5 \n");
-	for (i = 0; i < sys->total_faces; i++) {
-		gfsys->ringf_list[i] = NULL;
-	}
-	//printf("newGradientFlowSystem 6 \n");
-	for (i = 0; i < sys->total_edges; i++) {
-		gfsys->ringe_list[i] = NULL;
-	}
-	//printf("newGradientFlowSystem 7 \n");
-	lverts = findFeaturesOnMesh(sizeverts, sys);
-	//printf("newGradientFlowSystem 8 \n");
-	
-	for (i = 0; i < sizeverts[0]; i++) {
-		mv = MEM_mallocN(sizeof(GradientFlowVert), __func__);
-		copy_v3_v3(mv->co, sys->co[lverts[i]]);
-		mv->ori_e = sys->ringe_map[lverts[i]].indices[0];
-		addSeedToQueue(gfsys->heap_seeds, 0.0f, mv);
-	}
-	//printf("newGradientFlowSystem 9 \n");
-	gfsys->hfunction = mhfunction;
-	gfsys->gfield = mgfield;
-	MEM_SAFE_FREE(lverts);
-	//printf("newGradientFlowSystem 10 \n");
-	return gfsys;
-}
-
-void deleteGradientFlowSystem(GradientFlowSystem *gfsys) 
-{
-	int i;
-	if (gfsys) {
-		for (i = 0; i < gfsys->totalf; i++) {
-			MEM_SAFE_FREE(gfsys->ringf_list[i]);
-		}
-		for (i = 0; i < gfsys->totale; i++) {
-			MEM_SAFE_FREE(gfsys->ringe_list[i]);
-		}
-		deleteGradientFlowMesh(gfsys->mesh);
-		BLI_heap_free(gfsys->heap_seeds, MEM_freeN);
-		MEM_SAFE_FREE(gfsys);
-	}
-}
-
-int addGFVertGFSystem(GradientFlowSystem *gfsys, GradientFlowVert gfvert)
-{
-	return addVertGFSystem(gfsys, gfvert.co, gfvert.ori_e);
-}
-
-int addVertGFSystem(GradientFlowSystem *gfsys, float co[3], int index_edge)
-{
-	int pos = addVertGFMesh(gfsys->mesh, co, index_edge);
-
-	if (index_edge >= 0) {
-		if (gfsys->ringe_list[index_edge]) {
-			addNodeGFList(gfsys->ringe_list[index_edge], pos);
-		}
-		else{
-			gfsys->ringe_list[index_edge] = newGFList(pos);
-		}
-	}
-
-	return pos;
-}
-
-int addGFEdgeGFSystem(GradientFlowSystem *gfsys, GradientFlowEdge gfedge)
-{
-	return addEdgeGFSystem(gfsys, gfedge.v1, gfedge.v2, gfedge.ori_f);
-}
-
-int addEdgeGFSystem(GradientFlowSystem *gfsys, int index_v1, int index_v2, int index_face)
-{
-	int pos;
-	//printf("addEdgeGFSystem 0 \n");
-	pos = addEdgeGFMesh(gfsys->mesh, index_v1, index_v2, index_face);
-	//printf("addEdgeGFSystem 1 \n");
-	if (index_face >= 0) {
-		//printf("addEdgeGFSystem 2 \n");
-		if (gfsys->ringf_list[index_face]) {
-			//printf("addEdgeGFSystem 3 \n");
-			addNodeGFList(gfsys->ringf_list[index_face], pos);
-			//printf("addEdgeGFSystem 4 \n");
-		}
-		else{
-			//printf("addEdgeGFSystem 5 \n");
-			gfsys->ringf_list[index_face] = newGFList(pos);
-			//printf("addEdgeGFSystem 6 \n");
-		}
-	}
-	return pos;
-}
-
-int addEdgeTwoFacesGFSystem(GradientFlowSystem *gfsys, int index_v1, int index_v2, int index_face1, int index_face2)
-{
-	int pos = addEdgeGFMesh(gfsys->mesh, index_v1, index_v2, index_face1);
-	if (index_face1 >= 0) {
-		if (gfsys->ringf_list[index_face1]) {
-			addNodeGFList(gfsys->ringf_list[index_face1], pos);
-		}
-		else{
-			gfsys->ringf_list[index_face1] = newGFList(pos);
-		}
-	}
-	if (index_face2 >= 0) {
-		if (gfsys->ringf_list[index_face2]) {
-			addNodeGFList(gfsys->ringf_list[index_face2], pos);
-		}
-		else{
-			gfsys->ringf_list[index_face2] = newGFList(pos);
-		}
-	}
-	return pos;
-
+	return addEdgeGFMesh(gfmesh, gfedge.v1, gfedge.v2, gfedge.face);
 }
 
 /*
@@ -320,15 +137,15 @@ int *findFeaturesOnMesh(int size[2], LaplacianSystem *sys)
 	int *listdest = NULL;
 	total = 0;
 
-	for (i = 0; i < sys->total_edges; i++) {
+	/*for (i = 0; i < sys->total_edges; i++) {
 		f1 = sys->faces_edge[i][0];
 		f2 = sys->faces_edge[i][1];
 		angle = angle_normalized_v3v3(sys->no[f1], sys->no[f2]);
-		if (angle <= M_PI_2) {
+		if (angle >= M_PI_2) {
 			listverts[sys->edges[i][0]] = 1;
 			listverts[sys->edges[i][1]] = 1;
 		}
-	}
+	}*/
 
 	for (i = 0; i < sys->total_verts; i++) {
 		if (sys->constraints[i] == 1) {
@@ -355,16 +172,126 @@ int *findFeaturesOnMesh(int size[2], LaplacianSystem *sys)
 	return listdest;
 }
 
-void addSeedToQueue(Heap *aheap, float value, GradientFlowVert *vert)
+void addSeedToQueue(Heap *aheap, float value, GFVert *vert)
 {
 	BLI_heap_insert(aheap, value, vert);
 }
 
-GradientFlowVert *getTopSeedFromQueue(struct Heap *aheap)
+GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys, float *mhfunction, float(*mgfield)[3])
 {
-	GradientFlowVert *vert = BLI_heap_popmin(aheap);
-	return vert;
+	int ve[2], i;
+	int *lverts, sizeverts[2];	
+	GFVert *mv;
+	GradientFlowSystem *gfsys = MEM_callocN(sizeof(GradientFlowSystem), "GradientFlowSystem");
+	lverts = NULL;
 
+	estimateNumberGFVerticesEdges(ve, sys, sys->h);
+	
+	gfsys->sys = sys;
+	gfsys->mesh = newGradientFlowMesh(ve[0], ve[1]);
+	
+	gfsys->ringf_list = MEM_callocN(sizeof(LinkNode *) * sys->total_faces, "GFListFaces");
+	gfsys->ringe_list = MEM_callocN(sizeof(LinkNode *) * sys->total_edges, "GFListEdges");
+	
+	gfsys->heap_seeds = BLI_heap_new();
+	
+	gfsys->totalf = sys->total_faces;
+	gfsys->totale = sys->total_edges;
+	
+	lverts = findFeaturesOnMesh(sizeverts, sys);
+	
+	for (i = 0; i < sizeverts[0]; i++) {
+		mv = MEM_mallocN(sizeof(GFVert), __func__);
+		copy_v3_v3(mv->co, sys->co[lverts[i]]);
+		mv->idev = -lverts[i] - 1;
+		addSeedToQueue(gfsys->heap_seeds, 0.0f, mv);
+	}
+	
+	gfsys->hfunction = mhfunction;
+	gfsys->gfield = mgfield;
+	MEM_SAFE_FREE(lverts);
+	
+	return gfsys;
+}
+
+void deleteGradientFlowSystem(GradientFlowSystem *gfsys) 
+{
+	int i;
+	if (gfsys) {
+		for (i = 0; i < gfsys->totalf; i++) {
+			BLI_linklist_free(gfsys->ringf_list[i], NULL);
+		}
+		for (i = 0; i < gfsys->totale; i++) {
+			BLI_linklist_free(gfsys->ringe_list[i], NULL);
+		}
+		deleteGradientFlowMesh(gfsys->mesh);
+		MEM_SAFE_FREE(gfsys->ringf_list);
+		MEM_SAFE_FREE(gfsys->ringe_list);
+		BLI_heap_free(gfsys->heap_seeds, MEM_freeN);
+		MEM_SAFE_FREE(gfsys);
+	}
+}
+
+GFVertID addVertGFSystem(GradientFlowSystem *gfsys, float co[3], int index_edge)
+{
+	GFVertID ret = addVertGFMesh(gfsys->mesh, co, index_edge);
+
+	return ret;
+}
+
+GFVertID addGFVertGFSystem(GradientFlowSystem *gfsys, GFVert gfvert)
+{
+	return addVertGFSystem(gfsys, gfvert.co, gfvert.idev);
+}
+
+GFEdgeID addEdgeGFSystem(GradientFlowSystem *gfsys, int index_v1, int index_v2, int index)
+{
+	GFEdgeID ret = addEdgeGFMesh(gfsys->mesh, index_v1, index_v2, index);
+
+	if (index >= 0)
+		BLI_linklist_prepend(&gfsys->ringf_list[index], (void*)ret);
+	else
+		BLI_linklist_prepend(&gfsys->ringe_list[-index - 1], (void*)ret);
+
+	return ret;
+}
+
+GFEdgeID addGFEdgeGFSystem(GradientFlowSystem *gfsys, GFEdge gfedge)
+{
+	return addEdgeGFSystem(gfsys, gfedge.v1, gfedge.v2, gfedge.face);
+}
+
+#if 0
+int addEdgeTwoFacesGFSystem(GradientFlowSystem *gfsys, int index_v1, int index_v2, int index_face1, int index_face2)
+{
+	int pos = addEdgeGFMesh(gfsys->mesh, index_v1, index_v2, index_face1);
+	if (index_face1 >= 0) {
+		if (gfsys->ringf_list[index_face1]) {
+			addNodeGFList(gfsys->ringf_list[index_face1], pos);
+		}
+		else{
+			gfsys->ringf_list[index_face1] = newGFList(pos);
+		}
+	}
+	if (index_face2 >= 0) {
+		if (gfsys->ringf_list[index_face2]) {
+			addNodeGFList(gfsys->ringf_list[index_face2], pos);
+		}
+		else{
+			gfsys->ringf_list[index_face2] = newGFList(pos);
+		}
+	}
+	return pos;
+
+}
+#endif // 0
+
+
+GFVert *getTopSeedFromQueue(struct Heap *aheap)
+{
+	GFVert *vert = BLI_heap_popmin(aheap);
+
+	return vert;
 }
 
 bool isOnSegmentLine(float p1[3], float p2[3], float q[3]){
@@ -438,16 +365,17 @@ int getEdgeFromVerts(LaplacianSystem *sys, int v1, int v2)
 			return eidn[i];
 		}
 	}
+
 	return -1;
 }
 
-int getOtherFaceAdjacentToEdge(LaplacianSystem *sys, int oldface, int inde)
+int getOtherFaceAdjacentToEdge(LaplacianSystem *sys, int oldface, int e)
 {
-	if (sys->faces_edge[inde][0] == oldface) {
-		return sys->faces_edge[inde][1];
+	if (sys->faces_edge[e][0] == oldface) {
+		return sys->faces_edge[e][1];
 	}
 
-	return sys->faces_edge[inde][0];
+	return sys->faces_edge[e][0];
 }
 
 /* Project Gradient fields on face*/
@@ -461,41 +389,40 @@ void projectVectorOnFace(float r[3], float no[3], float dir[3])
 	normalize_v3_v3(r, w);
 }
 
-int getDifferentVertexFaceEdge(LaplacianSystem *sys, int oldface, int inde)
+int getThirdVert(LaplacianSystem *sys, int oldface, int v1, int v2)
 {
-	int i1, i2, i3;
-	//printf("getDifferentVertexFaceEdge if: %d, ie: %d\n", oldface, inde);
-	i1 = sys->edges[inde][0];
-	i2 = sys->edges[inde][1];
+	int a, b;
 
-	if (i1 == sys->faces[oldface][0]) {
-		if (i2 == sys->faces[oldface][1]) {
-			i3 = sys->faces[oldface][2];
-		}
-		else {
-			i3 = sys->faces[oldface][1];
-		}
-	}
-	else if (i1 == sys->faces[oldface][1]) {
-		if (i2 == sys->faces[oldface][2]) {
-			i3 = sys->faces[oldface][0];
-		}
-		else {
-			i3 = sys->faces[oldface][2];
-		}
-	}
-	else {
-		if (i2 == sys->faces[oldface][0]) {
-			i3 = sys->faces[oldface][1];
-		}
-		else {
-			i3 = sys->faces[oldface][0];
-		}
-	}
+	if      (v1 == sys->faces[oldface][0]) a = 0;
+	else if (v1 == sys->faces[oldface][1]) a = 1;
+	else if (v1 == sys->faces[oldface][2]) a = 2;
+	else a = 4;
 
-	return i3;
+	if      (v2 == sys->faces[oldface][0]) b = 0;
+	else if (v2 == sys->faces[oldface][1]) b = 1;
+	else if (v2 == sys->faces[oldface][2]) b = 2;
+	else b = 4;
+
+	BLI_assert(a + b < 4 && a != b);
+	return sys->faces[oldface][3 - a - b];
 }
 
+bool getSecondAndThirdVert(int *r1, int *r2, LaplacianSystem *sys, int face, int v)
+{
+	int a;
+
+	if      (v == sys->faces[face][0]) a = 0;
+	else if (v == sys->faces[face][1]) a = 1;
+	else if (v == sys->faces[face][2]) a = 2;
+	else return false;
+
+	*r1 = sys->faces[face][(a + 1) % 3];
+	*r2 = sys->faces[face][(a + 2) % 3];
+
+	return true;
+}
+
+#if 0
 /*
 * rind[0] return >0 if solution found
 * rind[1] return index or face or edge
@@ -525,8 +452,8 @@ void computeGradientDirectionOnVert(int rind[2], float r[3], LaplacianSystem *sy
 
 	index_edge = getEdgeFromVerts(sys, indexvert, ind_maxu);
 	copy_v2_v2_int(fs, sys->faces_edge[index_edge]);
-	op1 = getDifferentVertexFaceEdge(sys, fs[0], index_edge);
-	op2 = getDifferentVertexFaceEdge(sys, fs[1], index_edge);
+	op1 = getThirdVert(sys, fs[0], index_edge);
+	op2 = getThirdVert(sys, fs[1], index_edge);
 
 	if (sys->U_field[op1] <= sys->U_field[indexvert] && sys->U_field[op2] <= sys->U_field[indexvert]) {
 		rind[0] = GRA_DIR_ON_EDGE;
@@ -555,74 +482,96 @@ void computeGradientDirectionOnVert(int rind[2], float r[3], LaplacianSystem *sy
 
 }
 
-void computeGradientDirectionOnEdge(int rind[2], float r[3], LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexedge)
+int getGradientDirectionType(int u1, int u2, int u3, int u4)
 {
-	int fs[2], iv1, iv2, ov1, ov2;
-	float u1, u2, u3, u4;
-	copy_v2_v2_int(fs, sys->faces_edge[indexedge]);
-	iv1 = sys->edges[indexedge][0];
-	iv2 = sys->edges[indexedge][1];
-	ov1 = getDifferentVertexFaceEdge(sys, fs[0], indexedge);
-	ov2 = getDifferentVertexFaceEdge(sys, fs[1], indexedge);
-	u1 = sys->U_field[iv1];
-	u2 = sys->U_field[iv2];
-	u3 = sys->U_field[ov1];
-	u4 = sys->U_field[ov2];
-
 	if (u1 >= u2 && u1 >= u3 && u1 >= u4) {
 		if (u2 >= u3 && u2 >= u4) {
-			rind[0] = GRA_DIR_ON_EDGE;
-			rind[1] = indexedge;
+			return GRA_DIR_ON_EDGE;
+		}
+		if (u3 >= u4) {
+			return GRA_DIR_ON_FACE;
+		}
+		if (u4 >= u3) {
+			return GRA_DIR_ON_FACE;
+		}
+	}
+	if (u2 >= u1 && u2 >= u3 && u2 >= u4) {
+		if (u1 >= u3 && u1 >= u4) {
+			return GRA_DIR_ON_EDGE;
+		}
+		if (u3 >= u4) {
+			return GRA_DIR_ON_FACE;
+		}
+		if (u4 >= u3) {
+			return GRA_DIR_ON_FACE;
+		}
+	}
+	if (u3 >= u4) {
+		return GRA_DIR_ON_FACE;
+	}
+	if (u4 >= u3) {
+		return GRA_DIR_ON_FACE;
+	}
+
+	return GRA_DIR_ON_NONE;
+}
+
+void computeGradientDirectionOnEdge(int rtype, int rind, float r[3], LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexedge)
+{
+	if (u1 >= u2 && u1 >= u3 && u1 >= u4) {
+		if (u2 >= u3 && u2 >= u4) {
+			rtype = GRA_DIR_ON_EDGE;
+			rind = indexedge;
 			sub_v3_v3v3(r, sys->co[iv2], sys->co[iv1]);
 			return;
 		}
 		if (u3 >= u4) {
-			rind[0] = GRA_DIR_ON_FACE;
-			rind[1] = fs[0];
+			rtype = GRA_DIR_ON_FACE;
+			rind = fs[0];
 			copy_v3_v3(r, gfsys->gfield[fs[0]]);
 			return;
 		}
 		if (u4 >= u3) {
-			rind[0] = GRA_DIR_ON_FACE;
-			rind[1] = fs[1];
+			rtype = GRA_DIR_ON_FACE;
+			rind = fs[1];
 			copy_v3_v3(r, gfsys->gfield[fs[1]]);
 			return;
 		}
 	}
 	if (u2 >= u1 && u2 >= u3 && u2 >= u4) {
 		if (u1 >= u3 && u1 >= u4) {
-			rind[0] = GRA_DIR_ON_EDGE;
-			rind[1] = indexedge;
+			rtype = GRA_DIR_ON_EDGE;
+			rind = indexedge;
 			sub_v3_v3v3(r, sys->co[iv1], sys->co[iv2]);
 			return;
 		}
 		if (u3 >= u4) {
-			rind[0] = GRA_DIR_ON_FACE;
-			rind[1] = fs[0];
+			rtype = GRA_DIR_ON_FACE;
+			rind = fs[0];
 			copy_v3_v3(r, gfsys->gfield[fs[0]]);
 			return;
 		}
 		if (u4 >= u3) {
-			rind[0] = GRA_DIR_ON_FACE;
-			rind[1] = fs[1];
+			rtype = GRA_DIR_ON_FACE;
+			rind = fs[1];
 			copy_v3_v3(r, gfsys->gfield[fs[1]]);
 			return;
 		}
 	}
 	if (u3 >= u4) {
-		rind[0] = GRA_DIR_ON_FACE;
-		rind[1] = fs[0];
+		rtype = GRA_DIR_ON_FACE;
+		rind = fs[0];
 		copy_v3_v3(r, gfsys->gfield[fs[0]]);
 		return;
 	}
 	if (u4 >= u3) {
-		rind[0] = GRA_DIR_ON_FACE;
-		rind[1] = fs[1];
+		rtype = GRA_DIR_ON_FACE;
+		rind = fs[1];
 		copy_v3_v3(r, gfsys->gfield[fs[1]]);
 		return;
 	}
 
-	rind[0] = GRA_DIR_ON_NONE;
+	rtype = GRA_DIR_ON_NONE;
 }
 
 void computeGradientDirectionOnEdgeInverse(int rind[2], float r[3], LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexedge)
@@ -632,8 +581,8 @@ void computeGradientDirectionOnEdgeInverse(int rind[2], float r[3], LaplacianSys
 	copy_v2_v2_int(fs, sys->faces_edge[indexedge]);
 	iv1 = sys->edges[indexedge][0];
 	iv2 = sys->edges[indexedge][1];
-	ov1 = getDifferentVertexFaceEdge(sys, fs[0], indexedge);
-	ov2 = getDifferentVertexFaceEdge(sys, fs[1], indexedge);
+	ov1 = getThirdVert(sys, fs[0], indexedge);
+	ov2 = getThirdVert(sys, fs[1], indexedge);
 	u1 = sys->U_field[iv1];
 	u2 = sys->U_field[iv2];
 	u3 = sys->U_field[ov1];
@@ -703,7 +652,58 @@ void computeGradientDirectionOnEdgeInverse(int rind[2], float r[3], LaplacianSys
 * maxradius lenght to made query on dir direction
 */
 
-int nearGFEdgeInGFMesh(LaplacianSystem *sys, GradientFlowSystem *gfsys, float ori[3], float dir[3], int indexface, float maxradius)
+int nearGFEdgeInGFMeshFromEdge(LaplacianSystem *sys, GradientFlowSystem *gfsys, float ori[3], float dir[3], int indexedge, float maxradius)
+{
+	int fs[2], res, v1, v2, v3;
+	float d1[3], d2[3], r[3];
+
+	if (is_zero_v3(dir)) {
+		return -1;
+	}
+
+	copy_v2_v2_int(fs, sys->faces_edge[indexedge]);
+	projectVectorOnFace(d1, sys->no[fs[0]], dir);
+	mul_v3_v3fl(d2, d1, -1.0f);
+	v1 = sys->edges[indexedge][0];
+	v2 = sys->edges[indexedge][1];
+	v3 = getThirdVert(sys, fs[0], indexedge);
+
+	if (intersecionLineSegmentWithVector(r, sys->co[v1], sys->co[v3], ori, d1) 
+		|| intersecionLineSegmentWithVector(r, sys->co[v2], sys->co[v3], ori, d1)) {
+		res = nearGFEdgeInGFMesh(sys, gfsys, ori, d1, fs[0], maxradius);
+		if (res >=0 ) {
+			return res;
+		}
+	} 
+	else if (intersecionLineSegmentWithVector(r, sys->co[v1], sys->co[v3], ori, d2) 
+		|| intersecionLineSegmentWithVector(r, sys->co[v2], sys->co[v3], ori, d2)) {
+		res = nearGFEdgeInGFMesh(sys, gfsys, ori, d2, fs[0], maxradius);
+		if (res >=0 ) {
+			return res;
+		}
+	}
+	projectVectorOnFace(d1, sys->no[fs[1]], dir);
+	mul_v3_v3fl(d2, d1, -1.0f);
+	v3 = getThirdVert(sys, fs[1], indexedge);
+	if (intersecionLineSegmentWithVector(r, sys->co[v1], sys->co[v3], ori, d1) 
+		|| intersecionLineSegmentWithVector(r, sys->co[v2], sys->co[v3], ori, d1)) {
+		res = nearGFEdgeInGFMesh(sys, gfsys, ori, d1, fs[1], maxradius);
+		if (res >=0 ) {
+			return res;
+		}
+	} 
+	else if (intersecionLineSegmentWithVector(r, sys->co[v1], sys->co[v3], ori, d2) 
+		|| intersecionLineSegmentWithVector(r, sys->co[v2], sys->co[v3], ori, d2)) {
+		res = nearGFEdgeInGFMesh(sys, gfsys, ori, d2, fs[1], maxradius);
+		if (res >=0 ) {
+			return res;
+		}
+	}
+
+	return -1;
+}
+
+bool nearGFEdgeInGFMesh(LaplacianSystem *sys, GradientFlowSystem *gfsys, float ori[3], float dir[3], int indexface, float maxradius)
 {
 	GFList *gfl;
 	int index_gfedge, iv1, iv2, eid, newface;
@@ -718,7 +718,7 @@ int nearGFEdgeInGFMesh(LaplacianSystem *sys, GradientFlowSystem *gfsys, float or
 			if (index_gfedge >= 0 && index_gfedge < gfsys->mesh->totedge) {
 				iv1 = gfsys->mesh->medge[index_gfedge].v1;
 				iv2 = gfsys->mesh->medge[index_gfedge].v2;
-				
+
 
 				if (intersecionLineSegmentWithVector(i1, gfsys->mesh->mvert[iv1].co, gfsys->mesh->mvert[iv2].co, ori, v)) {
 					if (len_v3v3(i1, ori) < maxradius){
@@ -743,7 +743,7 @@ int nearGFEdgeInGFMesh(LaplacianSystem *sys, GradientFlowSystem *gfsys, float or
 				//projectVectorOnFace(r, sys->no[indexface], dir);
 				cross_v3_v3v3(r, sys->no[indexface], gfsys->gfield[indexface]);
 				return nearGFEdgeInGFMesh(sys, gfsys, i1, r, newface, maxradius - res);
-			}			
+			}
 		}
 		else if (intersecionLineSegmentWithVector(i1, sys->co[sys->faces[indexface][1]], sys->co[sys->faces[indexface][2]],
 			ori, v)) {
@@ -776,318 +776,261 @@ int nearGFEdgeInGFMesh(LaplacianSystem *sys, GradientFlowSystem *gfsys, float or
 	}
 	return -1;
 }
+#endif
 
-int nearGFEdgeInGFMeshFromEdge(LaplacianSystem *sys, GradientFlowSystem *gfsys, float ori[3], float dir[3], int indexedge, float maxradius)
+bool nextPointFromVertex(float r_co[3], int *r_face, int *r_edge, GradientFlowSystem *gfsys, int in_v)
 {
-	int fs[2], res, v1, v2, v3;
-	float d1[3], d2[3], r[3];
+	int i, f, vf1, vf2;
+	float gf[3], a[3], b[3], alfa, beta, gamma, dummy[3];
+	LaplacianSystem *sys = gfsys->sys;
 
-	if (is_zero_v3(dir)) {
-		return -1;
-	}
+	for (i = 0; i < sys->ringf_map[in_v].count; i++) {
+		f = sys->ringf_map[in_v].indices[i];
+		if (!getSecondAndThirdVert(&vf1, &vf2, sys, f, in_v)) continue;
 
-	copy_v2_v2_int(fs, sys->faces_edge[indexedge]);
-	projectVectorOnFace(d1, sys->no[fs[0]], dir);
-	mul_v3_v3fl(d2, d1, -1.0f);
-	v1 = sys->edges[indexedge][0];
-	v2 = sys->edges[indexedge][1];
-	v3 = getDifferentVertexFaceEdge(sys, fs[0], indexedge);
+		sub_v3_v3v3(a, sys->co[vf1], sys->co[in_v]);
+		sub_v3_v3v3(b, sys->co[vf2], sys->co[in_v]);
+		copy_v3_v3(gf, gfsys->gfield[f]);
 
-	if (intersecionLineSegmentWithVector(r, sys->co[v1], sys->co[v3], ori, d1) 
-		|| intersecionLineSegmentWithVector(r, sys->co[v2], sys->co[v3], ori, d1)) {
-		res = nearGFEdgeInGFMesh(sys, gfsys, ori, d1, fs[0], maxradius);
-		if (res >=0 ) {
-			return res;
-		}
-	} 
-	else if (intersecionLineSegmentWithVector(r, sys->co[v1], sys->co[v3], ori, d2) 
-		|| intersecionLineSegmentWithVector(r, sys->co[v2], sys->co[v3], ori, d2)) {
-		res = nearGFEdgeInGFMesh(sys, gfsys, ori, d2, fs[0], maxradius);
-		if (res >=0 ) {
-			return res;
-		}
-	}
-	projectVectorOnFace(d1, sys->no[fs[1]], dir);
-	mul_v3_v3fl(d2, d1, -1.0f);
-	v3 = getDifferentVertexFaceEdge(sys, fs[1], indexedge);
-	if (intersecionLineSegmentWithVector(r, sys->co[v1], sys->co[v3], ori, d1) 
-		|| intersecionLineSegmentWithVector(r, sys->co[v2], sys->co[v3], ori, d1)) {
-		res = nearGFEdgeInGFMesh(sys, gfsys, ori, d1, fs[1], maxradius);
-		if (res >=0 ) {
-			return res;
-		}
-	} 
-	else if (intersecionLineSegmentWithVector(r, sys->co[v1], sys->co[v3], ori, d2) 
-		|| intersecionLineSegmentWithVector(r, sys->co[v2], sys->co[v3], ori, d2)) {
-		res = nearGFEdgeInGFMesh(sys, gfsys, ori, d2, fs[1], maxradius);
-		if (res >=0 ) {
-			return res;
+		alfa = angle_v3v3(a, b);
+		beta = angle_v3v3(a, gf);
+		gamma = angle_v3v3(gf, b);
+
+		if (beta + gamma >= alfa - 0.001f && beta + gamma <= alfa + 0.001f) {
+			/* vertex on this face */
+			add_v3_v3(gf, sys->co[in_v]);
+			isect_line_line_v3(sys->co[vf1], sys->co[vf2], sys->co[in_v], gf, r_co, dummy);
+			*r_edge = getEdgeFromVerts(sys, vf1, vf2);
+			*r_face = f;
+
+			return true;
 		}
 	}
 
-	return -1;
+	return false;
+}
+
+bool nextPointFromEdge(float r_co[3], int *r_edge, GradientFlowSystem *gfsys, int in_f, int in_e, float in_co[3], float in_dir[3])
+{
+	int iv1, iv2, ov1;
+	float a[3], b[3], c[3], 
+		alfa, beta, gamma, dummy[3];
+	LaplacianSystem *sys = gfsys->sys;
+
+	iv1 = sys->edges[in_e][0];
+	iv2 = sys->edges[in_e][1];
+
+	ov1 = getThirdVert(sys, in_f, iv1, iv2);
+
+	sub_v3_v3v3(a, sys->co[iv1], in_co);
+	sub_v3_v3v3(b, sys->co[ov1], in_co);
+
+	alfa = angle_v3v3(a, in_dir);
+	beta = angle_v3v3(a, b);
+	gamma = angle_v3v3(in_dir, b);
+
+	if (beta > alfa) {
+		if (gamma > beta) {
+			/* vertex on iv1 */
+			copy_v3_v3(r_co, sys->co[iv1]);
+			*r_edge = -iv1 - 1;
+		}
+		else {
+			/* vertex on edge iv1 - ov1 */
+			add_v3_v3v3(c, in_dir, in_co);
+			isect_line_line_v3(sys->co[iv1], sys->co[ov1], in_co, c, r_co, dummy);
+			*r_edge = getEdgeFromVerts(sys, iv1, ov1);
+		}
+	}
+	else {
+		if (gamma > (float)M_PI - beta) {
+			/* vertex on iv2 */
+			copy_v3_v3(r_co, sys->co[iv2]);
+			*r_edge = -iv2 - 1;
+		}
+		else {
+			/* vertex on edge iv2 - ov1 */
+			add_v3_v3v3(c, in_dir, in_co);
+			isect_line_line_v3(sys->co[iv2], sys->co[ov1], in_co, c, r_co, dummy);
+			*r_edge = getEdgeFromVerts(sys, iv2, ov1);
+		}
+	}
+
+	return true;
+}
+
+bool intersectSegmentWithOthersOnFace(GradientFlowSystem *gfsys, float in_a[3], float in_b[3], int in_f)
+{
+	int e;
+	float dummy[3], lambda;
+	LinkNode *iter;
+	LaplacianSystem *sys = gfsys->sys;
+	GFVert *vertices = gfsys->mesh->mvert;
+	GFEdge *edges = gfsys->mesh->medge;
+
+	for (iter = gfsys->ringf_list[in_f]; iter; iter = iter->next) {
+		e = (int)iter->link;
+		if (isect_line_line_strict_v3(in_a, in_b, vertices[edges[e].v1].co, vertices[edges[e].v2].co, dummy, &lambda))
+			return true;
+	}
+
+	return false;
 }
 
 /**
-* return -1 if max U was found
-* float r[3] vertex with next point on flow line
-* float q[3] actual point on flow line.
-* int olface index of old face
-* int inde edge from origin of actual point
-*/
-int nextPointFlowLine(float r[3], LaplacianSystem *sys, float q[3], int oldface, int inde)
+ * 0 - intersection found
+ * 1 - intersection not found
+ * 2 - wrong direction for this face 
+ */
+int queryDirection(GradientFlowSystem *gfsys, float in_co[3], int in_e, int in_f, float in_dir[3], float maxdist)
 {
-	float v1[3], v2[3], dir[3], dq[3], res[3], r2[3];
-	float u1, u2, u3, u4, maxu;
-	int i1, i2, i3, i4, ix;
-	int newface, fs[2];
-	int numv, *vidn;
-	int i, iu, ie, isect;
-	//printf("nextPointFlowLine 0\n");
-	i1 = sys->edges[inde][0];
-	i2 = sys->edges[inde][1];
-	copy_v3_v3(v1, sys->co[i1]);
-	copy_v3_v3(v2, sys->co[i2]);
-	i3 = getDifferentVertexFaceEdge(sys, oldface, inde);
-	u1 = sys->U_field[i1];
-	u2 = sys->U_field[i2];
-	u3 = sys->U_field[i3];
-	copy_v2_v2_int(fs, sys->faces_edge[inde]);
-	//getFacesAdjacentToEdge(fs, sys, inde);
-	newface = fs[0] == oldface ? fs[1] : fs[0];
-	i4 = getDifferentVertexFaceEdge(sys, newface, inde);
-	u4 = sys->U_field[i4];
-	//printf("nextPointFlowLine 1\n");
-	/* The actual point on flow line correspond to a vertex in a mesh */
-	if (equals_v3v3(q, v1) || equals_v3v3(q, v2)) {
-		ix = equals_v3v3(q, v1) ? i1 : i2;
-		numv = sys->ringv_map[ix].count;
-		vidn = sys->ringv_map[ix].indices; /*review ringv ringf*/
-		iu = -1;
-		maxu = -1000000;
-		//printf("nextPointFlowLine 2\n");
-		for (i = 0; i < numv; i++) {
-			if (vidn[i] != ix) {
-				if (sys->U_field[ix] < sys->U_field[vidn[i]]) {
-					if (maxu < sys->U_field[vidn[i]]){
-						iu = vidn[i];
-						maxu = sys->U_field[vidn[i]];
-					}
+	int i, e;
+	float c[3], len, co[3], dir[3];
+	LaplacianSystem *sys = gfsys->sys;
+	copy_v3_v3(dir, in_dir);
 
-				}
-			}
-		}
-		//printf("nextPointFlowLine 3\n");
-		/*Max U found*/
-		if (iu == -1) {
-			//printf("nextPointFlowLine 4\n");
-			//printf("/*Max U found*/\n");
-			return -1;
-		}
+	len = dot_v3v3(dir, sys->no[in_f]);
+	mul_v3_v3fl(c, sys->no[in_f], len);
+	sub_v3_v3(dir, c);
+	normalize_v3(dir);
 
-		//printf("nextPointFlowLine 5\n");
-		ie = getEdgeFromVerts(sys, ix, iu);
-		//printf("nextPointFlowLine ie:%d 5.1\n", ie);
+	nextPointFromEdge(co, &e, gfsys, in_f, in_e, in_co, dir);
 
-		//getFacesAdjacentToEdge(fs, sys, ie);
-		//copy_v2_v2_int(fs, sys->faces_edge[ie]);
-		fs[0] = sys->faces_edge[ie][0];
-		fs[1] = sys->faces_edge[ie][1];
-		//printf("nextPointFlowLine 5.2\n");
-		i1 = ix;
-		i2 = iu;
-		i3 = getDifferentVertexFaceEdge(sys, fs[0], ie);
-		//printf("nextPointFlowLine 5.3\n");
-		i4 = getDifferentVertexFaceEdge(sys, fs[1], ie);
-		//printf("nextPointFlowLine 5.4\n");
-		u1 = sys->U_field[i1];
-		u2 = sys->U_field[i2];
-		u3 = sys->U_field[i3];
-		u3 = sys->U_field[i4];
-		//printf("nextPointFlowLine 6\n");
-		/* the next point is the opposite vertex in the edge*/
-		if (u2 >= u3 && u2 >= u4 && u1 >= u3 && u1 >= u4) {
-			//printf("nextPointFlowLine 7\n");
-			copy_v3_v3(r, sys->co[iu]);
-			return ie;
+	if (e < 0)
+		return 2;
 
-			/* the next point is on face fs[0]*/
-		}
-		else if (u3 >= u4) {
-			//printf("nextPointFlowLine 8\n");
-			copy_v3_v3(dir, sys->gf1[fs[0]]);
-			//projectGradientOnFace(dir, sys, sys->gf1, fs[0]);
-			mul_v3_fl(dir, 100);
-			add_v3_v3v3(dq, q, dir);
-			isect = isect_line_line_v3(sys->co[i3], sys->co[i2], q, dq, res, r2);
-			copy_v3_v3(r, res);
-			return ie;
-			/* the next point is on face fs[1]*/
-		}
-		else {
-			//printf("nextPointFlowLine 9\n");
-			copy_v3_v3(dir, sys->gf1[fs[1]]);
-			//projectGradientOnFace(dir, sys, sys->gf1, fs[1]);
-			mul_v3_fl(dir, 100);
-			add_v3_v3v3(dq, q, dir);
-			isect = isect_line_line_v3(sys->co[i4], sys->co[i2], q, dq, res, r2);
-			copy_v3_v3(r, res);
-			return ie;
-		}
+	sub_v3_v3v3(c, co, in_co);
+	len = len_v3(c);
 
-		/* There is simple intersection on new face adjacent to inde */
+	if (maxdist < len) {
+		mul_v3_fl(c, maxdist / len);
+		add_v3_v3v3(co, c, in_co);
+		maxdist = 0.0f;
 	}
-	else if (u1 <= u3 && u2 <= u3) {
-		//printf("nextPointFlowLine 10\n");
-		copy_v3_v3(dir, sys->gf1[newface]);
-		//projectGradientOnFace(dir, sys, sys->gf1, newface);
-		mul_v3_fl(dir, 100);
-		add_v3_v3v3(dq, q, dir);
-		if (u1 >= u2) {
-			//printf("nextPointFlowLine 11\n");
-			isect = isect_line_line_v3(sys->co[i3], sys->co[i1], q, dq, res, r2);
-			copy_v3_v3(r, res);
-			return getEdgeFromVerts(sys, i3, i1);
-		}
-		else {
-			//printf("nextPointFlowLine 12\n");
-			isect = isect_line_line_v3(sys->co[i3], sys->co[i2], q, dq, res, r2);
-			copy_v3_v3(r, res);
-			return getEdgeFromVerts(sys, i3, i2);
-		}
+	else
+		maxdist -= len;
 
-		/* The new point is on the same edge in the u1 direction*/
+	/*int vf1, vf2;
+	vf1 = addVertGFSystem(gfsys, in_co, 0);
+	vf2 = addVertGFSystem(gfsys, co, 0);
+	addEdgeGFSystem(gfsys, vf1, vf2, 0);*/
+
+	if (intersectSegmentWithOthersOnFace(gfsys, in_co, co, in_f))
+		return 0;
+		
+	if (maxdist > 0.0f) {
+		in_f = getOtherFaceAdjacentToEdge(sys, in_f, e);
+		i = queryDirection(gfsys, co, e, in_f, dir, maxdist);
+		if (i == 2) return 1;
+		else return i;
 	}
-	else if (u1 >= u2 && u1 >= u3 && u1 >= u4) {
-		//printf("nextPointFlowLine 13\n");
-		copy_v3_v3(r, sys->co[i1]);
-		return inde;
-		/* The new point is on the same edge in the u2 direction*/
-	}
-	else if (u2 >= u1 && u2 >= u3 && u2 >= u4) {
-		//printf("nextPointFlowLine 14\n");
-		copy_v3_v3(r, sys->co[i2]);
-		return inde;
-	}
-	return -2;
+	else
+		return 1;
 }
 
-int nextPointFlowLineInverse(float r[3], LaplacianSystem *sys, float q[3], int oldface, int inde)
+void getOrthogonalDirection(float r_dir[3], GradientFlowSystem *gfsys, float in_dir[3], int in_ev)
 {
-	float v1[3], v2[3], dir[3], dq[3], res[3], r2[3];
-	float u1, u2, u3, u4, minu;
-	int i1, i2, i3, i4, ix;
-	int newface, fs[2];
-	int numv, *vidn;
-	int i, iu, ie, isect;
-	i1 = sys->edges[inde][0];
-	i2 = sys->edges[inde][1];
-	copy_v3_v3(v1, sys->co[i1]);
-	copy_v3_v3(v2, sys->co[i2]);
-	i3 = getDifferentVertexFaceEdge(sys, oldface, inde);
-	u1 = sys->U_field[i1];
-	u2 = sys->U_field[i2];
-	u3 = sys->U_field[i3];
-	copy_v2_v2_int(fs, sys->faces_edge[inde]);
-	//getFacesAdjacentToEdge(fs, sys, inde);
-	newface = fs[0] == oldface ? fs[1] : fs[0];
-	i4 = getDifferentVertexFaceEdge(sys, newface, inde);
-	u4 = sys->U_field[i4];
+	int i, f;
+	float no[3];
+	LaplacianSystem *sys = gfsys->sys;
 
-	/* The actual point on flow line correspond to a vertex in a mesh */
-	if (equals_v3v3(q, v1) || equals_v3v3(q, v2)) {
-		ix = equals_v3v3(q, v1) ? i1 : i2;
-		numv = sys->ringv_map[ix].count;
-		vidn = sys->ringv_map[ix].indices;
-		iu = -1;
-		minu = 1000000;
-		for (i = 0; i < numv; i++) {
-			if (vidn[i] != ix) {
-				if (sys->U_field[ix] < sys->U_field[vidn[i]]) {
-					if (minu > sys->U_field[vidn[i]]){
-						iu = vidn[i];
-						minu = sys->U_field[vidn[i]];
+	zero_v3(no);
+
+	if (in_ev < 0) {
+		in_ev = -in_ev - 1;
+		for (i = 0; i < sys->ringf_map[in_ev].count; i++) {
+			f = sys->ringf_map[in_ev].indices[i];
+			add_v3_v3(no, sys->no[f]);
+		}
+		mul_v3_fl(no, 1.0f / (float)sys->ringf_map[in_ev].count);
+	}
+	else {
+		add_v3_v3(no, sys->no[sys->faces_edge[in_ev][0]]);
+		add_v3_v3(no, sys->no[sys->faces_edge[in_ev][1]]);
+		mul_v3_fl(no, 0.5f);
+	}
+
+	cross_v3_v3v3(r_dir, no, in_dir);
+	normalize_v3(r_dir);
+}
+
+bool checkPoint(GradientFlowSystem *gfsys, float in_oldco[3], float in_newco[3], int in_ev, float maxdist)
+{
+	int i, f, d, vf1, vf2;
+	float seg[3], dir[3];
+	LaplacianSystem *sys = gfsys->sys;
+
+	sub_v3_v3v3(seg, in_oldco, in_newco);
+	getOrthogonalDirection(dir, gfsys, seg, in_ev);
+
+	for (d = 0; d < 2; d++) {
+		if (in_ev < 0) {
+			for (i = 0; i < sys->ringf_map[-in_ev - 1].count; i++) {
+				f = sys->ringf_map[-in_ev - 1].indices[i];
+				if (!getSecondAndThirdVert(&vf1, &vf2, sys, f, -in_ev - 1)) continue;
+#if 0
+					float co[3], a[3], b[3], alfa, beta, gamma;
+					len = dot_v3v3(dir, sys->no[f]);
+					mul_v3_v3fl(b, sys->no[f], len);
+					sub_v3_v3v3(c, dir, b);
+					normalize_v3(c);
+
+					sub_v3_v3v3(a, sys->co[in_ev], sys->co[vf1]);
+					sub_v3_v3v3(b, sys->co[in_ev], sys->co[vf2]);
+
+					alfa = angle_v3v3(a, b);
+					beta = angle_v3v3(a, dir);
+					gamma = angle_v3v3(dir, b);
+
+					if (beta + gamma >= alfa - 0.001f && beta + gamma <= alfa + 0.001f) {
+						if (!queryDirection(gfsys, in_newco, getEdgeFromVerts(sys, in_ev, vf2), f, c, maxdist))
+							return false;
+						break;
 					}
-				}
+#endif // 0
+				if (!queryDirection(gfsys, in_newco, getEdgeFromVerts(sys, -in_ev - 1, vf2), f, dir, maxdist))
+					return false;
 			}
 		}
-		/*Min U found*/
-		if (iu == -1) {
-			//printf("/*Min U found*/\n");
-			return -1;
-		}
-
-		ie = getEdgeFromVerts(sys, ix, iu);
-
-		//getFacesAdjacentToEdge(fs, sys, ie);
-		copy_v2_v2_int(fs, sys->faces_edge[ie]);
-		i1 = ix;
-		i2 = iu;
-		i3 = getDifferentVertexFaceEdge(sys, fs[0], ie);
-		i4 = getDifferentVertexFaceEdge(sys, fs[1], ie);
-		u1 = sys->U_field[i1];
-		u2 = sys->U_field[i2];
-		u3 = sys->U_field[i3];
-		u3 = sys->U_field[i4];
-
-		/* the next point is the opposite vertex in the edge*/
-		if (u2 <= u3 && u2 <= u4 && u1 <= u3 && u1 <= u4) {
-			copy_v3_v3(r, sys->co[iu]);
-			return ie;
-
-			/* the next point is on face fs[0]*/
-		}
-		else if (u3 <= u4) {
-			copy_v3_v3(dir, sys->gf1[fs[0]]);
-			//projectGradientOnFace(dir, sys, sys->gf1, fs[0]);
-			mul_v3_fl(dir, -100);
-			add_v3_v3v3(dq, q, dir);
-			isect = isect_line_line_v3(sys->co[i3], sys->co[i2], q, dq, res, r2);
-			copy_v3_v3(r, res);
-			return ie;
-			/* the next point is on face fs[1]*/
-		}
 		else {
-			copy_v3_v3(dir, sys->gf1[fs[1]]);
-			//projectGradientOnFace(dir, sys, sys->gf1, fs[1]);
-			mul_v3_fl(dir, -100);
-			add_v3_v3v3(dq, q, dir);
-			isect = isect_line_line_v3(sys->co[i4], sys->co[i2], q, dq, res, r2);
-			copy_v3_v3(r, res);
-			return ie;
+			if (!queryDirection(gfsys, in_newco, in_ev, sys->faces_edge[in_ev][0], dir, maxdist))
+				return false;
+			if (!queryDirection(gfsys, in_newco, in_ev, sys->faces_edge[in_ev][1], dir, maxdist))
+				return false;
 		}
-
-		/* There is simple intersection on new face adjacent to inde */
+		mul_v3_fl(dir, -1.0f);
 	}
-	else if (u1 >= u3 && u2 >= u3) {
-		//projectGradientOnFace(dir, sys, sys->gf1, newface);
-		copy_v3_v3(dir, sys->gf1[newface]);
-		mul_v3_fl(dir, -100);
-		add_v3_v3v3(dq, q, dir);
-		if (u1 <= u2) {
-			isect = isect_line_line_v3(sys->co[i3], sys->co[i1], q, dq, res, r2);
-			copy_v3_v3(r, res);
-			return getEdgeFromVerts(sys, i3, i1);
-		}
-		else {
-			isect = isect_line_line_v3(sys->co[i3], sys->co[i2], q, dq, res, r2);
-			copy_v3_v3(r, res);
-			return getEdgeFromVerts(sys, i3, i2);
-		}
-
-		/* The new point is on the same edge in the u1 direction*/
-	}
-	else if (u1 <= u2 && u1 <= u3 && u1 <= u4) {
-		copy_v3_v3(r, sys->co[i1]);
-		return inde;
-		/* The new point is on the same edge in the u2 direction*/
-	}
-	else if (u2 <= u1 && u2 <= u3 && u2 <= u4) {
-		copy_v3_v3(r, sys->co[i2]);
-		return inde;
-	}
-	return -2;
+	return true;
 }
+
+bool nextPointFlowLine(GFVertID *r, GradientFlowSystem *gfsys, GFVertID in_id, int *face)
+{
+	float co[3];
+	int edge;
+	LaplacianSystem *sys = gfsys->sys;
+	GFVert *in = &gfsys->mesh->mvert[in_id];
+
+	if (in->idev < 0) {
+		if (!nextPointFromVertex(co, face, &edge, gfsys, -in->idev - 1)) return false;
+		if (!checkPoint(gfsys, in->co, co, edge, 0.1f)) return false;
+
+		*r = addVertGFSystem(gfsys, co, edge);
+		addEdgeGFSystem(gfsys, in_id, *r, *face);
+	}
+	else {
+		*face = getOtherFaceAdjacentToEdge(sys, *face, in->idev);
+		nextPointFromEdge(co, &edge, gfsys, *face, in->idev, in->co, gfsys->gfield[*face]);
+
+		if (!checkPoint(gfsys, in->co, co, edge, 0.1f)) return false;
+
+		*r = addVertGFSystem(gfsys, co, edge);
+		addEdgeGFSystem(gfsys, in_id, *r, edge < 0 ? edge : *face);
+	}
+
+	return true;
+}
+
+#if 0
 
 float getSamplingDistanceFunctionOnFace(LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexface)
 {
@@ -1107,203 +1050,18 @@ float getMaxSamplingDistanceFunctionOnFace(LaplacianSystem *sys, GradientFlowSys
 	return max_fff(h1, h2, h3);
 }
 
-void computeGFLine(LaplacianSystem *sys, GradientFlowSystem *gfsys, GradientFlowVert *gfvert_seed)
+#endif // 0
+
+void computeGFLine(LaplacianSystem *sys, GradientFlowSystem *gfsys, GFVert *gfvert_seed)
 {
-	float r[3], q[3], dir[3], d1[3], newseed[3], oriseed[3], hvalue;
-	int idv = -1, fs[2], ied, oldface, oldedge, newface, indv1, indv2, ri[2], igfedold, igfednew, idedgeseed;
-	bool can_next;
-	GradientFlowVert *gfseed;
+	GFVertID oldgfv, newgfv;
+	int face = 0;
 
-	/* is valid vert*/
-	if (gfvert_seed->ori_e == -1) return;
+	oldgfv = addVertGFSystem(gfsys, gfvert_seed->co, gfvert_seed->idev);
 
-	//printf("computeGFLine 0\n");
-
-	copy_v2_v2_int(fs, sys->faces_edge[gfvert_seed->ori_e]);
-	can_next = true;
-	copy_v3_v3(q, gfvert_seed->co);
-	oldface = fs[0];
-	newface = fs[1];
-	oldedge = gfvert_seed->ori_e;
-	indv1 = addVertGFSystem(gfsys, q, gfvert_seed->ori_e);
-	idv = indv1;
-	igfedold = -1;
-	igfednew = -1;
-	//printf("computeGFLine 1\n");
-	while (can_next) {
-		//printf("computeGFLine 2\n");
-		computeGradientDirectionOnEdge(ri, dir, sys, gfsys, oldedge);
-		//printf("computeGFLine 3\n");
-		if (ri[0] == GRA_DIR_ON_FACE) {
-			//printf("computeGFLine 4\n");
-			copy_v2_v2_int(fs, sys->faces_edge[oldedge]);
-			oldface = fs[0] == ri[1] ? fs[1] : fs[0];
-			newface = fs[0] == ri[1] ? fs[0] : fs[1];
-			ied = nextPointFlowLine(r, sys, q, oldface, oldedge);
-			if (ied >= 0) {
-				cross_v3_v3v3(d1, sys->no[newface], dir);
-				//printf("computeGFLine 5\n");
-				if (nearGFEdgeInGFMeshFromEdge(sys, gfsys, r, d1, ied, getSamplingDistanceFunctionOnFace(sys, gfsys, newface)) < 0) {
-					//printf("computeGFLine 6\n");
-					indv2 = addVertGFSystem(gfsys, r, ied);
-					//printf("computeGFLine 6.1\n");
-					addEdgeGFSystem(gfsys, indv1, indv2, newface);
-					//printf("computeGFLine 6.2\n");
-					add_v3_v3v3(oriseed, r, q);
-					mul_v3_fl(oriseed, 0.5f);
-					//printf("computeGFLine 6.3\n");
-					hvalue = getMaxSamplingDistanceFunctionOnFace(sys, gfsys, newface);
-					//printf("computeGFLine 6.4\n");
-					/*idedgeseed = computeNewSeed(newseed, sys, gfsys, newface, oriseed, d1, hvalue);
-					//printf("computeGFLine 7\n");
-					if (idedgeseed >= 0) {
-						//printf("computeGFLine 8\n");
-						gfseed = MEM_mallocN(sizeof (GradientFlowVert), __func__);
-						copy_v3_v3(gfseed->co, newseed);
-						gfseed->ori_e = idedgeseed;
-						addSeedToQueue(gfsys->heap_seeds, 1.0f / hvalue, gfseed);
-						//printf("computeGFLine 9\n");
-					}*/
-					//printf("computeGFLine 10\n");
-					copy_v3_v3(q, r);
-					oldface = newface;
-					oldedge = ied;
-					indv1 = indv2;
-				}
-				else {
-					//printf("computeGFLine 11\n");
-					can_next = false;
-				}
-			}
-			else {
-				can_next = false;
-			}
-		} 
-		else if (ri[0] == GRA_DIR_ON_EDGE) {
-			//printf("computeGFLine 12\n");
-			copy_v2_v2_int(fs, sys->faces_edge[oldedge]);
-			oldface = fs[0];
-			newface = fs[1];
-			ied = nextPointFlowLine(r, sys, q, oldface, oldedge);
-			//printf("computeGFLine 13\n");
-			if (ied >= 0) {
-				if (!equals_v3v3(r, q)) {
-					//printf("computeGFLine 14\n");
-					cross_v3_v3v3(d1, sys->no[newface], dir);
-					//printf("computeGFLine 15\n");
-					if (nearGFEdgeInGFMeshFromEdge(sys, gfsys, r, d1, ied, getSamplingDistanceFunctionOnFace(sys, gfsys, newface)) < 0 ) {
-						//printf("computeGFLine 16\n");
-						indv2 = addVertGFSystem(gfsys, r, ied);
-						addEdgeTwoFacesGFSystem(gfsys, indv1, indv2, newface, oldface);
-						copy_v3_v3(q, r);
-						oldface = newface;
-						oldedge = ied;
-						indv1 = indv2;
-						//printf("computeGFLine 17\n");
-					}
-					else { 
-						//printf("computeGFLine 18\n");
-						can_next = false;
-					}
-				
-				}
-				else {
-					//printf("computeGFLine 19\n");
-					can_next = false;
-				}
-			}
-			else {
-				can_next = false;
-			}
-
-		}
-		else {
-			//printf("computeGFLine 20\n");
-			can_next = false;
-		}
-		//printf("computeGFLine 21\n");
-	}	
-
-	//printf("computeGFLine 22\n");
-
-	/* Inverse direction
-	copy_v2_v2_int(fs, sys->faces_edge[gfvert_seed->ori_e]);
-	can_next = true;
-	copy_v3_v3(q, gfvert_seed->co);
-	oldface = fs[0];
-	newface = fs[1];
-	oldedge = gfvert_seed->ori_e;
-	indv1 = idv;
-	igfedold = -1;
-	igfednew = -1;
-	while (can_next) {
-		computeGradientDirectionOnEdgeInverse(ri, dir, sys, gfsys, oldedge);
-		if (ri[0] == GRA_DIR_ON_FACE) {
-			copy_v2_v2_int(fs, sys->faces_edge[oldedge]);
-			oldface = fs[0] == ri[1] ? fs[1] : fs[0];
-			newface = fs[0] == ri[1] ? fs[0] : fs[1];
-			ied = nextPointFlowLineInverse(r, sys, q, oldface, oldedge);
-			if (ied >= 0) {
-				cross_v3_v3v3(d1, sys->no[newface], dir);
-				if (nearGFEdgeInGFMeshFromEdge(sys, gfsys, r, d1, ied, getSamplingDistanceFunctionOnFace(sys, gfsys, newface)) < 0 ) {
-					indv2 = addVertGFSystem(gfsys, r, ied);
-					addEdgeGFSystem(gfsys, indv1, indv2, newface);
-
-					hvalue = getMaxSamplingDistanceFunctionOnFace(sys, gfsys, newface);
-					idedgeseed = computeNewSeed(newseed, sys, gfsys, newface, oriseed, d1, hvalue);
-					if (idedgeseed >= 0) {
-						gfseed = MEM_mallocN(sizeof (GradientFlowVert), __func__);
-						copy_v3_v3(gfseed->co, newseed);
-						gfseed->ori_e = idedgeseed;
-						addSeedToQueue(gfsys->heap_seeds, 1.0f / hvalue, gfseed);
-					}
-
-					copy_v3_v3(q, r);
-					oldface = newface;
-					oldedge = ied;
-					indv1 = indv2;
-				}
-				else { 
-					can_next = false;
-				}
-			}
-			else {
-				can_next = false;
-			}
-		} 
-		else if (ri[0] == GRA_DIR_ON_EDGE) {
-			copy_v2_v2_int(fs, sys->faces_edge[oldedge]);
-			oldface = fs[0];
-			newface = fs[1];
-			ied = nextPointFlowLineInverse(r, sys, q, oldface, oldedge);
-			if (ied >= 0) {
-				if (!equals_v3v3(r, q)) {
-					cross_v3_v3v3(d1, sys->no[newface], dir);
-					if (nearGFEdgeInGFMeshFromEdge(sys, gfsys, r, d1, ied, getSamplingDistanceFunctionOnFace(sys, gfsys, newface)) < 0 ) {
-						indv2 = addVertGFSystem(gfsys, r, ied);
-						addEdgeTwoFacesGFSystem(gfsys, indv1, indv2, newface, oldface);
-						copy_v3_v3(q, r);
-						oldface = newface;
-						oldedge = ied;
-						indv1 = indv2;
-					}
-					else { 
-						can_next = false;
-					}
-				
-				}
-				else {
-					can_next = false;
-				}
-			}
-			else {
-				can_next = false;
-			}
-		}
-		else {
-			can_next = false;
-		}
-	}*/
+	while (nextPointFlowLine(&newgfv, gfsys, oldgfv, &face)) {
+		oldgfv = newgfv;
+	}
 }
 
 int computeNewSeed(float r[3], LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexf, float ori[3], float dir[3], float mh)
@@ -1395,31 +1153,23 @@ int computeNewSeed(float r[3], LaplacianSystem *sys, GradientFlowSystem *gfsys, 
 	return -1;
 }
 
-
 void computeFlowLines(LaplacianSystem *sys) {
-	GradientFlowSystem *gfsys1, *gfsys2;
-	GradientFlowVert *seed;
-	//printf("computeFlowLines 0 \n");
-	//printf("computeFlowLines 1 \n");
-	gfsys1 = newGradientFlowSystem(sys, sys->h1, sys->gf1);
-	//printf("computeFlowLines 2 \n");
-	gfsys2 = newGradientFlowSystem(sys, sys->h2, sys->gf2);
-	//printf("computeFlowLines 3 \n");
+	GFVert *seed;
+	
+	if (sys->gfsys1) deleteGradientFlowSystem(sys->gfsys1);
+	sys->gfsys1 = newGradientFlowSystem(sys, sys->h1, sys->gf1);
+	//sys->gfsys2 = newGradientFlowSystem(sys, sys->h2, sys->gf2);
 
-	while (!BLI_heap_is_empty(gfsys1->heap_seeds)) {
-		//printf("computeFlowLines 4 \n");
-		seed = getTopSeedFromQueue(gfsys1->heap_seeds);
-		//printf("computeFlowLines 5 \n");
-		computeGFLine(sys, gfsys1, seed);
-		//printf("computeFlowLines 6 \n");
-		/*MEM_SAFE_FREE(seed);*/
-	}
-	sys->gfsys = gfsys1;
-	/*
-	while (!BLI_heap_is_empty(gfsys2->heap_seeds)) {
-		seed = getTopSeedFromQueue(gfsys2->heap_seeds);
-		computeGFLine(sys, gfsys2, seed);
+	while (!BLI_heap_is_empty(sys->gfsys1->heap_seeds)) {
+		seed = getTopSeedFromQueue(sys->gfsys1->heap_seeds);
+		computeGFLine(sys, sys->gfsys1, seed);
 		MEM_SAFE_FREE(seed);
-	}*/
+	}
+	
+	//while (!BLI_heap_is_empty(gfsys2->heap_seeds)) {
+	//	seed = getTopSeedFromQueue(gfsys2->heap_seeds);
+	//	computeGFLine(sys, gfsys2, seed);
+	//	//MEM_SAFE_FREE(seed);
+	//}
 	
 }

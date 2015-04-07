@@ -38,54 +38,58 @@
 
 #include "BKE_mesh_mapping.h"
 #include "BLI_heap.h"
+#include "BLI_linklist.h"
 
-typedef struct GFList {
-	int index;		/*Index pointer to face or edge on original mesh*/
-	struct GFList *next;
-} GFList;
+typedef int GFEdgeID;
+typedef int GFVertID;
 
-typedef struct GradientFlowVert {
-	float co[3];		/*Vert coordinates*/
-	int ori_e;	/*Edge index on original Mesh -1 if not inside a edge*/
-} GradientFlowVert;
+typedef struct GFVert {
+	float co[3];		/* Vert position on edge */
+	int idev;	            /* Edge/vertex index on original Mesh - negative if on vertex */
+} GFVert;
 
-typedef struct GradientFlowEdge {
-	int v1, v2;	/*Vert indices on gradient flow mesh*/
-	int ori_f;		/*Face index on original Mesh -1 if not inside a face*/
-} GradientFlowEdge;
+typedef struct GFEdge {
+	int v1, v2;	    /* Vert indices on gradient flow mesh */
+	int face;		/* Face/edge index on original Mesh - negative if on original edge */
+} GFEdge;
 
 typedef struct GradientFlowMesh {
 	int totvert, allocvert;
 	int totedge, allocedge;
-	GradientFlowVert *mvert;	/* array of verts */
-	GradientFlowEdge *medge;	/* array of edges */
+	GFVert *mvert;	/* array of verts */
+	GFEdge *medge;	/* array of edges */
 } GradientFlowMesh;
 
-/*GradientFlowSysten, one gfsys for every gradient field*/
+typedef struct LaplacianSystem LaplacianSystem;
+
+/* GradientFlowSysten, one gfsys for every gradient field */
 typedef struct GradientFlowSystem {
-	GradientFlowMesh *mesh;			/* Mesh pointer*/
-	GFList **ringf_list;			/* Array list of of GradientFlowEdge per original face*/
-	GFList **ringe_list;			/* Array list of of GradientFlowVert per original edge*/
+	GradientFlowMesh *mesh;			/* Mesh pointer */
+	LinkNode **ringf_list;			/* Array list of of GFEdge per original face */
+	LinkNode **ringe_list;			/* Array list of of GFVert per original edge */
 	struct Heap *heap_seeds;
+
 	int totalf;
 	int totale;
 	float *hfunction;
 	float(*gfield)[3];				/* Gradient Field g1 */
+
+	LaplacianSystem *sys;
 } GradientFlowSystem;
 
 typedef struct LaplacianSystem {
 	bool command_compute_flow;
 	bool has_solution;
 	bool command_remesh;
-	int total_verts;
+
 	int total_edges;
 	int total_faces;
 	int total_features;
 	int total_gflines;
 	int total_gfverts;
-	char features_grp_name[64];		/* Vertex Group name */
+
+	int total_verts;
 	float(*co)[3];					/* Original vertex coordinates */
-	float(*cogfl)[3];				/* Vertex coordinate Gradient flow line */
 	float(*no)[3];					/* Original face normal */
 	float(*gf1)[3];					/* Gradient Field g1 */
 	float(*gf2)[3];					/* Gradient Field g2 */
@@ -94,24 +98,24 @@ typedef struct LaplacianSystem {
 	float *h1;						/* Sampling distance function h1*/
 	float *h2;						/* Sampling distance function h2*/
 	float h;
+
 	int *constraints;				/* Feature points constraints*/
 	int *ringf_indices;				/* Indices of faces per vertex */
 	int *ringv_indices;				/* Indices of neighbors(vertex) per vertex */
 	int *ringe_indices;				/* Indices of edges per vertex */
-	unsigned int(*faces)[4];		/* Copy of MFace (tessface) v1-v4 */
+
+	unsigned int(*faces)[3];		/* Copy of MFace (tessface) v1-v3, v2-v4 */
 	unsigned int(*edges)[2];		/* Copy of edges v1-v2 */
 	unsigned int(*faces_edge)[2];	/* Faces by edges  */
+
 	MeshElemMap *ringf_map;			/* Map of faces per vertex */
 	MeshElemMap *ringv_map;			/* Map of vertex per vertex */
 	MeshElemMap *ringe_map;			/* Map of edges per vertex */
-	NLContext *context;				/* System for solve general implicit rotations */
-	GradientFlowSystem *gfsys;
-} LaplacianSystem;
 
-GFList *newGFList(int value);
-void deleteGFList(GFList *l);
-void addNodeGFList(GFList *l, int value);
-int getSizeGFList(GFList *l);
+	NLContext *context;				/* System for solve general implicit rotations */
+
+	GradientFlowSystem *gfsys1, *gfsys2;
+} LaplacianSystem;
 
 /*
 * alpha is degree of anisotropic curvature sensitivity
@@ -122,44 +126,44 @@ int getSizeGFList(GFList *l);
 void estimateNumberGFVerticesEdges(int ve[2], LaplacianSystem *sys, float h);
 
 GradientFlowMesh *newGradientFlowMesh(int totalvert, int totaledge);
-void deleteGradientFlowMesh(GradientFlowMesh * gfmesh);
-int addGFVertGFMesh(GradientFlowMesh *gfmesh, GradientFlowVert gfvert);
-int addVertGFMesh(GradientFlowMesh *gfmesh, float co[3], int index_edge);
-int addGFEdgeGFMesh(GradientFlowMesh *gfmesh, GradientFlowEdge gfedge);
-int addEdgeGFMesh(GradientFlowMesh *gfmesh, int index_v1, int index_v2, int index_face);
-
-GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys, float *mhfunction, float(*mgfield)[3]);
+//void deleteGradientFlowMesh(GradientFlowMesh * gfmesh);
+//int addGFVertGFMesh(GradientFlowMesh *gfmesh, GFVert gfvert);
+//int addVertGFMesh(GradientFlowMesh *gfmesh, float co[3], int index_edge);
+//int addGFEdgeGFMesh(GradientFlowMesh *gfmesh, GFEdge gfedge);
+//int addEdgeGFMesh(GradientFlowMesh *gfmesh, int index_v1, int index_v2, int index_face);
+//
+//GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys, float *mhfunction, float(*mgfield)[3]);
 void deleteGradientFlowSystem(GradientFlowSystem *gfsys);
-int addGFVertGFSystem(GradientFlowSystem *gfsys, GradientFlowVert gfvert);
-int addVertGFSystem(GradientFlowSystem *gfsys, float co[3], int index_edge);
-int addGFEdgeGFSystem(GradientFlowSystem *gfsys, GradientFlowEdge gfedge);
-int addEdgeGFSystem(GradientFlowSystem *gfsys, int index_v1, int index_v2, int index_face);
-int addEdgeTwoFacesGFSystem(GradientFlowSystem *gfsys, int index_v1, int index_v2, int index_face1, int index_face2);
-
-int *findFeaturesOnMesh(int size[2], LaplacianSystem *sys);
-void addSeedToQueue(struct Heap *aheap, float value, GradientFlowVert *vert);
-GradientFlowVert *getTopSeedFromQueue(struct Heap *aheap);
-
-bool isOnSegmentLine(float p1[3], float p2[3], float q[3]);
-bool intersecionLineSegmentWithVector(float r[3], float p1[3], float p2[3], float ori[3], float dir[3]);
-int getEdgeFromVerts(LaplacianSystem *sys, int v1, int v2);
-int getOtherFaceAdjacentToEdge(LaplacianSystem *sys, int oldface, int inde);
-void projectVectorOnFace(float r[3], float no[3], float dir[3]);
-int getDifferentVertexFaceEdge(LaplacianSystem *sys, int oldface, int inde);
-#define GRA_DIR_ON_NONE 0
-#define GRA_DIR_ON_FACE 1
-#define GRA_DIR_ON_EDGE 2
-void computeGradientDirectionOnVert(int rind[2], float r[3], LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexvert);
-void computeGradientDirectionOnEdgeInverse(int rind[2], float r[3], LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexedge);
-int nearGFEdgeInGFMesh(LaplacianSystem *sys, GradientFlowSystem *gfsys, float ori[3], float dir[3], int indexface, float maxradius);
-int nearGFEdgeInGFMeshFromEdge(LaplacianSystem *sys, GradientFlowSystem *gfsys, float ori[3], float dir[3], int indexedge, float maxradius);
-int nextPointFlowLine(float r[3], LaplacianSystem *sys, float q[3], int oldface, int inde);
-int nextPointFlowLineInverse(float r[3], LaplacianSystem *sys, float q[3], int oldface, int inde);
-float getSamplingDistanceFunctionOnFace(LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexface);
-float getMaxSamplingDistanceFunctionOnFace(LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexface);
-void computeGFLine(LaplacianSystem *sys, GradientFlowSystem *gfsys, GradientFlowVert *gfvert_seed);
-
-int computeNewSeed(float r[3], LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexf, float ori[3], float dir[3], float mh);
+//int addGFVertGFSystem(GradientFlowSystem *gfsys, GFVert gfvert);
+//int addVertGFSystem(GradientFlowSystem *gfsys, float co[3], int index_edge);
+//int addGFEdgeGFSystem(GradientFlowSystem *gfsys, GFEdge gfedge);
+//int addEdgeGFSystem(GradientFlowSystem *gfsys, int index_v1, int index_v2, int index_face);
+//int addEdgeTwoFacesGFSystem(GradientFlowSystem *gfsys, int index_v1, int index_v2, int index_face1, int index_face2);
+//
+//int *findFeaturesOnMesh(int size[2], LaplacianSystem *sys);
+//void addSeedToQueue(struct Heap *aheap, float value, GFVert *vert);
+//GFVert *getTopSeedFromQueue(struct Heap *aheap);
+//
+//bool isOnSegmentLine(float p1[3], float p2[3], float q[3]);
+//bool intersecionLineSegmentWithVector(float r[3], float p1[3], float p2[3], float ori[3], float dir[3]);
+//int getEdgeFromVerts(LaplacianSystem *sys, int v1, int v2);
+//int getOtherFaceAdjacentToEdge(LaplacianSystem *sys, int oldface, int inde);
+//void projectVectorOnFace(float r[3], float no[3], float dir[3]);
+//int getDifferentVertexFaceEdge(LaplacianSystem *sys, int oldface, int inde);
+//#define GRA_DIR_ON_NONE 0
+//#define GRA_DIR_ON_FACE 1
+//#define GRA_DIR_ON_EDGE 2
+//void computeGradientDirectionOnVert(int rind[2], float r[3], LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexvert);
+//void computeGradientDirectionOnEdgeInverse(int rind[2], float r[3], LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexedge);
+//int nearGFEdgeInGFMesh(LaplacianSystem *sys, GradientFlowSystem *gfsys, float ori[3], float dir[3], int indexface, float maxradius);
+//int nearGFEdgeInGFMeshFromEdge(LaplacianSystem *sys, GradientFlowSystem *gfsys, float ori[3], float dir[3], int indexedge, float maxradius);
+//int nextPointFlowLine(float r[3], LaplacianSystem *sys, float q[3], int oldface, int inde);
+//int nextPointFlowLineInverse(float r[3], LaplacianSystem *sys, float q[3], int oldface, int inde);
+//float getSamplingDistanceFunctionOnFace(LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexface);
+//float getMaxSamplingDistanceFunctionOnFace(LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexface);
+//void computeGFLine(LaplacianSystem *sys, GradientFlowSystem *gfsys, GFVert *gfvert_seed);
+//
+//int computeNewSeed(float r[3], LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexf, float ori[3], float dir[3], float mh);
 
 void computeFlowLines(LaplacianSystem *sys);
 
