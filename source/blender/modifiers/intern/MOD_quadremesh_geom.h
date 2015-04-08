@@ -45,8 +45,18 @@ typedef int GFVertID;
 
 typedef struct GFVert {
 	float co[3];		/* Vert position on edge */
-	int idev;	            /* Edge/vertex index on original Mesh - negative if on vertex */
 } GFVert;
+
+typedef enum {
+	eSeedVert,
+	eSeedFace
+} GFSeedType;
+
+typedef struct GFSeed {
+	float co[3];
+	int val;
+	GFSeedType type;
+} GFSeed;
 
 typedef struct GFEdge {
 	int v1, v2;	    /* Vert indices on gradient flow mesh */

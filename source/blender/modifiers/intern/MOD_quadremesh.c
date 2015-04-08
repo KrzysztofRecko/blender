@@ -491,7 +491,7 @@ static LaplacianSystem* initSystem(QuadRemeshModifierData *qmd, Object *ob, Deri
 	return sys;
 }
 
-static GradientFlowSystem *QuadRemeshModifier_do(QuadRemeshModifierData *qmd, Object *ob, DerivedMesh *dm)
+static LaplacianSystem *QuadRemeshModifier_do(QuadRemeshModifierData *qmd, Object *ob, DerivedMesh *dm)
 {
 	int i;
 	LaplacianSystem *sys = NULL;
@@ -502,7 +502,6 @@ static GradientFlowSystem *QuadRemeshModifier_do(QuadRemeshModifierData *qmd, Ob
 	float mmin = 1000, mmax = 0;
 	float y;
 	int x;
-	GradientFlowSystem *gfsys = NULL;
 
 	qmd->flag |= MOD_QUADREMESH_COMPUTE_FLOW;
 	qmd->flag |= MOD_QUADREMESH_REMESH;
@@ -553,21 +552,15 @@ static GradientFlowSystem *QuadRemeshModifier_do(QuadRemeshModifierData *qmd, Ob
 		if (sys->has_solution) {
 			sys->h = 2.0f;
 			computeFlowLines(sys);
-			gfsys = sys->gfsys1;
 		}
 		qmd->flag &= ~MOD_QUADREMESH_REMESH;
 	}
 
 	if (qmd->cache_system) {
 		sys = qmd->cache_system;
-		if (sys->has_solution) {
-			if (sys->gfsys1) {
-				gfsys = sys->gfsys1;
-			}
-		}
 	}
 
-	return gfsys;
+	return sys;
 }
 
 
@@ -638,15 +631,11 @@ static DerivedMesh *applyModifier(ModifierData *md,
 	MVert *arrayvect;
 	MEdge *arrayedge;
 	int i;
-	GradientFlowSystem *gfsys = NULL;
 	DerivedMesh *result;
 	
-	if (!gfsys) {
-		gfsys = QuadRemeshModifier_do((QuadRemeshModifierData *)md, ob, dm);
-	}
-	LaplacianSystem *sys = (LaplacianSystem *)((QuadRemeshModifierData *)md)->cache_system;
+	LaplacianSystem *sys = QuadRemeshModifier_do((QuadRemeshModifierData *)md, ob, dm);
 	
-	if (gfsys) {
+	if (sys) {
 		/*result = CDDM_new(gfsys->totalf * 2, gfsys->totalf, 0, 0, 0);
 		arrayvect = result->getVertArray(result);
 		for (i = 0; i < gfsys->totalf; i++) {
@@ -664,16 +653,27 @@ static DerivedMesh *applyModifier(ModifierData *md,
 			arrayedge[i].flag |= ME_EDGEDRAW;
 		}*/
 
-		result = CDDM_new(gfsys->mesh->totvert, gfsys->mesh->totedge, 0, 0, 0);
+		result = CDDM_new(sys->gfsys1->mesh->totvert + sys->gfsys2->mesh->totvert,
+						  sys->gfsys1->mesh->totedge + sys->gfsys2->mesh->totedge,
+						  0, 0, 0);
 		arrayvect = result->getVertArray(result);
-		for (i = 0; i < gfsys->mesh->totvert; i++) {
-			copy_v3_v3(arrayvect[i].co, gfsys->mesh->mvert[i].co);
+		for (i = 0; i < sys->gfsys1->mesh->totvert; i++) {
+			copy_v3_v3(arrayvect[i].co, sys->gfsys1->mesh->mvert[i].co);
 		}
+		for (i = 0; i < sys->gfsys2->mesh->totvert; i++) {
+			copy_v3_v3(arrayvect[i + sys->gfsys1->mesh->totvert].co, sys->gfsys2->mesh->mvert[i].co);
+		}
+
 		arrayedge = result->getEdgeArray(result);
-		for (i = 0; i < gfsys->mesh->totedge; i++) {
-			arrayedge[i].v1 = gfsys->mesh->medge[i].v1;
-			arrayedge[i].v2 = gfsys->mesh->medge[i].v2;
+		for (i = 0; i < sys->gfsys1->mesh->totedge; i++) {
+			arrayedge[i].v1 = sys->gfsys1->mesh->medge[i].v1;
+			arrayedge[i].v2 = sys->gfsys1->mesh->medge[i].v2;
 			arrayedge[i].flag |= ME_EDGEDRAW;
+		}
+		for (i = 0; i < sys->gfsys2->mesh->totedge; i++) {
+			arrayedge[i + sys->gfsys1->mesh->totedge].v1 = sys->gfsys2->mesh->medge[i].v1 + sys->gfsys1->mesh->totvert;
+			arrayedge[i + sys->gfsys1->mesh->totedge].v2 = sys->gfsys2->mesh->medge[i].v2 + sys->gfsys1->mesh->totvert;
+			arrayedge[i + sys->gfsys1->mesh->totedge].flag |= ME_EDGEDRAW;
 		}
 	}
 	else{
