@@ -41,6 +41,9 @@
 
 #include "MOD_util.h"
 
+//#define QR_SHOWQUERIES
+#define QR_LINELIMIT 40000
+
 void estimateNumberGFVerticesEdges(int ve[2], LaplacianSystem *sys, float h)
 {
 	int i, totalv, totale;
@@ -89,7 +92,7 @@ void deleteGradientFlowMesh(GradientFlowMesh * gfmesh)
 GFVertID addVertGFMesh(GradientFlowMesh *gfmesh, float co[3])
 {
 	if (gfmesh->totvert == gfmesh->allocvert) {
-		gfmesh->allocvert += MOD_QUADREMESH_ALLOC_BLOCK;
+		gfmesh->allocvert = gfmesh->allocvert * 2 + 10;
 		gfmesh->mvert = MEM_reallocN(gfmesh->mvert, sizeof(GFVert) * gfmesh->allocvert);
 	}
 
@@ -618,8 +621,6 @@ bool intersectSegmentWithOthersOnFace(GradientFlowSystem *gfsys, float in_a[3], 
 	return false;
 }
 
-//#define QR_SHOWQUERIES
-
 /**
  * 0 - intersection found
  * 1 - intersection not found
@@ -766,14 +767,11 @@ void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 {
 	int i, f, d, e, v, newe;
 	bool is_vertex;
-	float co[3], gf[3], dir = 1.0f;
+	float newco[3], oldco[3], gf[3], dir = 1.0f;
 	LaplacianSystem *sys = gfsys->sys;
 	GFVertID oldgfv, newgfv, seed;
 
-	if (in_seed->type == eSeedVert) v = in_seed->val;
-	else v = 0;
-
-	seed = addVertGFSystem(gfsys, in_seed->co);
+	seed = -1;
 
 	for (d = 0; d < 2; d++) {
 		if (in_seed->type == eSeedVert) {
@@ -787,7 +785,8 @@ void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 			e = -1;
 		}
 
-		oldgfv = seed;
+		oldgfv = -1;
+		copy_v3_v3(oldco, in_seed->co);
 
 		while (1) {
 			if (is_vertex) {
@@ -795,7 +794,7 @@ void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 					f = sys->ringf_map[v].indices[i];
 
 					mul_v3_v3fl(gf, gfsys->gfield[f], dir);
-					if (nextPoint(co, &e, gfsys, f, gfsys->mesh->mvert[oldgfv].co, gf)) {
+					if (nextPoint(newco, &e, gfsys, f, oldco, gf)) {
 						is_vertex = false;
 						break;
 					}
@@ -804,7 +803,11 @@ void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 			}
 			else {
 				mul_v3_v3fl(gf, gfsys->gfield[f], dir);
-				nextPoint(co, &newe, gfsys, f, gfsys->mesh->mvert[oldgfv].co, gf);
+				if (!nextPoint(newco, &newe, gfsys, f, oldco, gf)) {
+					is_vertex = true;
+					v = compare_v3v3(newco, sys->co[sys->edges[e][0]], 0.000001f) ? sys->edges[e][0] : sys->edges[e][1];
+					continue;
+				}
 
 				if (newe == e) {
 					if (dir * sys->U_field[sys->edges[e][0]] < dir * sys->U_field[sys->edges[e][1]])
@@ -812,17 +815,23 @@ void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 					else
 						v = sys->edges[e][1];
 
-					copy_v3_v3(co, sys->co[v]);
+					copy_v3_v3(newco, sys->co[v]);
 					is_vertex = true;
 				}
 				else e = newe;
+
+				if (compare_v3v3(newco, oldco, 0.000001f))
+					break;
 			}
 
-			if (!checkPoint(gfsys, gfsys->mesh->mvert[oldgfv].co, co, f, 0.06f, 0.18f)) break;
+			if (!checkPoint(gfsys, oldco, newco, f, 0.08f, 0.12f)) break;
 
-			newgfv = addVertGFSystem(gfsys, co);
+			if (seed == -1) seed = addVertGFSystem(gfsys, in_seed->co);
+			if (oldgfv == -1) oldgfv = seed;
+			newgfv = addVertGFSystem(gfsys, newco);
 			addEdgeGFSystem(gfsys, oldgfv, newgfv, f);
 			oldgfv = newgfv;
+			copy_v3_v3(oldco, gfsys->mesh->mvert[oldgfv].co);
 
 			f = getOtherFaceAdjacentToEdge(sys, f, e);
 		}
@@ -841,7 +850,7 @@ void computeFlowLines(LaplacianSystem *sys) {
 
 	while (!BLI_heap_is_empty(sys->gfsys1->heap_seeds)) {
 		seed = getTopSeedFromQueue(sys->gfsys1->heap_seeds);
-		if (++comp < 4000)
+		if (++comp < QR_LINELIMIT)
 			computeGFLine(sys->gfsys1, seed);
 		MEM_SAFE_FREE(seed);
 	}
@@ -850,7 +859,7 @@ void computeFlowLines(LaplacianSystem *sys) {
 	
 	while (!BLI_heap_is_empty(sys->gfsys2->heap_seeds)) {
 		seed = getTopSeedFromQueue(sys->gfsys2->heap_seeds);
-		if (++comp < 4000)
+		if (++comp < QR_LINELIMIT)
 			computeGFLine(sys->gfsys2, seed);
 		MEM_SAFE_FREE(seed);
 	}
