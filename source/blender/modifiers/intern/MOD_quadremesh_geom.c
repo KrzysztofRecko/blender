@@ -139,7 +139,7 @@ int *findFeaturesOnMesh(int size[2], LaplacianSystem *sys)
 	int *listdest = NULL;
 	total = 0;
 
-	for (i = 0; i < sys->total_edges; i++) {
+	/*for (i = 0; i < sys->total_edges; i++) {
 		f1 = sys->faces_edge[i][0];
 		f2 = sys->faces_edge[i][1];
 		angle = angle_normalized_v3v3(sys->no[f1], sys->no[f2]);
@@ -147,7 +147,7 @@ int *findFeaturesOnMesh(int size[2], LaplacianSystem *sys)
 			listverts[sys->edges[i][0]] = 1;
 			listverts[sys->edges[i][1]] = 1;
 		}
-	}
+	}*/
 
 	for (i = 0; i < sys->total_verts; i++) {
 		if (sys->constraints[i] == 1) {
@@ -285,7 +285,6 @@ int addEdgeTwoFacesGFSystem(GradientFlowSystem *gfsys, int index_v1, int index_v
 
 }
 #endif // 0
-
 
 GFSeed *getTopSeedFromQueue(struct Heap *aheap)
 {
@@ -444,7 +443,7 @@ bool nextPoint(float r_co[3], int *r_edge, GradientFlowSystem *gfsys, int in_f, 
 		sub_v3_v3v3(a[i], in_co, sys->co[sys->faces[in_f][i]]);
 
 	for (i = 0; i < 3; i++)
-		if (compare_v3v3(a[i], zero, 0.00001f))
+		if (dot_v3v3(a[i], a[i]) < FLT_EPSILON)
 			v = i;
 
 	if (v != -1) {
@@ -730,6 +729,8 @@ bool checkPoint(GradientFlowSystem *gfsys, float in_oldco[3], float in_newco[3],
 	LaplacianSystem *sys = gfsys->sys;
 
 	sub_v3_v3v3(seg, in_oldco, in_newco);
+	if (dot_v3v3(seg, seg) < 0.00001f) return true;
+
 	getOrthogonalDirection(dir, gfsys, seg, in_f);
 
 	for (d = 0; d < 2; d++) {
@@ -763,15 +764,104 @@ float getMaxSamplingDistanceFunctionOnFace(LaplacianSystem *sys, GradientFlowSys
 
 #endif // 0
 
+void resetLine(GradientFlowSystem *gfsys, GFLine *line)
+{
+	int i;
+	GFVertID newv;
+
+	/* flush queue */
+	for (i = 0; i < line->num_q; i++) {
+		if (line->qf[i] != -1) {
+			newv = addVertGFSystem(gfsys, line->qco[i]);
+			addEdgeGFSystem(gfsys, line->end, newv, line->qf[i]);
+			line->end = newv;
+		}
+	}
+
+	/* reset to original state */
+	line->end = line->seed;
+	line->lastchklen = 0.0f;
+	line->num_q = 1;
+	copy_v3_v3(line->lastchk, gfsys->mesh->mvert[line->seed].co);
+	copy_v3_v3(line->qco[0], gfsys->mesh->mvert[line->seed].co);
+	line->qf[0] = -1;
+	line->qlen = 0.0f;
+}
+
+GFLine* newGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed, int in_f, float in_newco[3])
+{
+	GFLine *result;
+
+	if (!checkPoint(gfsys, in_newco, in_seed->co, in_f, 0.04f, 0.08f)) return NULL;
+
+	result = MEM_callocN(sizeof(GFLine), "GradientFlowLine");
+	result->seed = addVertGFSystem(gfsys, in_seed->co);
+	resetLine(gfsys, result);
+
+	return result;
+}
+
+bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float in_newco[3])
+{
+	const float chklen = 0.08f; /* sampling rate */
+
+	int i;
+	float seg[3], newchk[3];
+	float curlen;
+	GFVertID newv;
+
+	/**
+	 * qco[0] - first point after last checked
+	 * qco[num_q - 1] - last added point
+	 */
+
+	sub_v3_v3v3(seg, in_newco, line->qco[line->num_q - 1]);
+	curlen = len_v3(seg);
+
+	while (line->qlen + curlen > line->lastchklen + chklen) {
+		mul_v3_v3fl(newchk, seg, (line->lastchklen + chklen - line->qlen) / curlen);
+		add_v3_v3(newchk, line->qco[line->num_q - 1]);
+
+		if (!checkPoint(gfsys, line->lastchk, newchk, in_f, 0.04f, 0.08f)) {
+			if (line->qf[0] != -1) {
+				newv = addVertGFSystem(gfsys, line->lastchk);
+				addEdgeGFSystem(gfsys, line->end, newv, line->qf[0]);
+			}
+			return false;
+		}
+		else {
+			/* flush queue */
+			for (i = 0; i < line->num_q - 1; i++) {
+				if (line->qf[i] != -1) {
+					newv = addVertGFSystem(gfsys, line->qco[i]);
+					addEdgeGFSystem(gfsys, line->end, newv, line->qf[i]);
+					line->end = newv;
+				}
+			}
+			copy_v3_v3(line->qco[0], line->qco[line->num_q - 1]);
+			line->qf[0] = line->qf[line->num_q - 1];
+			line->num_q = 1;
+
+			copy_v3_v3(line->lastchk, newchk);
+			line->lastchklen += chklen;
+		}
+	}
+
+	copy_v3_v3(line->qco[line->num_q], in_newco);
+	line->qf[line->num_q] = in_f;
+	line->qlen += curlen;
+	if (++line->num_q == 10) return false;
+
+	return true;
+}
+
 void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 {
 	int i, f, d, e, v, newe;
 	bool is_vertex;
 	float newco[3], oldco[3], gf[3], dir = 1.0f;
 	LaplacianSystem *sys = gfsys->sys;
-	GFVertID oldgfv, newgfv, seed;
-
-	seed = -1;
+	GFLine *line = NULL;
 
 	for (d = 0; d < 2; d++) {
 		if (in_seed->type == eSeedVert) {
@@ -785,7 +875,6 @@ void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 			e = -1;
 		}
 
-		oldgfv = -1;
 		copy_v3_v3(oldco, in_seed->co);
 
 		while (1) {
@@ -805,8 +894,8 @@ void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 				mul_v3_v3fl(gf, gfsys->gfield[f], dir);
 				if (!nextPoint(newco, &newe, gfsys, f, oldco, gf)) {
 					is_vertex = true;
-					v = compare_v3v3(newco, sys->co[sys->edges[e][0]], 0.000001f) ? sys->edges[e][0] : sys->edges[e][1];
-					continue;
+					v = compare_v3v3(newco, sys->co[sys->edges[newe][0]], 0.001f) ? sys->edges[newe][0] : sys->edges[newe][1];
+					//continue;
 				}
 
 				if (newe == e) {
@@ -818,25 +907,27 @@ void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 					copy_v3_v3(newco, sys->co[v]);
 					is_vertex = true;
 				}
-				else e = newe;
 
-				if (compare_v3v3(newco, oldco, 0.000001f))
-					break;
+				e = newe;
 			}
 
-			if (!checkPoint(gfsys, oldco, newco, f, 0.08f, 0.12f)) break;
+			if (line == NULL) {
+				line = newGFLine(gfsys, in_seed, f, newco);
+				if (line == NULL) return;
+			}
+			
+			if (!addPointToLine(gfsys, line, f, newco)) break;
 
-			if (seed == -1) seed = addVertGFSystem(gfsys, in_seed->co);
-			if (oldgfv == -1) oldgfv = seed;
-			newgfv = addVertGFSystem(gfsys, newco);
-			addEdgeGFSystem(gfsys, oldgfv, newgfv, f);
-			oldgfv = newgfv;
-			copy_v3_v3(oldco, gfsys->mesh->mvert[oldgfv].co);
-
+			copy_v3_v3(oldco, newco);
 			f = getOtherFaceAdjacentToEdge(sys, f, e);
-		}
+		} /* while (1) */
+
+		if (line) resetLine(gfsys, line);
+
 		dir = -dir;
-	}
+	} /* for (d = 0; d < 2; d++) */
+
+	MEM_SAFE_FREE(line);
 }
 
 void computeFlowLines(LaplacianSystem *sys) {
@@ -855,13 +946,13 @@ void computeFlowLines(LaplacianSystem *sys) {
 		MEM_SAFE_FREE(seed);
 	}
 
-	comp = 0;
+	/*comp = 0;
 	
 	while (!BLI_heap_is_empty(sys->gfsys2->heap_seeds)) {
 		seed = getTopSeedFromQueue(sys->gfsys2->heap_seeds);
 		if (++comp < QR_LINELIMIT)
 			computeGFLine(sys->gfsys2, seed);
 		MEM_SAFE_FREE(seed);
-	}
+	}*/
 	
 }

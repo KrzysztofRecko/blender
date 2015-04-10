@@ -63,6 +63,18 @@ typedef struct GFEdge {
 	int face;		/* Face/edge index on original Mesh - negative if on original edge */
 } GFEdge;
 
+typedef struct GFLine {
+	GFVertID end, seed;
+
+	float lastchk[3];
+	float lastchklen;
+
+	float qco[10][3];
+	int qf[10];
+	float qlen;
+	int num_q;
+} GFLine;
+
 typedef struct GradientFlowMesh {
 	int totvert, allocvert;
 	int totedge, allocedge;
