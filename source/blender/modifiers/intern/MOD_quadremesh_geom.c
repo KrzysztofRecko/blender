@@ -422,15 +422,17 @@ bool getSecondAndThirdVert(int *r1, int *r2, LaplacianSystem *sys, int face, int
 }
 
 /**
- * /return true - different point reached
- *         false - the same point reached
+ * /return 0 - all good
+ *         1 - new vertex very close to 1st vertex of result edge
+ *         2 -           -||-           2nd vertex of result edge
+ *         3 - other error (eg. input outside of triangle)
  */
-bool nextPoint(float r_co[3], int *r_edge, GradientFlowSystem *gfsys, int in_f, float in_co[3], float in_dir[3])
+int nextPoint(float r_co[3], int *r_edge, GradientFlowSystem *gfsys, int in_f, float in_co[3], float in_dir[3])
 {
 	int i, pick = -1, v = -1;
 	bool is_on_vertex = false;
 	float a[3][3], b[3][3], c[2][3], co2[3],
-		dummy[3], zero[3] = { 0.0f, 0.0f, 0.0f };
+		dummy[3];
 	LaplacianSystem *sys = gfsys->sys;
 
 	/* check if direction is coplanar to triangle */
@@ -439,12 +441,11 @@ bool nextPoint(float r_co[3], int *r_edge, GradientFlowSystem *gfsys, int in_f, 
 
 	add_v3_v3v3(co2, in_dir, in_co); /* second point on direction */
 
-	for (i = 0; i < 3; i++)
+	for (i = 0; i < 3; i++) {
 		sub_v3_v3v3(a[i], in_co, sys->co[sys->faces[in_f][i]]);
-
-	for (i = 0; i < 3; i++)
 		if (dot_v3v3(a[i], a[i]) < FLT_EPSILON)
 			v = i;
+	}
 
 	if (v != -1) {
 		is_on_vertex = true;
@@ -464,16 +465,18 @@ bool nextPoint(float r_co[3], int *r_edge, GradientFlowSystem *gfsys, int in_f, 
 			pick = i;
 
 	if (pick == -1)
-		*r_edge = 0;
-	else
-		*r_edge = getEdgeFromVerts(sys, sys->faces[in_f][pick], sys->faces[in_f][(pick + 1) % 3]);
+		return 3;
+
+	*r_edge = getEdgeFromVerts(sys, sys->faces[in_f][pick], sys->faces[in_f][(pick + 1) % 3]);
 
 	isect_line_line_v3(sys->co[sys->faces[in_f][pick]], sys->co[sys->faces[in_f][(pick + 1) % 3]], in_co, co2, r_co, dummy);
 
-	if (is_on_vertex && pick != (v + 1) % 3)
-		return false;
-	else
-		return true;
+	if (len_squared_v3v3(r_co, sys->co[sys->edges[*r_edge][0]]) < FLT_EPSILON)
+		return 1;
+	if (len_squared_v3v3(r_co, sys->co[sys->edges[*r_edge][1]]) < FLT_EPSILON)
+		return 2;
+
+	return 0;
 
 #if 0
 		if (compare_v3v3(r_co, in_co, 0.001f)) { /* result too close to input */
@@ -644,7 +647,7 @@ int queryDirection(GradientFlowSystem *gfsys, float in_co[3], int in_f, float in
 			return 2;
 		if (dot_v3v3(sys->no[oldf], sys->no[in_f]) < 0.0f) mul_v3_fl(dir, -1.0f);
 
-		if (!nextPoint(newco, &e, gfsys, in_f, oldco, dir)) return 2;
+		if (nextPoint(newco, &e, gfsys, in_f, oldco, dir)) return 2;
 		oldf = in_f;
 
 		sub_v3_v3v3(c, newco, oldco);
@@ -729,7 +732,7 @@ bool checkPoint(GradientFlowSystem *gfsys, float in_oldco[3], float in_newco[3],
 	LaplacianSystem *sys = gfsys->sys;
 
 	sub_v3_v3v3(seg, in_oldco, in_newco);
-	if (dot_v3v3(seg, seg) < 0.00001f) return true;
+	if (dot_v3v3(seg, seg) < FLT_EPSILON) return true;
 
 	getOrthogonalDirection(dir, gfsys, seg, in_f);
 
@@ -823,10 +826,11 @@ bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float in_
 		add_v3_v3(newchk, line->qco[line->num_q - 1]);
 
 		if (!checkPoint(gfsys, line->lastchk, newchk, in_f, 0.04f, 0.08f)) {
-			if (line->qf[0] != -1) {
+			if (line->qf[0] != -1 && line->num_q > 0) {
 				newv = addVertGFSystem(gfsys, line->lastchk);
 				addEdgeGFSystem(gfsys, line->end, newv, line->qf[0]);
 			}
+			//line->num_q = 0;
 			return false;
 		}
 		else {
@@ -857,7 +861,7 @@ bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float in_
 
 void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 {
-	int i, f, d, e, v, newe;
+	int i, f, d, e, v, r, newe;
 	bool is_vertex;
 	float newco[3], oldco[3], gf[3], dir = 1.0f;
 	LaplacianSystem *sys = gfsys->sys;
@@ -883,7 +887,7 @@ void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 					f = sys->ringf_map[v].indices[i];
 
 					mul_v3_v3fl(gf, gfsys->gfield[f], dir);
-					if (nextPoint(newco, &e, gfsys, f, oldco, gf)) {
+					if (!nextPoint(newco, &e, gfsys, f, oldco, gf)) {
 						is_vertex = false;
 						break;
 					}
@@ -892,11 +896,17 @@ void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 			}
 			else {
 				mul_v3_v3fl(gf, gfsys->gfield[f], dir);
-				if (!nextPoint(newco, &newe, gfsys, f, oldco, gf)) {
+				r = nextPoint(newco, &newe, gfsys, f, oldco, gf);
+				
+				if (r == 1) {
 					is_vertex = true;
-					v = compare_v3v3(newco, sys->co[sys->edges[newe][0]], 0.001f) ? sys->edges[newe][0] : sys->edges[newe][1];
-					//continue;
+					v = sys->edges[newe][0];
 				}
+				else if (r == 2) {
+					is_vertex = true;
+					v = sys->edges[newe][1];
+				}
+				else if (r == 3) break;
 
 				if (newe == e) {
 					if (dir * sys->U_field[sys->edges[e][0]] < dir * sys->U_field[sys->edges[e][1]])
@@ -916,7 +926,7 @@ void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 				if (line == NULL) return;
 			}
 			
-			if (!addPointToLine(gfsys, line, f, newco)) break;
+			if (!addPointToLine(gfsys, line, f, newco))	break;
 
 			copy_v3_v3(oldco, newco);
 			f = getOtherFaceAdjacentToEdge(sys, f, e);
