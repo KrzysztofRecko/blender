@@ -139,7 +139,7 @@ int *findFeaturesOnMesh(int size[2], LaplacianSystem *sys)
 	int *listdest = NULL;
 	total = 0;
 
-	/*for (i = 0; i < sys->total_edges; i++) {
+	for (i = 0; i < sys->total_edges; i++) {
 		f1 = sys->faces_edge[i][0];
 		f2 = sys->faces_edge[i][1];
 		angle = angle_normalized_v3v3(sys->no[f1], sys->no[f2]);
@@ -147,7 +147,7 @@ int *findFeaturesOnMesh(int size[2], LaplacianSystem *sys)
 			listverts[sys->edges[i][0]] = 1;
 			listverts[sys->edges[i][1]] = 1;
 		}
-	}*/
+	}
 
 	for (i = 0; i < sys->total_verts; i++) {
 		if (sys->constraints[i] == 1) {
@@ -477,98 +477,6 @@ int nextPoint(float r_co[3], int *r_edge, GradientFlowSystem *gfsys, int in_f, f
 		return 2;
 
 	return 0;
-
-#if 0
-		if (compare_v3v3(r_co, in_co, 0.001f)) { /* result too close to input */
-			sub_v3_v3v3(dummy, sys->co[sys->edges[*r_edge][1]], sys->co[sys->edges[*r_edge][0]]);
-			if (dot_v3v3(dummy, in_dir) < 0.0f) {
-				copy_v3_v3(r_co, sys->co[sys->edges[*r_edge][0]]);
-				*r_edge = sys->edges[*r_edge][0];
-			}
-			else {
-				copy_v3_v3(r_co, sys->co[sys->edges[*r_edge][1]]);
-				*r_edge = sys->edges[*r_edge][1];
-			}
-			return false;
-		}
-		else 
-
-
-			return true;
-
-	else { /* input on vertex v of face */
-		sub_v3_v3v3(b[0], sys->co[sys->faces[in_f][(v + 1) % 3]], in_co);
-		sub_v3_v3v3(b[1], sys->co[sys->faces[in_f][(v + 2) % 3]], in_co);
-
-		cross_v3_v3v3(c[0], in_dir, b[0]);
-		cross_v3_v3v3(c[1], b[1], in_dir);
-
-		if (dot_v3v3(c[0], sys->no[in_f]) < 0.0f) { /* direction points away from triangle */
-			copy_v3_v3(r_co, in_co);
-			*r_edge = getEdgeFromVerts(sys, sys->faces[in_f][(v + 1) % 3], sys->faces[in_f][v]);
-
-			return false;
-		}
-		else if (dot_v3v3(c[1], sys->no[in_f]) < 0.0f) {
-			copy_v3_v3(r_co, in_co);
-			*r_edge = getEdgeFromVerts(sys, sys->faces[in_f][(v + 2) % 3], sys->faces[in_f][v]);
-
-			return false;
-		}
-		else { /* direction points towards an edge */
-			isect_line_line_v3(sys->co[sys->faces[in_f][(v + 1) % 3]], sys->co[sys->faces[in_f][(v + 2) % 3]], in_co, co2, r_co, dummy);
-			*r_edge = getEdgeFromVerts(sys, sys->faces[in_f][(v + 1) % 3], sys->faces[in_f][(v + 2) % 3]);
-
-			return true;
-		}
-	}
-#endif
-
-#if 0
-
-	iv1 = sys->edges[in_e][0];
-	iv2 = sys->edges[in_e][1];
-	ov1 = getThirdVert(sys, in_f, iv1, iv2);
-
-	sub_v3_v3v3(a, sys->co[ov1], in_co);
-	sub_v3_v3v3(e, sys->co[iv1], sys->co[iv2]);
-
-	cross_v3_v3v3(b, a, e);
-	if (dot_v3v3(b, sys->no[in_f]) < 0.0f) {
-		mul_v3_fl(e, -1.0f);
-		iv1 = sys->edges[in_e][1];
-		iv2 = sys->edges[in_e][0];
-	}
-
-	cross_v3_v3v3(b, a, in_dir);
-	cross_v3_v3v3(c, e, in_dir);
-
-	if (dot_v3v3(b, sys->no[in_f]) > 0.0f) {
-		*r_edge = getEdgeFromVerts(sys, iv1, ov1);
-		if (dot_v3v3(c, sys->no[in_f]) > 0.0f) { /* vertex on iv1 */
-			copy_v3_v3(r_co, sys->co[iv1]);
-			return false;
-		}
-		else {                                   /* vertex on edge iv1 - ov1 */
-			add_v3_v3v3(c, in_dir, in_co);
-			isect_line_line_v3(sys->co[iv1], sys->co[ov1], in_co, c, r_co, dummy);
-		}
-	}
-	else {
-		*r_edge = getEdgeFromVerts(sys, iv2, ov1);
-		if (dot_v3v3(c, sys->no[in_f]) > 0.0f) { /* vertex on iv2 */
-			copy_v3_v3(r_co, sys->co[iv2]);
-			return false;
-		}
-		else {                                   /* vertex on edge iv2 - ov1 */
-			add_v3_v3v3(c, in_dir, in_co);
-			isect_line_line_v3(sys->co[iv2], sys->co[ov1], in_co, c, r_co, dummy);
-}
-	}
-
-	return true;
-#endif // 0
-
 }
 
 #if 0
@@ -671,10 +579,20 @@ int queryDirection(GradientFlowSystem *gfsys, float in_co[3], int in_f, float in
 
 			if (intersectSegmentWithOthersOnFace(gfsys, oldco, newco2, in_f)) return 0;
 		}
-		else if (!make_seed)
+		
+		if (actlen > dist && !make_seed)
 			return 1;
 
-		if (make_seed && actlen > maxdist) {
+#ifdef QR_SHOWQUERIES
+		if (actlen > dist && actlen < maxdist) {
+			int vf1, vf2;
+			vf1 = addVertGFSystem(gfsys, oldco);
+			vf2 = addVertGFSystem(gfsys, newco);
+			addEdgeGFSystem(gfsys, vf1, vf2, 0);
+		}
+#endif
+
+		if (actlen > maxdist) {
 			mul_v3_v3fl(newco2, c, (maxdist - actlen + len) / len);
 			add_v3_v3(newco2, oldco);
 
@@ -688,14 +606,6 @@ int queryDirection(GradientFlowSystem *gfsys, float in_co[3], int in_f, float in
 			addSeedToQueue(gfsys->heap_seeds, newco2, false, in_f, 0.0f);
 			return 1;
 		}
-#ifdef QR_SHOWQUERIES
-		else {
-			int vf1, vf2;
-			vf1 = addVertGFSystem(gfsys, oldco);
-			vf2 = addVertGFSystem(gfsys, newco2);
-			addEdgeGFSystem(gfsys, vf1, vf2, 0);
-		}
-#endif
 
 		in_f = getOtherFaceAdjacentToEdge(sys, in_f, e);
 		copy_v3_v3(oldco, newco);
@@ -806,10 +716,10 @@ GFLine* newGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed, int in_f, float in
 
 bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float in_newco[3])
 {
-	const float chklen = 0.08f; /* sampling rate */
+	const float chklen = 0.03f; /* sampling rate */
 
 	int i;
-	float seg[3], newchk[3];
+	float seg[3], newchk[3], oldco[3];
 	float curlen;
 	GFVertID newv;
 
@@ -818,37 +728,38 @@ bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float in_
 	 * qco[num_q - 1] - last added point
 	 */
 
-	sub_v3_v3v3(seg, in_newco, line->qco[line->num_q - 1]);
+	copy_v3_v3(oldco, line->qco[line->num_q - 1]);
+	sub_v3_v3v3(seg, in_newco, oldco);
 	curlen = len_v3(seg);
 
 	while (line->qlen + curlen > line->lastchklen + chklen) {
 		mul_v3_v3fl(newchk, seg, (line->lastchklen + chklen - line->qlen) / curlen);
-		add_v3_v3(newchk, line->qco[line->num_q - 1]);
+		add_v3_v3(newchk, oldco);
 
 		if (!checkPoint(gfsys, line->lastchk, newchk, in_f, 0.04f, 0.08f)) {
-			if (line->qf[0] != -1 && line->num_q > 0) {
+			if (line->num_q == 0) {
+				newv = addVertGFSystem(gfsys, line->lastchk);
+				addEdgeGFSystem(gfsys, line->end, newv, in_f);
+			}
+			else if (line->qf[0] != -1) {
 				newv = addVertGFSystem(gfsys, line->lastchk);
 				addEdgeGFSystem(gfsys, line->end, newv, line->qf[0]);
 			}
-			//line->num_q = 0;
 			return false;
 		}
-		else {
-			/* flush queue */
-			for (i = 0; i < line->num_q - 1; i++) {
-				if (line->qf[i] != -1) {
-					newv = addVertGFSystem(gfsys, line->qco[i]);
-					addEdgeGFSystem(gfsys, line->end, newv, line->qf[i]);
-					line->end = newv;
-				}
+		
+		/* flush queue */
+		for (i = 0; i < line->num_q; i++) {
+			if (line->qf[i] != -1) {
+				newv = addVertGFSystem(gfsys, line->qco[i]);
+				addEdgeGFSystem(gfsys, line->end, newv, line->qf[i]);
+				line->end = newv;
 			}
-			copy_v3_v3(line->qco[0], line->qco[line->num_q - 1]);
-			line->qf[0] = line->qf[line->num_q - 1];
-			line->num_q = 1;
-
-			copy_v3_v3(line->lastchk, newchk);
-			line->lastchklen += chklen;
 		}
+		line->num_q = 0;
+
+		copy_v3_v3(line->lastchk, newchk);
+		line->lastchklen += chklen;
 	}
 
 	copy_v3_v3(line->qco[line->num_q], in_newco);
@@ -956,13 +867,13 @@ void computeFlowLines(LaplacianSystem *sys) {
 		MEM_SAFE_FREE(seed);
 	}
 
-	/*comp = 0;
+	comp = 0;
 	
 	while (!BLI_heap_is_empty(sys->gfsys2->heap_seeds)) {
 		seed = getTopSeedFromQueue(sys->gfsys2->heap_seeds);
 		if (++comp < QR_LINELIMIT)
 			computeGFLine(sys->gfsys2, seed);
 		MEM_SAFE_FREE(seed);
-	}*/
+	}
 	
 }
