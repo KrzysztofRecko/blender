@@ -45,6 +45,7 @@ typedef int GFVertID;
 
 typedef struct GFVert {
 	float co[3];		/* Vert position on edge */
+	int e[4];           /* 4 neighboring vertices: 2 for each gfsystem */
 } GFVert;
 
 typedef enum {
@@ -75,20 +76,13 @@ typedef struct GFLine {
 	int num_q;
 } GFLine;
 
-typedef struct GradientFlowMesh {
-	int totvert, allocvert;
-	int totedge, allocedge;
-	GFVert *mvert;	/* array of verts */
-	GFEdge *medge;	/* array of edges */
-} GradientFlowMesh;
-
 typedef struct LaplacianSystem LaplacianSystem;
 
 /* GradientFlowSysten, one gfsys for every gradient field */
 typedef struct GradientFlowSystem {
-	GradientFlowMesh *mesh;			/* Mesh pointer */
+	int totedge, allocedge;
+	GFEdge *medge;	/* array of edges */
 	LinkNode **ringf_list;			/* Array list of of GFEdge per original face */
-	LinkNode **ringe_list;			/* Array list of of GFVert per original edge */
 	struct Heap *heap_seeds;
 
 	int totalf;
@@ -137,6 +131,10 @@ typedef struct LaplacianSystem {
 	NLContext *context;				/* System for solve general implicit rotations */
 
 	GradientFlowSystem *gfsys1, *gfsys2;
+
+	int totvert, allocvert;
+	GFVert *mvert;	/* array of verts */
+
 } LaplacianSystem;
 
 /*
@@ -145,9 +143,8 @@ typedef struct LaplacianSystem {
 * return ve[0] number of vertices
 * return ve[1] number of edges
 */
-void estimateNumberGFVerticesEdges(int ve[2], LaplacianSystem *sys, float h);
+//void estimateNumberGFVerticesEdges(int ve[2], LaplacianSystem *sys, float h);
 
-GradientFlowMesh *newGradientFlowMesh(int totalvert, int totaledge);
 //void deleteGradientFlowMesh(GradientFlowMesh * gfmesh);
 //int addGFVertGFMesh(GradientFlowMesh *gfmesh, GFVert gfvert);
 //int addVertGFMesh(GradientFlowMesh *gfmesh, float co[3], int index_edge);

@@ -46,6 +46,7 @@
 static void deleteLaplacianSystem(LaplacianSystem *sys)
 {
 	deleteGradientFlowSystem(sys->gfsys1);
+	deleteGradientFlowSystem(sys->gfsys2);
 	MEM_SAFE_FREE(sys->faces);
 	MEM_SAFE_FREE(sys->edges);
 	MEM_SAFE_FREE(sys->faces_edge);
@@ -67,6 +68,7 @@ static void deleteLaplacianSystem(LaplacianSystem *sys)
 	if (sys->context) {
 		nlDeleteContext(sys->context);
 	}
+	MEM_SAFE_FREE(sys->mvert);
 	MEM_SAFE_FREE(sys);
 }
 
@@ -652,27 +654,24 @@ static DerivedMesh *applyModifier(ModifierData *md,
 			arrayedge[i].flag |= ME_EDGEDRAW;
 		}*/
 
-		result = CDDM_new(sys->gfsys1->mesh->totvert + sys->gfsys2->mesh->totvert,
-						  sys->gfsys1->mesh->totedge + sys->gfsys2->mesh->totedge,
+		result = CDDM_new(sys->totvert,
+						  sys->gfsys1->totedge + sys->gfsys2->totedge,
 						  0, 0, 0);
 		arrayvect = result->getVertArray(result);
-		for (i = 0; i < sys->gfsys1->mesh->totvert; i++) {
-			copy_v3_v3(arrayvect[i].co, sys->gfsys1->mesh->mvert[i].co);
-		}
-		for (i = 0; i < sys->gfsys2->mesh->totvert; i++) {
-			copy_v3_v3(arrayvect[i + sys->gfsys1->mesh->totvert].co, sys->gfsys2->mesh->mvert[i].co);
+		for (i = 0; i < sys->totvert; i++) {
+			copy_v3_v3(arrayvect[i].co, sys->mvert[i].co);
 		}
 
 		arrayedge = result->getEdgeArray(result);
-		for (i = 0; i < sys->gfsys1->mesh->totedge; i++) {
-			arrayedge[i].v1 = sys->gfsys1->mesh->medge[i].v1;
-			arrayedge[i].v2 = sys->gfsys1->mesh->medge[i].v2;
+		for (i = 0; i < sys->gfsys1->totedge; i++) {
+			arrayedge[i].v1 = sys->gfsys1->medge[i].v1;
+			arrayedge[i].v2 = sys->gfsys1->medge[i].v2;
 			arrayedge[i].flag |= ME_EDGEDRAW;
 		}
-		for (i = 0; i < sys->gfsys2->mesh->totedge; i++) {
-			arrayedge[i + sys->gfsys1->mesh->totedge].v1 = sys->gfsys2->mesh->medge[i].v1 + sys->gfsys1->mesh->totvert;
-			arrayedge[i + sys->gfsys1->mesh->totedge].v2 = sys->gfsys2->mesh->medge[i].v2 + sys->gfsys1->mesh->totvert;
-			arrayedge[i + sys->gfsys1->mesh->totedge].flag |= ME_EDGEDRAW;
+		for (i = 0; i < sys->gfsys2->totedge; i++) {
+			arrayedge[i + sys->gfsys1->totedge].v1 = sys->gfsys2->medge[i].v1;
+			arrayedge[i + sys->gfsys1->totedge].v2 = sys->gfsys2->medge[i].v2;
+			arrayedge[i + sys->gfsys1->totedge].flag |= ME_EDGEDRAW;
 		}
 	}
 	else{
