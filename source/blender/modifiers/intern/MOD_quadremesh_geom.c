@@ -43,6 +43,9 @@
 
 //#define QR_SHOWQUERIES
 #define QR_LINELIMIT 40000
+#define QR_SAMPLING_RATE 0.03f
+#define QR_MINDIST 0.04f
+#define QR_SEEDDIST 0.08f
 
 void estimateNumberGFVerticesEdges(int ve[2], LaplacianSystem *sys, float h)
 {
@@ -705,7 +708,7 @@ GFLine* newGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed, int in_f, float in
 {
 	GFLine *result;
 
-	if (!checkPoint(gfsys, in_newco, in_seed->co, in_f, 0.04f, 0.08f)) return NULL;
+	if (!checkPoint(gfsys, in_newco, in_seed->co, in_f, QR_MINDIST, QR_SEEDDIST)) return NULL;
 
 	result = MEM_callocN(sizeof(GFLine), "GradientFlowLine");
 	result->seed = addVertGFSystem(gfsys, in_seed->co);
@@ -716,7 +719,7 @@ GFLine* newGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed, int in_f, float in
 
 bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float in_newco[3])
 {
-	const float chklen = 0.03f; /* sampling rate */
+	const float chklen = QR_SAMPLING_RATE; /* sampling rate */
 
 	int i;
 	float seg[3], newchk[3], oldco[3];
@@ -736,7 +739,7 @@ bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float in_
 		mul_v3_v3fl(newchk, seg, (line->lastchklen + chklen - line->qlen) / curlen);
 		add_v3_v3(newchk, oldco);
 
-		if (!checkPoint(gfsys, line->lastchk, newchk, in_f, 0.04f, 0.08f)) {
+		if (!checkPoint(gfsys, line->lastchk, newchk, in_f, QR_MINDIST, QR_SEEDDIST)) {
 			if (line->num_q == 0) {
 				newv = addVertGFSystem(gfsys, line->lastchk);
 				addEdgeGFSystem(gfsys, line->end, newv, in_f);
