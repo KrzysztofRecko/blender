@@ -247,6 +247,7 @@ GFSeed *getTopSeedFromQueue(struct Heap *aheap)
 	return vert;
 }
 
+#if 0
 bool isOnSegmentLine(float p1[3], float p2[3], float q[3]){
 	if (fabsf(len_v3v3(p1, q) + len_v3v3(p2, q) - len_v3v3(p1, p2)) < MOD_QUADREMESH_MIN_LEN) {
 		return true;
@@ -307,6 +308,7 @@ bool intersectionVectorWithTriangle(float r[3], float p1[3], float p2[3], float 
 	return false;
 
 }
+#endif
 
 int getEdgeFromVerts(LaplacianSystem *sys, int v1, int v2)
 {
@@ -331,6 +333,7 @@ int getOtherFaceAdjacentToEdge(LaplacianSystem *sys, int oldface, int e)
 	return sys->faces_edge[e][0];
 }
 
+#if 0
 /* Project Gradient fields on face*/
 void projectVectorOnFace(float r[3], float no[3], float dir[3])
 {
@@ -374,6 +377,7 @@ bool getSecondAndThirdVert(int *r1, int *r2, LaplacianSystem *sys, int face, int
 
 	return true;
 }
+#endif
 
 /**
  * /return 0 - all good
@@ -623,19 +627,6 @@ float getSamplingDistanceFunctionOnFace(GradientFlowSystem *gfsys, int in_f, flo
 
 	return uv[0] * h1 + uv[1] * h2 + (1.0f - uv[0] - uv[1]) * h3;
 }
-
-#if 0
-
-float getMaxSamplingDistanceFunctionOnFace(LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexface)
-{
-	float h1, h2, h3;
-	h1 = gfsys->hfunction[sys->faces[indexface][0]];
-	h2 = gfsys->hfunction[sys->faces[indexface][1]];
-	h3 = gfsys->hfunction[sys->faces[indexface][2]];
-	return max_fff(h1, h2, h3);
-}
-
-#endif // 0
 
 void resetLine(GradientFlowSystem *gfsys, GFLine *line)
 {
