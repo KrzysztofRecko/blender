@@ -606,7 +606,7 @@ int queryDirection(GradientFlowSystem *gfsys, float in_co[3], int in_f, float in
 			addEdgeGFSystem(gfsys, vf1, vf2, 0);
 #endif
 
-			addSeedToQueue(gfsys->heap_seeds, newco2, false, in_f, 0.0f);
+			addSeedToQueue(gfsys->heap_seeds, newco2, false, in_f, -maxdist);
 			return 1;
 		}
 
@@ -658,16 +658,21 @@ bool checkPoint(GradientFlowSystem *gfsys, float in_oldco[3], float in_newco[3],
 	return true;
 }
 
-#if 0
-
-float getSamplingDistanceFunctionOnFace(LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexface)
+float getSamplingDistanceFunctionOnFace(GradientFlowSystem *gfsys, int in_f, float in_co[3])
 {
-	float h1, h2, h3;
-	h1 = gfsys->hfunction[sys->faces[indexface][0]];
-	h2 = gfsys->hfunction[sys->faces[indexface][1]];
-	h3 = gfsys->hfunction[sys->faces[indexface][2]];
-	return min_fff(h1, h2, h3);
+	float h1, h2, h3, uv[2];
+	LaplacianSystem *sys = gfsys->sys;
+
+	resolve_tri_uv_v3(uv, in_co, sys->co[sys->faces[in_f][0]], sys->co[sys->faces[in_f][1]], sys->co[sys->faces[in_f][2]]);
+
+	h1 = gfsys->hfunction[sys->faces[in_f][0]];
+	h2 = gfsys->hfunction[sys->faces[in_f][1]];
+	h3 = gfsys->hfunction[sys->faces[in_f][2]];
+
+	return uv[0] * h1 + uv[1] * h2 + (1.0f - uv[0] - uv[1]) * h3;
 }
+
+#if 0
 
 float getMaxSamplingDistanceFunctionOnFace(LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexface)
 {

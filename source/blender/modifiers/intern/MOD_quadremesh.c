@@ -486,8 +486,6 @@ static LaplacianSystem* initSystem(QuadRemeshModifierData *qmd, Object *ob, Deri
 
 	createFacesByEdge(sys);
 
-	//computeSampleDistanceFunctions(sys, 2.0, 10.0f);
-
 	return sys;
 }
 
@@ -520,6 +518,7 @@ static LaplacianSystem *QuadRemeshModifier_do(QuadRemeshModifierData *qmd, Objec
 
 			if (sys->has_solution) {
 				computeGradientFields(sys);
+				computeSampleDistanceFunctions(sys, 2.0f, 10.0f);
 
 				/* normalization of vgroup weights */
 				/*if (!defgroup_find_name(ob, "QuadRemeshFlow")) {
