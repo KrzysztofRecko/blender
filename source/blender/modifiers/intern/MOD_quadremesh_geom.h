@@ -44,7 +44,7 @@ typedef int GFEdgeID;
 typedef int GFVertID;
 
 typedef struct GFVert {
-	float co[3];		/* Vert position on edge */
+	float co[3];		/* Vert position */
 	GFVertID e[4];      /* 4 neighboring vertices: 2 for each gfsystem */
 } GFVert;
 
@@ -60,8 +60,7 @@ typedef struct GFSeed {
 } GFSeed;
 
 typedef struct GFEdge {
-	int v1, v2;	    /* Vert indices on gradient flow mesh */
-	int face;		/* Face/edge index on original Mesh - negative if on original edge */
+	GFVertID v1, v2;	    /* Vert indices */
 } GFEdge;
 
 typedef struct GFLine {
@@ -85,10 +84,9 @@ typedef struct GradientFlowSystem {
 	int totedge, allocedge;
 	GFEdge *medge;	/* array of edges */
 	LinkNode **ringf_list;			/* Array list of of GFEdge per original face */
+
 	struct Heap *heap_seeds;
 
-	int totalf;
-	int totale;
 	float *hfunction;
 	float(*gfield)[3];				/* Gradient Field g1 */
 
@@ -100,35 +98,32 @@ typedef struct LaplacianSystem {
 	bool has_solution;
 	bool command_remesh;
 
-	int total_edges;
-	int total_faces;
-	int total_features;
-	int total_gflines;
-	int total_gfverts;
-
 	int total_verts;
 	float(*co)[3];					/* Original vertex coordinates */
 	float(*no)[3];					/* Original face normal */
-	float(*gf1)[3];					/* Gradient Field g1 */
-	float(*gf2)[3];					/* Gradient Field g2 */
-	float *weights;					/* Feature points weights*/
 	float *U_field;					/* Initial scalar field*/
-	float *h1;						/* Sampling distance function h1*/
-	float *h2;						/* Sampling distance function h2*/
-	float h;
 
+	int total_features;
 	int *constraints;				/* Feature points constraints*/
+	float *weights;					/* Feature points weights*/
+
 	int *ringf_indices;				/* Indices of faces per vertex */
 	int *ringv_indices;				/* Indices of neighbors(vertex) per vertex */
 	int *ringe_indices;				/* Indices of edges per vertex */
-
-	unsigned int(*faces)[3];		/* Copy of MFace (tessface) v1-v3, v2-v4 */
-	unsigned int(*edges)[2];		/* Copy of edges v1-v2 */
-	unsigned int(*faces_edge)[2];	/* Faces by edges  */
-
 	MeshElemMap *ringf_map;			/* Map of faces per vertex */
 	MeshElemMap *ringv_map;			/* Map of vertex per vertex */
 	MeshElemMap *ringe_map;			/* Map of edges per vertex */
+
+	int total_faces;
+	unsigned int(*faces)[3];		/* Copy of MFace (tessface) v1-v3, v2-v4 */
+	float(*gf1)[3], (*gf2)[3];		/* Gradient Fields g1 and g2 per face*/
+
+	float *h1, *h2;					/* Sampling distance functions h1 and h2 */
+	float h;
+
+	int total_edges;
+	unsigned int(*edges)[2];		/* Copy of edges v1-v2 */
+	unsigned int(*faces_edge)[2];	/* Faces by edges  */
 
 	NLContext *context;				/* System for solve general implicit rotations */
 
@@ -136,7 +131,6 @@ typedef struct LaplacianSystem {
 
 	int totvert, allocvert;
 	GFVert *mvert;	/* array of verts */
-
 } LaplacianSystem;
 
 /*

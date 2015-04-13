@@ -102,7 +102,6 @@ GFEdgeID addEdge(GradientFlowSystem *gfsys, int index_v1, int index_v2, int inde
 		gfsys->medge = MEM_reallocN(gfsys->medge, sizeof(GFEdge) * gfsys->allocedge);
 	}
 
-	gfsys->medge[gfsys->totedge].face = index_face;
 	gfsys->medge[gfsys->totedge].v1 = index_v1;
 	gfsys->medge[gfsys->totedge].v2 = index_v2;
 	gfsys->totedge++;
@@ -185,9 +184,6 @@ GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys, float *mhfunctio
 	
 	gfsys->heap_seeds = BLI_heap_new();
 	
-	gfsys->totalf = sys->total_faces;
-	gfsys->totale = sys->total_edges;
-	
 	lverts = findFeaturesOnMesh(sizeverts, sys);
 	
 	for (i = 0; i < sizeverts[0]; i++) {
@@ -205,7 +201,7 @@ void deleteGradientFlowSystem(GradientFlowSystem *gfsys)
 {
 	int i;
 	if (gfsys) {
-		for (i = 0; i < gfsys->totalf; i++) {
+		for (i = 0; i < gfsys->sys->total_faces; i++) {
 			BLI_linklist_free(gfsys->ringf_list[i], NULL);
 		}
 		MEM_SAFE_FREE(gfsys->ringf_list);
