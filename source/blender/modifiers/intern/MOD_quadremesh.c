@@ -520,7 +520,7 @@ static LaplacianSystem *QuadRemeshModifier_do(QuadRemeshModifierData *qmd, Objec
 
 			if (sys->has_solution) {
 				computeGradientFields(sys);
-				computeSampleDistanceFunctions(sys, 2.0f, 10.0f);
+				//computeSampleDistanceFunctions(sys, 2.0f, 10.0f);
 
 				/* normalization of vgroup weights */
 				/*if (!defgroup_find_name(ob, "QuadRemeshFlow")) {
@@ -553,6 +553,7 @@ static LaplacianSystem *QuadRemeshModifier_do(QuadRemeshModifierData *qmd, Objec
 		if (sys->has_solution) {
 			sys->h = 2.0f;
 			computeFlowLines(sys);
+			generateMesh(sys);
 		}
 		qmd->flag &= ~MOD_QUADREMESH_REMESH;
 	}
@@ -629,50 +630,13 @@ static DerivedMesh *applyModifier(ModifierData *md,
 	//DerivedMesh *dm2 = get_dm(ob, NULL, dm, NULL, false, false);
 	//QuadRemeshModifier_do((QuadRemeshModifierData *)md, ob, dm, (void *)dm->getVertArray(dm), dm->getNumVerts(dm));
 
-	MVert *arrayvect;
-	MEdge *arrayedge;
-	int i;
+	
 	DerivedMesh *result;
 	
 	LaplacianSystem *sys = QuadRemeshModifier_do((QuadRemeshModifierData *)md, ob, dm);
 	
 	if (sys) {
-		/*result = CDDM_new(gfsys->totalf * 2, gfsys->totalf, 0, 0, 0);
-		arrayvect = result->getVertArray(result);
-		for (i = 0; i < gfsys->totalf; i++) {
-			float cent[3], v[3];
-			cent_tri_v3(cent, sys->co[sys->faces[i][0]], sys->co[sys->faces[i][1]], sys->co[sys->faces[i][2]]);
-			mul_v3_fl(gfsys->gfield[i], 0.1f);
-			add_v3_v3v3(v, cent, gfsys->gfield[i]);
-			copy_v3_v3(arrayvect[i * 2].co, v);
-			copy_v3_v3(arrayvect[i * 2 + 1].co, cent);
-		}
-		arrayedge = result->getEdgeArray(result);
-		for (i = 0; i < gfsys->totalf; i++) {
-			arrayedge[i].v1 = i * 2;
-			arrayedge[i].v2 = i * 2 + 1;
-			arrayedge[i].flag |= ME_EDGEDRAW;
-		}*/
-
-		result = CDDM_new(sys->totvert,
-						  sys->gfsys1->totedge + sys->gfsys2->totedge,
-						  0, 0, 0);
-		arrayvect = result->getVertArray(result);
-		for (i = 0; i < sys->totvert; i++) {
-			copy_v3_v3(arrayvect[i].co, sys->mvert[i].co);
-		}
-
-		arrayedge = result->getEdgeArray(result);
-		for (i = 0; i < sys->gfsys1->totedge; i++) {
-			arrayedge[i].v1 = sys->gfsys1->medge[i].v1;
-			arrayedge[i].v2 = sys->gfsys1->medge[i].v2;
-			arrayedge[i].flag |= ME_EDGEDRAW;
-		}
-		for (i = 0; i < sys->gfsys2->totedge; i++) {
-			arrayedge[i + sys->gfsys1->totedge].v1 = sys->gfsys2->medge[i].v1;
-			arrayedge[i + sys->gfsys1->totedge].v2 = sys->gfsys2->medge[i].v2;
-			arrayedge[i + sys->gfsys1->totedge].flag |= ME_EDGEDRAW;
-		}
+		result = sys->resultDM;
 	}
 	else{
 		result = dm;

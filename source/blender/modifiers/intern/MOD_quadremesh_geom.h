@@ -39,6 +39,7 @@
 #include "BKE_mesh_mapping.h"
 #include "BLI_heap.h"
 #include "BLI_linklist.h"
+#include "BKE_cdderivedmesh.h"
 
 typedef int GFEdgeID;
 typedef int GFVertID;
@@ -131,6 +132,8 @@ typedef struct LaplacianSystem {
 
 	int totvert, allocvert;
 	GFVert *mvert;	/* array of verts */
+
+	DerivedMesh *resultDM;
 } LaplacianSystem;
 
 /*
@@ -181,6 +184,7 @@ void deleteGradientFlowSystem(GradientFlowSystem *gfsys);
 //int computeNewSeed(float r[3], LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexf, float ori[3], float dir[3], float mh);
 
 void computeFlowLines(LaplacianSystem *sys);
+void generateMesh(LaplacianSystem *sys);
 
 #endif /*openNl*/
 #endif /*__MOD_QUADREMESH_GEOM_H__*/

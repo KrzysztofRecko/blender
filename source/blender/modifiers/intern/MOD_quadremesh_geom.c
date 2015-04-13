@@ -646,7 +646,6 @@ void addSegmentToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float i
 bool changeLineDirection(GradientFlowSystem *gfsys, GFLine *line)
 {
 	int i;
-	GFVertID newv;
 
 	if (line->seed != -1) {
 		/* flush queue */
@@ -679,7 +678,6 @@ bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float in_
 	int i;
 	float seg[3], newchk[3];
 	float curlen;
-	GFVertID newv;
 
 	/* qco[0] - first point after last checked
 	 * qco[num_q - 1] - last added point */
@@ -827,4 +825,48 @@ void computeFlowLines(LaplacianSystem *sys) {
 		MEM_SAFE_FREE(seed);
 	}
 	
+}
+
+void generateMesh(LaplacianSystem *sys)
+{
+	MVert *arrayvect;
+	MEdge *arrayedge;
+	int i;
+
+	/*result = CDDM_new(gfsys->totalf * 2, gfsys->totalf, 0, 0, 0);
+	arrayvect = result->getVertArray(result);
+	for (i = 0; i < gfsys->totalf; i++) {
+	float cent[3], v[3];
+	cent_tri_v3(cent, sys->co[sys->faces[i][0]], sys->co[sys->faces[i][1]], sys->co[sys->faces[i][2]]);
+	mul_v3_fl(gfsys->gfield[i], 0.1f);
+	add_v3_v3v3(v, cent, gfsys->gfield[i]);
+	copy_v3_v3(arrayvect[i * 2].co, v);
+	copy_v3_v3(arrayvect[i * 2 + 1].co, cent);
+	}
+	arrayedge = result->getEdgeArray(result);
+	for (i = 0; i < gfsys->totalf; i++) {
+	arrayedge[i].v1 = i * 2;
+	arrayedge[i].v2 = i * 2 + 1;
+	arrayedge[i].flag |= ME_EDGEDRAW;
+	}*/
+
+	sys->resultDM = CDDM_new(sys->totvert,
+					sys->gfsys1->totedge + sys->gfsys2->totedge,
+					0, 0, 0);
+	arrayvect = sys->resultDM->getVertArray(sys->resultDM);
+	for (i = 0; i < sys->totvert; i++) {
+		copy_v3_v3(arrayvect[i].co, sys->mvert[i].co);
+	}
+
+	arrayedge = sys->resultDM->getEdgeArray(sys->resultDM);
+	for (i = 0; i < sys->gfsys1->totedge; i++) {
+		arrayedge[i].v1 = sys->gfsys1->medge[i].v1;
+		arrayedge[i].v2 = sys->gfsys1->medge[i].v2;
+		arrayedge[i].flag |= ME_EDGEDRAW;
+	}
+	for (i = 0; i < sys->gfsys2->totedge; i++) {
+		arrayedge[i + sys->gfsys1->totedge].v1 = sys->gfsys2->medge[i].v1;
+		arrayedge[i + sys->gfsys1->totedge].v2 = sys->gfsys2->medge[i].v2;
+		arrayedge[i + sys->gfsys1->totedge].flag |= ME_EDGEDRAW;
+	}
 }
