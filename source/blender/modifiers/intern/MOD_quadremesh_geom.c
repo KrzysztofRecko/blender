@@ -947,10 +947,60 @@ void makeEdges(LaplacianSystem *sys)
 	}
 }
 
+void makePolys(LaplacianSystem *sys)
+{
+	int i, j, d, s, dd;
+	GFVertID v, n;
+
+	sys->totloop = sys->allocloop = 0;
+	sys->totpolys = sys->allocpolys = 0;
+	MEM_SAFE_FREE(sys->loops);
+	MEM_SAFE_FREE(sys->polys);
+
+	for (i = 0; i < sys->totvert; i++) {
+		for (j = 0; j < 4; j++) {
+			if (sys->mvert[i].e[j] >= 0) {
+				d = j;
+				v = i;
+				s = sys->totloop;
+				do {
+					if (sys->totloop == sys->allocloop) {
+						sys->allocloop = sys->allocloop * 2 + 10;
+						sys->loops = MEM_reallocN(sys->loops, sys->allocloop * sizeof(MLoop));
+					}
+					sys->loops[sys->totloop].v = v;
+					sys->loops[sys->totloop].e = 0;
+					sys->totloop++;
+
+					n = sys->mvert[v].e[d];
+					sys->mvert[v].e[d] = -1;
+					v = n;
+					dd = d;
+					d = (d + 1) % 4;
+					while (d != dd && sys->mvert[v].e[d] < 0) d = (d + 3) % 4;
+					if (sys->mvert[v].e[d] < 0) break;
+				} while (v != i);
+
+				if (sys->totpolys == sys->allocpolys) {
+					sys->allocpolys = sys->allocpolys * 2 + 10;
+					sys->polys = MEM_reallocN(sys->polys, sys->allocpolys * sizeof(MPoly));
+				}
+				sys->polys[sys->totpolys].loopstart = s;
+				sys->polys[sys->totpolys].totloop = sys->totloop - s;
+				sys->polys[sys->totpolys].mat_nr = 0;
+				sys->polys[sys->totpolys].flag = 0;
+				sys->totpolys++;
+			}
+		}
+	}
+}
+
 void generateMesh(LaplacianSystem *sys)
 {
 	MVert *arrayvect;
 	MEdge *arrayedge;
+	MPoly *polys;
+	MLoop *loops;
 	int i;
 
 #if 0
@@ -994,18 +1044,23 @@ arrayedge[i].flag |= ME_EDGEDRAW;
 
 	generateIntersectionsOnFaces(sys);
 	deleteDegenerateVerts(sys);
-	makeEdges(sys);
+	makePolys(sys);
 
-	sys->resultDM = CDDM_new(sys->totvert, sys->totedge, 0, 0, 0);
+	sys->resultDM = CDDM_new(sys->totvert, 0, 0, sys->totloop, sys->totpolys);
 	arrayvect = sys->resultDM->getVertArray(sys->resultDM);
 	for (i = 0; i < sys->totvert; i++) {
 		copy_v3_v3(arrayvect[i].co, sys->mvert[i].co);
 	}
 
-	arrayedge = sys->resultDM->getEdgeArray(sys->resultDM);
+	/*arrayedge = sys->resultDM->getEdgeArray(sys->resultDM);
 	for (i = 0; i < sys->totedge; i++) {
 		arrayedge[i].v1 = sys->medge[i].v1;
 		arrayedge[i].v2 = sys->medge[i].v2;
 		arrayedge[i].flag |= ME_EDGEDRAW;
-	}
+	}*/
+
+	loops = sys->resultDM->getLoopArray(sys->resultDM);
+	memcpy(loops, sys->loops, sys->totloop * sizeof(MLoop));
+	polys = sys->resultDM->getPolyArray(sys->resultDM);
+	memcpy(polys, sys->polys, sys->totpolys * sizeof(MPoly));
 }

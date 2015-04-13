@@ -135,6 +135,11 @@ typedef struct LaplacianSystem {
 	int totedge, allocedge;
 	GFEdge *medge;
 
+	int totloop, allocloop;
+	MLoop *loops;
+	int totpolys, allocpolys;
+	MPoly *polys;
+
 	DerivedMesh *resultDM;
 } LaplacianSystem;
 
