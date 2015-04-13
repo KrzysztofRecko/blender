@@ -628,6 +628,25 @@ float getSamplingDistanceFunctionOnFace(GradientFlowSystem *gfsys, int in_f, flo
 	return uv[0] * h1 + uv[1] * h2 + (1.0f - uv[0] - uv[1]) * h3;
 }
 
+void addSegmentToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float in_co[3])
+{
+	int i;
+	GFVertID newv;
+
+	if (gfsys == gfsys->sys->gfsys1) i = 0;
+	else i = 1;
+
+	if (line->d == 1) i += 2;
+
+	newv = addVert(gfsys->sys, in_co);
+	addEdge(gfsys, line->end, newv, in_f);
+
+	gfsys->sys->mvert[newv].e[i] = line->end;
+	gfsys->sys->mvert[line->end].e[(i + 2) % 4] = newv;
+
+	line->end = newv;
+}
+
 bool changeLineDirection(GradientFlowSystem *gfsys, GFLine *line)
 {
 	int i;
@@ -635,13 +654,10 @@ bool changeLineDirection(GradientFlowSystem *gfsys, GFLine *line)
 
 	if (line->seed != -1) {
 		/* flush queue */
-		for (i = 0; i < line->num_q; i++) {
-			newv = addVert(gfsys->sys, line->qco[i]);
-			addEdge(gfsys, line->end, newv, line->qf[i]);
-			line->end = newv;
-		}
-		line->num_q = 0;
+		for (i = 0; i < line->num_q; i++)
+			addSegmentToLine(gfsys, line, line->qf[i], line->qco[i]);
 
+		line->num_q = 0;
 		copy_v3_v3(line->oldco, gfsys->sys->mvert[line->seed].co);
 	}
 
@@ -689,26 +705,18 @@ bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float in_
 		add_v3_v3(newchk, line->oldco);
 
 		if (!checkPoint(gfsys, line->lastchk, newchk, in_f, QR_MINDIST, QR_SEEDDIST)) {
-			if (line->num_q == 0) {
-				newv = addVert(gfsys->sys, line->lastchk);
-				addEdge(gfsys, line->end, newv, in_f);
-			}
-			else {
-				newv = addVert(gfsys->sys, line->lastchk);
-				addEdge(gfsys, line->end, newv, line->qf[0]);
-				line->num_q = 0;
-			}
+			if (line->num_q == 0) addSegmentToLine(gfsys, line, in_f, line->lastchk);
+			else addSegmentToLine(gfsys, line, line->qf[0], line->lastchk);
+			
+			line->num_q = 0;
 			return false;
 		}
 		
 		/* flush queue */
-		for (i = 0; i < line->num_q; i++) {
-			newv = addVert(gfsys->sys, line->qco[i]);
-			addEdge(gfsys, line->end, newv, line->qf[i]);
-			line->end = newv;
-		}
-		line->num_q = 0;
+		for (i = 0; i < line->num_q; i++)
+			addSegmentToLine(gfsys, line, line->qf[i], line->qco[i]);
 
+		line->num_q = 0;
 		copy_v3_v3(line->lastchk, newchk);
 		line->lastchklen += chklen;
 	}

@@ -45,7 +45,7 @@ typedef int GFVertID;
 
 typedef struct GFVert {
 	float co[3];		/* Vert position on edge */
-	int e[4];           /* 4 neighboring vertices: 2 for each gfsystem */
+	GFVertID e[4];      /* 4 neighboring vertices: 2 for each gfsystem */
 } GFVert;
 
 typedef enum {
