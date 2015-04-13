@@ -90,6 +90,10 @@ GFVertID addVert(LaplacianSystem *sys, float co[3])
 	}
 
 	copy_v3_v3(sys->mvert[sys->totvert].co, co);
+	sys->mvert[sys->totvert].e[0] = -1;
+	sys->mvert[sys->totvert].e[1] = -1;
+	sys->mvert[sys->totvert].e[2] = -1;
+	sys->mvert[sys->totvert].e[3] = -1;
 	sys->totvert++;
 
 	return sys->totvert - 1;
@@ -626,16 +630,15 @@ float getSamplingDistanceFunctionOnFace(GradientFlowSystem *gfsys, int in_f, flo
 
 void addSegmentToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float in_co[3])
 {
-	int i;
+	int i = gfsys == gfsys->sys->gfsys1 ? 0 : 1;
 	GFVertID newv;
-
-	if (gfsys == gfsys->sys->gfsys1) i = 0;
-	else i = 1;
 
 	if (line->d == 1) i += 2;
 
 	newv = addVert(gfsys->sys, in_co);
-	addEdge(gfsys, line->end, newv, in_f);
+
+	if (line->d == 0) addEdge(gfsys, line->end, newv, in_f);
+	else addEdge(gfsys, newv, line->end, in_f);
 
 	gfsys->sys->mvert[newv].e[i] = line->end;
 	gfsys->sys->mvert[line->end].e[(i + 2) % 4] = newv;
@@ -827,46 +830,182 @@ void computeFlowLines(LaplacianSystem *sys) {
 	
 }
 
+void insertOnEdge(GradientFlowSystem *gfsys, GFVertID in_vid, GFEdgeID in_e)
+{
+	int i = gfsys == gfsys->sys->gfsys1 ? 0 : 1;
+	GFVert *verts = gfsys->sys->mvert;
+	GFVertID va = gfsys->medge[in_e].v1;
+	GFVertID vb = gfsys->medge[in_e].v2;
+	GFVertID vc = verts[va].e[i + 2];
+
+	while (vc != vb) {
+		if (IS_EQF(len_v3v3(verts[va].co, verts[in_vid].co) + len_v3v3(verts[vc].co, verts[in_vid].co), 
+			       len_v3v3(verts[va].co, verts[vc].co))) break;
+
+		va = vc;
+		vc = verts[vc].e[i + 2];
+	}
+
+	verts[va].e[i + 2] = in_vid;
+	verts[vc].e[i] = in_vid;
+	verts[in_vid].e[i + 2] = vc;
+	verts[in_vid].e[i] = va;
+}
+
+void generateIntersectionsOnFaces(LaplacianSystem *sys)
+{
+	int f;
+	float isection[3], lambda;
+	GFEdgeID e1, e2;
+	LinkNode *iter1, *iter2;
+	GFVertID newv;
+
+	for (f = 0; f < sys->total_faces; f++) {
+		for (iter1 = sys->gfsys1->ringf_list[f]; iter1; iter1 = iter1->next) {
+			e1 = (GFEdgeID)iter1->link;
+
+			for (iter2 = sys->gfsys2->ringf_list[f]; iter2; iter2 = iter2->next) {
+				e2 = (GFEdgeID)iter2->link;
+
+				if (isect_line_line_strict_v3(sys->mvert[sys->gfsys1->medge[e1].v1].co,
+					                          sys->mvert[sys->gfsys1->medge[e1].v2].co,
+					                          sys->mvert[sys->gfsys2->medge[e2].v1].co,
+					                          sys->mvert[sys->gfsys2->medge[e2].v2].co,
+					                          isection, &lambda))
+				{
+					newv = addVert(sys, isection);
+					insertOnEdge(sys->gfsys1, newv, e1);
+					insertOnEdge(sys->gfsys2, newv, e2);
+				}
+			}
+		}
+	}
+}
+
+void deleteDegenerateVerts(LaplacianSystem *sys)
+{
+	int i, n, m;
+	GFVert *verts = sys->mvert;
+
+	for (i = 0; i < sys->totvert; i++) {
+		for (n = 0, m = 0; n < 4; n++)
+			if (verts[i].e[n] >= 0) m++;
+
+		if (m == 1) {
+			for (n = 0; n < 4; n++)
+				if (verts[i].e[n] >= 0) break;
+
+			verts[verts[i].e[n]].e[(n + 2) % 4] = -1;
+			verts[i].e[n] = -1;
+			verts[i].e[0] = -2;
+		}
+		else if (m == 2) {
+			if (verts[i].e[0] >= 0 && verts[i].e[2] >= 0) n = 0;
+			else if (verts[i].e[1] >= 0 && verts[i].e[3] >= 0) n = 1;
+			else continue;
+
+			verts[verts[i].e[n]].e[n + 2] = verts[i].e[n + 2];
+			verts[verts[i].e[n + 2]].e[n] = verts[i].e[n];
+			verts[i].e[n] = -1;
+			verts[i].e[n + 2] = -1;
+			verts[i].e[0] = -2;
+		}
+	}
+
+	/*for (i = 0, n = 0; i < sys->totvert; i++) {
+		if (verts[i].e[0] == -2) continue;
+
+		copy_v3_v3(verts[n].co, verts[i].co);
+		copy_v4_v4_int(verts[n].e, verts[i].e);
+		n++;
+	}
+
+	sys->totvert = n;*/
+}
+
+void makeEdges(LaplacianSystem *sys)
+{
+	int i, j, k;
+
+	sys->totedge = sys->allocedge = 0;
+	MEM_SAFE_FREE(sys->medge);
+
+	for (i = 0; i < sys->totvert; i++) {
+		for (j = 0; j < 4; j++) {
+			if (sys->mvert[i].e[j] >= 0) {
+				if (sys->totedge == sys->allocedge) {
+					sys->allocedge = sys->allocedge * 2 + 10;
+					sys->medge = MEM_reallocN(sys->medge, sys->allocedge * sizeof(GFEdge));
+				}
+				sys->medge[sys->totedge].v1 = i;
+				sys->medge[sys->totedge].v2 = sys->mvert[i].e[j];
+				sys->mvert[i].e[j] = -1;
+				sys->mvert[sys->mvert[i].e[j]].e[(j + 2) % 4] = -1;
+				sys->totedge++;
+			}
+		}
+	}
+}
+
 void generateMesh(LaplacianSystem *sys)
 {
 	MVert *arrayvect;
 	MEdge *arrayedge;
 	int i;
 
+#if 0
 	/*result = CDDM_new(gfsys->totalf * 2, gfsys->totalf, 0, 0, 0);
-	arrayvect = result->getVertArray(result);
-	for (i = 0; i < gfsys->totalf; i++) {
-	float cent[3], v[3];
-	cent_tri_v3(cent, sys->co[sys->faces[i][0]], sys->co[sys->faces[i][1]], sys->co[sys->faces[i][2]]);
-	mul_v3_fl(gfsys->gfield[i], 0.1f);
-	add_v3_v3v3(v, cent, gfsys->gfield[i]);
-	copy_v3_v3(arrayvect[i * 2].co, v);
-	copy_v3_v3(arrayvect[i * 2 + 1].co, cent);
-	}
-	arrayedge = result->getEdgeArray(result);
-	for (i = 0; i < gfsys->totalf; i++) {
-	arrayedge[i].v1 = i * 2;
-	arrayedge[i].v2 = i * 2 + 1;
-	arrayedge[i].flag |= ME_EDGEDRAW;
-	}*/
+arrayvect = result->getVertArray(result);
+for (i = 0; i < gfsys->totalf; i++) {
+float cent[3], v[3];
+cent_tri_v3(cent, sys->co[sys->faces[i][0]], sys->co[sys->faces[i][1]], sys->co[sys->faces[i][2]]);
+mul_v3_fl(gfsys->gfield[i], 0.1f);
+add_v3_v3v3(v, cent, gfsys->gfield[i]);
+copy_v3_v3(arrayvect[i * 2].co, v);
+copy_v3_v3(arrayvect[i * 2 + 1].co, cent);
+}
+arrayedge = result->getEdgeArray(result);
+for (i = 0; i < gfsys->totalf; i++) {
+arrayedge[i].v1 = i * 2;
+arrayedge[i].v2 = i * 2 + 1;
+arrayedge[i].flag |= ME_EDGEDRAW;
+}*/
 
-	sys->resultDM = CDDM_new(sys->totvert,
+	/*sys->resultDM = CDDM_new(sys->totvert,
 					sys->gfsys1->totedge + sys->gfsys2->totedge,
 					0, 0, 0);
+					arrayvect = sys->resultDM->getVertArray(sys->resultDM);
+					for (i = 0; i < sys->totvert; i++) {
+					copy_v3_v3(arrayvect[i].co, sys->mvert[i].co);
+					}
+
+					arrayedge = sys->resultDM->getEdgeArray(sys->resultDM);
+					for (i = 0; i < sys->gfsys1->totedge; i++) {
+					arrayedge[i].v1 = sys->gfsys1->medge[i].v1;
+					arrayedge[i].v2 = sys->gfsys1->medge[i].v2;
+					arrayedge[i].flag |= ME_EDGEDRAW;
+					}
+					for (i = 0; i < sys->gfsys2->totedge; i++) {
+					arrayedge[i + sys->gfsys1->totedge].v1 = sys->gfsys2->medge[i].v1;
+					arrayedge[i + sys->gfsys1->totedge].v2 = sys->gfsys2->medge[i].v2;
+					arrayedge[i + sys->gfsys1->totedge].flag |= ME_EDGEDRAW;
+					}*/
+#endif // 0
+
+	generateIntersectionsOnFaces(sys);
+	deleteDegenerateVerts(sys);
+	makeEdges(sys);
+
+	sys->resultDM = CDDM_new(sys->totvert, sys->totedge, 0, 0, 0);
 	arrayvect = sys->resultDM->getVertArray(sys->resultDM);
 	for (i = 0; i < sys->totvert; i++) {
 		copy_v3_v3(arrayvect[i].co, sys->mvert[i].co);
 	}
 
 	arrayedge = sys->resultDM->getEdgeArray(sys->resultDM);
-	for (i = 0; i < sys->gfsys1->totedge; i++) {
-		arrayedge[i].v1 = sys->gfsys1->medge[i].v1;
-		arrayedge[i].v2 = sys->gfsys1->medge[i].v2;
+	for (i = 0; i < sys->totedge; i++) {
+		arrayedge[i].v1 = sys->medge[i].v1;
+		arrayedge[i].v2 = sys->medge[i].v2;
 		arrayedge[i].flag |= ME_EDGEDRAW;
-	}
-	for (i = 0; i < sys->gfsys2->totedge; i++) {
-		arrayedge[i + sys->gfsys1->totedge].v1 = sys->gfsys2->medge[i].v1;
-		arrayedge[i + sys->gfsys1->totedge].v2 = sys->gfsys2->medge[i].v2;
-		arrayedge[i + sys->gfsys1->totedge].flag |= ME_EDGEDRAW;
 	}
 }

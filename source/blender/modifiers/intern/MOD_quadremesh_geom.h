@@ -132,6 +132,8 @@ typedef struct LaplacianSystem {
 
 	int totvert, allocvert;
 	GFVert *mvert;	/* array of verts */
+	int totedge, allocedge;
+	GFEdge *medge;
 
 	DerivedMesh *resultDM;
 } LaplacianSystem;
