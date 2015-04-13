@@ -66,6 +66,8 @@ typedef struct GFEdge {
 
 typedef struct GFLine {
 	GFVertID end, seed;
+	int d;
+	float oldco[3];
 
 	float lastchk[3];
 	float lastchklen;

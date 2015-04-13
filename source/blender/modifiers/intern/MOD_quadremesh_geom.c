@@ -628,41 +628,36 @@ float getSamplingDistanceFunctionOnFace(GradientFlowSystem *gfsys, int in_f, flo
 	return uv[0] * h1 + uv[1] * h2 + (1.0f - uv[0] - uv[1]) * h3;
 }
 
-void resetLine(GradientFlowSystem *gfsys, GFLine *line)
+bool changeLineDirection(GradientFlowSystem *gfsys, GFLine *line)
 {
 	int i;
 	GFVertID newv;
 
-	/* flush queue */
-	for (i = 0; i < line->num_q; i++) {
-		if (line->qf[i] != -1) {
+	if (line->seed != -1) {
+		/* flush queue */
+		for (i = 0; i < line->num_q; i++) {
 			newv = addVert(gfsys->sys, line->qco[i]);
 			addEdge(gfsys, line->end, newv, line->qf[i]);
 			line->end = newv;
 		}
+		line->num_q = 0;
+
+		copy_v3_v3(line->oldco, gfsys->sys->mvert[line->seed].co);
 	}
 
 	/* reset to original state */
 	line->end = line->seed;
-	line->lastchklen = 0.0f;
-	line->num_q = 1;
-	copy_v3_v3(line->lastchk, gfsys->sys->mvert[line->seed].co);
-	copy_v3_v3(line->qco[0], gfsys->sys->mvert[line->seed].co);
-	line->qf[0] = -1;
-	line->qlen = 0.0f;
+	copy_v3_v3(line->lastchk, line->oldco);
+
+	return ++line->d != 2;
 }
 
-GFLine* newGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed, int in_f, float in_newco[3])
+void initGFLine(GradientFlowSystem *gfsys, GFLine *line, GFSeed *in_seed)
 {
-	GFLine *result;
-
-	if (!checkPoint(gfsys, in_newco, in_seed->co, in_f, QR_MINDIST, QR_SEEDDIST)) return NULL;
-
-	result = MEM_callocN(sizeof(GFLine), "GradientFlowLine");
-	result->seed = addVert(gfsys->sys, in_seed->co);
-	resetLine(gfsys, result);
-
-	return result;
+	line->seed = line->end = -1;
+	line->d = 0;
+	
+	copy_v3_v3(line->oldco, in_seed->co);
 }
 
 bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float in_newco[3])
@@ -670,42 +665,47 @@ bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float in_
 	const float chklen = QR_SAMPLING_RATE; /* sampling rate */
 
 	int i;
-	float seg[3], newchk[3], oldco[3];
+	float seg[3], newchk[3];
 	float curlen;
 	GFVertID newv;
 
-	/**
-	 * qco[0] - first point after last checked
-	 * qco[num_q - 1] - last added point
-	 */
+	/* qco[0] - first point after last checked
+	 * qco[num_q - 1] - last added point */
 
-	copy_v3_v3(oldco, line->qco[line->num_q - 1]);
-	sub_v3_v3v3(seg, in_newco, oldco);
+	sub_v3_v3v3(seg, in_newco, line->oldco);
 	curlen = len_v3(seg);
+
+	if (line->seed == -1) {
+		if (!checkPoint(gfsys, in_newco, line->oldco, in_f, QR_MINDIST, QR_SEEDDIST)) return false;
+
+		line->end = line->seed = addVert(gfsys->sys, line->oldco);
+		line->lastchklen = line->qlen = 0.0f;
+		line->num_q = 0;
+		copy_v3_v3(line->lastchk, line->oldco);
+	}
 
 	while (line->qlen + curlen > line->lastchklen + chklen) {
 		mul_v3_v3fl(newchk, seg, (line->lastchklen + chklen - line->qlen) / curlen);
-		add_v3_v3(newchk, oldco);
+		add_v3_v3(newchk, line->oldco);
 
 		if (!checkPoint(gfsys, line->lastchk, newchk, in_f, QR_MINDIST, QR_SEEDDIST)) {
 			if (line->num_q == 0) {
 				newv = addVert(gfsys->sys, line->lastchk);
 				addEdge(gfsys, line->end, newv, in_f);
 			}
-			else if (line->qf[0] != -1) {
+			else {
 				newv = addVert(gfsys->sys, line->lastchk);
 				addEdge(gfsys, line->end, newv, line->qf[0]);
+				line->num_q = 0;
 			}
 			return false;
 		}
 		
 		/* flush queue */
 		for (i = 0; i < line->num_q; i++) {
-			if (line->qf[i] != -1) {
-				newv = addVert(gfsys->sys, line->qco[i]);
-				addEdge(gfsys, line->end, newv, line->qf[i]);
-				line->end = newv;
-			}
+			newv = addVert(gfsys->sys, line->qco[i]);
+			addEdge(gfsys, line->end, newv, line->qf[i]);
+			line->end = newv;
 		}
 		line->num_q = 0;
 
@@ -713,23 +713,28 @@ bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float in_
 		line->lastchklen += chklen;
 	}
 
+	if (line->num_q == 10) return false;
+
+	copy_v3_v3(line->oldco, in_newco);
 	copy_v3_v3(line->qco[line->num_q], in_newco);
 	line->qf[line->num_q] = in_f;
 	line->qlen += curlen;
-	if (++line->num_q == 10) return false;
+	line->num_q++;
 
 	return true;
 }
 
 void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 {
-	int i, f, d, e, v, r, newe;
+	int i, f, e, v, r, newe;
 	bool is_vertex;
-	float newco[3], oldco[3], gf[3], dir = 1.0f;
+	float newco[3], gf[3], dir = 1.0f;
 	LaplacianSystem *sys = gfsys->sys;
-	GFLine *line = NULL;
+	GFLine line;
 
-	for (d = 0; d < 2; d++) {
+	initGFLine(gfsys, &line, in_seed);
+
+	do {
 		if (in_seed->type == eSeedVert) {
 			is_vertex = true;
 			v = in_seed->val;
@@ -741,15 +746,13 @@ void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 			e = -1;
 		}
 
-		copy_v3_v3(oldco, in_seed->co);
-
 		while (1) {
 			if (is_vertex) {
 				for (i = 0; i < sys->ringf_map[v].count; i++) {
 					f = sys->ringf_map[v].indices[i];
 
 					mul_v3_v3fl(gf, gfsys->gfield[f], dir);
-					if (!nextPoint(newco, &e, gfsys, f, oldco, gf)) {
+					if (!nextPoint(newco, &e, gfsys, f, line.oldco, gf)) {
 						is_vertex = false;
 						break;
 					}
@@ -758,7 +761,7 @@ void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 			}
 			else {
 				mul_v3_v3fl(gf, gfsys->gfield[f], dir);
-				r = nextPoint(newco, &newe, gfsys, f, oldco, gf);
+				r = nextPoint(newco, &newe, gfsys, f, line.oldco, gf);
 				
 				if (r == 1) {
 					is_vertex = true;
@@ -782,24 +785,14 @@ void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 
 				e = newe;
 			}
-
-			if (line == NULL) {
-				line = newGFLine(gfsys, in_seed, f, newco);
-				if (line == NULL) return;
-			}
 			
-			if (!addPointToLine(gfsys, line, f, newco))	break;
+			if (!addPointToLine(gfsys, &line, f, newco))	break;
 
-			copy_v3_v3(oldco, newco);
 			f = getOtherFaceAdjacentToEdge(sys, f, e);
 		} /* while (1) */
 
-		if (line) resetLine(gfsys, line);
-
 		dir = -dir;
-	} /* for (d = 0; d < 2; d++) */
-
-	MEM_SAFE_FREE(line);
+	} while (changeLineDirection(gfsys, &line));
 }
 
 void computeFlowLines(LaplacianSystem *sys) {
