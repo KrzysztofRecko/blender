@@ -29,9 +29,6 @@
 #ifndef __MOD_QUADREMESH_GEOM_H__
 #define __MOD_QUADREMESH_GEOM_H__
 
-#define MOD_QUADREMESH_ALLOC_BLOCK 256
-#define MOD_QUADREMESH_MIN_LEN 0.000001f
-
 #ifdef WITH_OPENNL
 
 #include "ONL_opennl.h"
@@ -92,7 +89,7 @@ typedef struct InputMesh {
 	int *ringv_indices;				/* Indices of neighbors(vertex) per vertex */
 	int *ringe_indices;				/* Indices of edges per vertex */
 	MeshElemMap *ringf_map;			/* Map of faces per vertex */
-	//MeshElemMap *ringv_map;			/* Map of vertex per vertex */
+	//MeshElemMap *ringv_map;			/* Map of vertex per vertex  - unused right now */
 	MeshElemMap *ringe_map;			/* Map of edges per vertex */
 
 	int *constraints;				/* Feature points constraints*/
@@ -146,53 +143,8 @@ typedef struct LaplacianSystem {
 	DerivedMesh *resultDM;
 } LaplacianSystem;
 
-/*
-* alpha is degree of anisotropic curvature sensitivity
-* h is the desired distance
-* return ve[0] number of vertices
-* return ve[1] number of edges
-*/
-//void estimateNumberGFVerticesEdges(int ve[2], LaplacianSystem *sys, float h);
-
-//void deleteGradientFlowMesh(GradientFlowMesh * gfmesh);
-//int addGFVertGFMesh(GradientFlowMesh *gfmesh, GFVert gfvert);
-//int addVertGFMesh(GradientFlowMesh *gfmesh, float co[3], int index_edge);
-//int addGFEdgeGFMesh(GradientFlowMesh *gfmesh, GFEdge gfedge);
-//int addEdgeGFMesh(GradientFlowMesh *gfmesh, int index_v1, int index_v2, int index_face);
-//
-//GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys, float *mhfunction, float(*mgfield)[3]);
+GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys, float *mhfunction, float(*mgfield)[3]);
 void deleteGradientFlowSystem(GradientFlowSystem *gfsys);
-//int addGFVertGFSystem(GradientFlowSystem *gfsys, GFVert gfvert);
-//int addVertGFSystem(GradientFlowSystem *gfsys, float co[3], int index_edge);
-//int addGFEdgeGFSystem(GradientFlowSystem *gfsys, GFEdge gfedge);
-//int addEdgeGFSystem(GradientFlowSystem *gfsys, int index_v1, int index_v2, int index_face);
-//int addEdgeTwoFacesGFSystem(GradientFlowSystem *gfsys, int index_v1, int index_v2, int index_face1, int index_face2);
-//
-//int *findFeaturesOnMesh(int size[2], LaplacianSystem *sys);
-//void addSeedToQueue(struct Heap *aheap, float value, GFVert *vert);
-//GFVert *getTopSeedFromQueue(struct Heap *aheap);
-//
-//bool isOnSegmentLine(float p1[3], float p2[3], float q[3]);
-//bool intersecionLineSegmentWithVector(float r[3], float p1[3], float p2[3], float ori[3], float dir[3]);
-//int getEdgeFromVerts(LaplacianSystem *sys, int v1, int v2);
-//int getOtherFaceAdjacentToEdge(LaplacianSystem *sys, int oldface, int inde);
-//void projectVectorOnFace(float r[3], float no[3], float dir[3]);
-//int getDifferentVertexFaceEdge(LaplacianSystem *sys, int oldface, int inde);
-//#define GRA_DIR_ON_NONE 0
-//#define GRA_DIR_ON_FACE 1
-//#define GRA_DIR_ON_EDGE 2
-//void computeGradientDirectionOnVert(int rind[2], float r[3], LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexvert);
-//void computeGradientDirectionOnEdgeInverse(int rind[2], float r[3], LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexedge);
-//int nearGFEdgeInGFMesh(LaplacianSystem *sys, GradientFlowSystem *gfsys, float ori[3], float dir[3], int indexface, float maxradius);
-//int nearGFEdgeInGFMeshFromEdge(LaplacianSystem *sys, GradientFlowSystem *gfsys, float ori[3], float dir[3], int indexedge, float maxradius);
-//int nextPointFlowLine(float r[3], LaplacianSystem *sys, float q[3], int oldface, int inde);
-//int nextPointFlowLineInverse(float r[3], LaplacianSystem *sys, float q[3], int oldface, int inde);
-//float getSamplingDistanceFunctionOnFace(LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexface);
-//float getMaxSamplingDistanceFunctionOnFace(LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexface);
-//void computeGFLine(LaplacianSystem *sys, GradientFlowSystem *gfsys, GFVert *gfvert_seed);
-//
-//int computeNewSeed(float r[3], LaplacianSystem *sys, GradientFlowSystem *gfsys, int indexf, float ori[3], float dir[3], float mh);
-
 void computeFlowLines(LaplacianSystem *sys);
 void generateMesh(LaplacianSystem *sys);
 

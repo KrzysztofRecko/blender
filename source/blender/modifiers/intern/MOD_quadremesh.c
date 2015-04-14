@@ -577,7 +577,6 @@ static LaplacianSystem *QuadRemeshModifier_do(QuadRemeshModifierData *qmd, Objec
 	return sys;
 }
 
-
 #else  /* WITH_OPENNL */
 static void QuadRemeshModifier_do(
         QuadRemeshModifierData *lmd, Object *ob, DerivedMesh *dm,
@@ -633,7 +632,6 @@ static void deformVerts(ModifierData *md, Object *ob, DerivedMesh *derivedData,
 }
 #endif // 0
 
-
 static DerivedMesh *applyModifier(ModifierData *md,
 	Object *ob,
 	DerivedMesh *dm,
@@ -677,8 +675,7 @@ ModifierTypeInfo modifierType_QuadRemesh = {
 	/* structSize */        sizeof(QuadRemeshModifierData),
 	/* type */              eModifierTypeType_Nonconstructive,
 	/* flags */             eModifierTypeFlag_AcceptsMesh |
-							eModifierTypeFlag_AcceptsCVs |
-							eModifierTypeFlag_SupportsEditmode,
+							eModifierTypeFlag_AcceptsCVs,
 	/* copyData */          copyData,
 	/* deformVerts */       NULL,
 	/* deformMatrices */    NULL,
