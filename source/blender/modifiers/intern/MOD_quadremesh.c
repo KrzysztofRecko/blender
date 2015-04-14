@@ -43,65 +43,83 @@
 
 #ifdef WITH_OPENNL
 
+static void freeInputMesh(InputMesh *im)
+{
+	MEM_SAFE_FREE(im->faces);
+	MEM_SAFE_FREE(im->edges);
+	MEM_SAFE_FREE(im->faces_edge);
+	MEM_SAFE_FREE(im->co);
+	MEM_SAFE_FREE(im->no);
+	MEM_SAFE_FREE(im->constraints);
+	MEM_SAFE_FREE(im->weights);
+
+	MEM_SAFE_FREE(im->ringf_indices);
+	//MEM_SAFE_FREE(im->ringv_indices);
+	MEM_SAFE_FREE(im->ringe_indices);
+	MEM_SAFE_FREE(im->ringf_map);
+	//MEM_SAFE_FREE(im->ringv_map);
+	MEM_SAFE_FREE(im->ringe_map);
+}
+
+static void freeOutputMesh(OutputMesh *om)
+{
+	MEM_SAFE_FREE(om->mvert);
+	MEM_SAFE_FREE(om->medge);
+	MEM_SAFE_FREE(om->polys);
+	MEM_SAFE_FREE(om->loops);
+}
+
 static void deleteLaplacianSystem(LaplacianSystem *sys)
 {
 	deleteGradientFlowSystem(sys->gfsys1);
 	deleteGradientFlowSystem(sys->gfsys2);
-	MEM_SAFE_FREE(sys->faces);
-	MEM_SAFE_FREE(sys->edges);
-	MEM_SAFE_FREE(sys->faces_edge);
-	MEM_SAFE_FREE(sys->co);
-	MEM_SAFE_FREE(sys->no);
-	MEM_SAFE_FREE(sys->constraints);
-	MEM_SAFE_FREE(sys->weights);
+	freeInputMesh(&sys->input_mesh);
+	freeOutputMesh(&sys->output_mesh);
+	
 	MEM_SAFE_FREE(sys->U_field);
 	MEM_SAFE_FREE(sys->h1);
 	MEM_SAFE_FREE(sys->h2);
 	MEM_SAFE_FREE(sys->gf1);
 	MEM_SAFE_FREE(sys->gf2);
-	MEM_SAFE_FREE(sys->ringf_indices);
-	MEM_SAFE_FREE(sys->ringv_indices);
-	MEM_SAFE_FREE(sys->ringe_indices);
-	MEM_SAFE_FREE(sys->ringf_map);
-	MEM_SAFE_FREE(sys->ringv_map);
-	MEM_SAFE_FREE(sys->ringe_map);
+	
 	if (sys->context) {
 		nlDeleteContext(sys->context);
 	}
-	MEM_SAFE_FREE(sys->mvert);
+	
 	MEM_SAFE_FREE(sys);
 }
 
-static void createFaceRingMap(LaplacianSystem *sys)
+static void createFaceRingMap(InputMesh *im)
 {
 	int i, j, totalr = 0;
 	int *index_iter;
 
-	sys->ringf_map = MEM_callocN(sizeof(MeshElemMap) * sys->total_verts, "DeformRingMap");
+	im->ringf_map = MEM_callocN(sizeof(MeshElemMap) * im->num_verts, "DeformRingMap");
 
-	for (i = 0; i < sys->total_faces; i++) {
+	for (i = 0; i < im->num_faces; i++) {
 		for (j = 0; j < 3; j++) {
-			sys->ringf_map[sys->faces[i][j]].count++;
+			im->ringf_map[im->faces[i][j]].count++;
 			totalr++;
 		}
 	}
 
-	sys->ringf_indices = MEM_callocN(sizeof(int) * totalr, "DeformRingIndex");
-	index_iter = sys->ringf_indices;
-	for (i = 0; i < sys->total_verts; i++) {
-		sys->ringf_map[i].indices = index_iter;
-		index_iter += sys->ringf_map[i].count;
-		sys->ringf_map[i].count = 0;
+	im->ringf_indices = MEM_callocN(sizeof(int) * totalr, "DeformRingIndex");
+	index_iter = im->ringf_indices;
+	for (i = 0; i < im->num_verts; i++) {
+		im->ringf_map[i].indices = index_iter;
+		index_iter += im->ringf_map[i].count;
+		im->ringf_map[i].count = 0;
 	}
 
-	for (i = 0; i < sys->total_faces; i++) {
+	for (i = 0; i < im->num_faces; i++) {
 		for (j = 0; j < 3; j++) {
-			MeshElemMap *map = &sys->ringf_map[sys->faces[i][j]];
+			MeshElemMap *map = &im->ringf_map[im->faces[i][j]];
 			map->indices[map->count++] = i;
 		}
 	}
 }
 
+#if 0
 static void createVertRingMap(LaplacianSystem *sys)
 {
 	int i, totalr = 0;
@@ -130,64 +148,57 @@ static void createVertRingMap(LaplacianSystem *sys)
 		map2->indices[map2->count++] = sys->edges[i][0];
 	}
 }
+#endif // 0
 
-static void createEdgeRingMap(LaplacianSystem *sys)
+static void createEdgeRingMap(InputMesh *im)
 {
 	int i, totalr = 0;
 	int *index_iter;
 
-	sys->ringe_map = MEM_callocN(sizeof(MeshElemMap) * sys->total_verts, "DeformNeighborsMap");
+	im->ringe_map = MEM_callocN(sizeof(MeshElemMap) * im->num_verts, "DeformNeighborsMap");
 
-	for (i = 0; i < sys->total_edges; i++) {
-		sys->ringe_map[sys->edges[i][0]].count++;
-		sys->ringe_map[sys->edges[i][1]].count++;
+	for (i = 0; i < im->num_edges; i++) {
+		im->ringe_map[im->edges[i][0]].count++;
+		im->ringe_map[im->edges[i][1]].count++;
 		totalr += 2;
 	}
 
-	sys->ringe_indices = MEM_callocN(sizeof(int) * totalr, "DeformNeighborsIndex");
-	index_iter = sys->ringe_indices;
-	for (i = 0; i < sys->total_verts; i++) {
-		sys->ringe_map[i].indices = index_iter;
-		index_iter += sys->ringe_map[i].count;
-		sys->ringe_map[i].count = 0;
+	im->ringe_indices = MEM_callocN(sizeof(int) * totalr, "DeformNeighborsIndex");
+	index_iter = im->ringe_indices;
+	for (i = 0; i < im->num_verts; i++) {
+		im->ringe_map[i].indices = index_iter;
+		index_iter += im->ringe_map[i].count;
+		im->ringe_map[i].count = 0;
 	}
 
-	for (i = 0; i < sys->total_edges; i++) {
-		MeshElemMap *map1 = &sys->ringe_map[sys->edges[i][0]];
-		MeshElemMap *map2 = &sys->ringe_map[sys->edges[i][1]];
+	for (i = 0; i < im->num_edges; i++) {
+		MeshElemMap *map1 = &im->ringe_map[im->edges[i][0]];
+		MeshElemMap *map2 = &im->ringe_map[im->edges[i][1]];
 		map1->indices[map1->count++] = i;
 		map2->indices[map2->count++] = i;
 	}
 }
 
-static void computeFacesAdjacentToEdge(int fs[2], LaplacianSystem *sys, int indexe)
-{
-	int i, v1, v2, counter;
-	int *fidn, numf;
-	int *vin;
-	v1 = sys->edges[indexe][0];
-	v2 = sys->edges[indexe][1];
-	numf = sys->ringf_map[v1].count;
-	fidn = sys->ringf_map[v1].indices;
-	counter = 0;
-	fs[0] = -1;
-	fs[1] = -1;
+static void createFacesByEdge(InputMesh *im){
+	int e, i, j, v1, v2, *vin;
 
-	for (i = 0; i < numf && counter < 2; i++) {
-		vin = sys->faces[fidn[i]];
-		if (vin[0] == v2 || vin[1] == v2 || vin[2] == v2) {
-			fs[counter++] = fidn[i];
+	for (e = 0; e < im->num_edges; e++) {
+		v1 = im->edges[e][0];
+		v2 = im->edges[e][1];
+
+		im->faces_edge[e][0] = -1;
+		im->faces_edge[e][1] = -1;
+
+		for (i = 0, j = 0; i < im->ringf_map[v1].count && j < 2; i++) {
+			vin = im->faces[im->ringf_map[v1].indices[i]];
+			if (vin[0] == v2 || vin[1] == v2 || vin[2] == v2) {
+				im->faces_edge[e][j++] = im->ringf_map[v1].indices[i];
+			}
 		}
 	}
 }
 
-static void createFacesByEdge(LaplacianSystem *sys){
-	int ei;
-	for (ei = 0; ei < sys->total_edges; ei++) {
-		computeFacesAdjacentToEdge(sys->faces_edge[ei], sys, ei);
-	}
-}
-
+#if 0
 /*
 * Compute the normal curvature
 * k = dot(2*no, (pi - pj)) / (|pi - pj|)^2
@@ -219,7 +230,7 @@ static void computeSampleDistanceFunctions(LaplacianSystem *sys, float user_h, f
 
 		k1 = dot_v3v3(no, avg1) / dot_v3v3(avg1, avg1);
 		k2 = dot_v3v3(no, avg2) / dot_v3v3(avg2, avg2);
-		
+
 		h1 = user_h / (1.0f + user_alpha * (logf(1.0f + k1*k1)));
 		h2 = user_h / (1.0f + user_alpha * (logf(1.0f + k2*k2)));
 
@@ -228,36 +239,38 @@ static void computeSampleDistanceFunctions(LaplacianSystem *sys, float user_h, f
 	}
 }
 
-static void initLaplacianMatrix(LaplacianSystem *sys)
+#endif // 0
+
+static void initLaplacianMatrix(InputMesh *im)
 {
 	float v1[3], v2[3], v3[3], no[3];
 	float w2, w3;
 	int j, fi;
 	unsigned int idv1, idv2, idv3;
 
-	for (fi = 0; fi < sys->total_faces; fi++) {
-		const unsigned int *vidf = sys->faces[fi];
+	for (fi = 0; fi < im->num_faces; fi++) {
+		const unsigned int *vidf = im->faces[fi];
 
 		idv1 = vidf[0];
 		idv2 = vidf[1];
 		idv3 = vidf[2];
 
-		normal_tri_v3(no, sys->co[idv1], sys->co[idv2], sys->co[idv3]);
-		copy_v3_v3(sys->no[fi], no);
+		normal_tri_v3(no, im->co[idv1], im->co[idv2], im->co[idv3]);
+		copy_v3_v3(im->no[fi], no);
 
 		for (j = 0; j < 3; j++) {
 			idv1 = vidf[j];
 			idv2 = vidf[(j + 1) % 3];
 			idv3 = vidf[(j + 2) % 3];
 
-			copy_v3_v3(v1, sys->co[idv1]);
-			copy_v3_v3(v2, sys->co[idv2]);
-			copy_v3_v3(v3, sys->co[idv3]);
+			copy_v3_v3(v1, im->co[idv1]);
+			copy_v3_v3(v2, im->co[idv2]);
+			copy_v3_v3(v3, im->co[idv3]);
 
 			w2 = cotangent_tri_weight_v3(v3, v1, v2);
 			w3 = cotangent_tri_weight_v3(v2, v3, v1);
 
-			if (sys->constraints[idv1] == 1) {
+			if (im->constraints[idv1] == 1) {
 				nlMatrixAdd(idv1, idv1, w2 + w3);
 			}
 			else  {
@@ -273,8 +286,8 @@ static void initLaplacianMatrix(LaplacianSystem *sys)
 
 static void computeScalarField(LaplacianSystem *sys)
 {
-	int vid, i, n;
-	n = sys->total_verts;
+	int vid, i;
+	InputMesh *im = &sys->input_mesh;
 
 #ifdef OPENNL_THREADING_HACK
 	modifier_opennl_lock();
@@ -283,24 +296,24 @@ static void computeScalarField(LaplacianSystem *sys)
 	nlNewContext();
 	sys->context = nlGetCurrent();
 
-	nlSolverParameteri(NL_NB_VARIABLES, n);
+	nlSolverParameteri(NL_NB_VARIABLES, im->num_verts);
 	nlSolverParameteri(NL_SYMMETRIC, NL_FALSE);
 	nlSolverParameteri(NL_LEAST_SQUARES, NL_TRUE);
-	nlSolverParameteri(NL_NB_ROWS, n);
+	nlSolverParameteri(NL_NB_ROWS, im->num_verts);
 	nlSolverParameteri(NL_NB_RIGHT_HAND_SIDES, 1);
 	nlBegin(NL_SYSTEM);
 	
-	for (i = 0; i < n; i++) {
+	for (i = 0; i < im->num_verts; i++) {
 		nlSetVariable(0, i, 0);
 	}
 		
 	nlBegin(NL_MATRIX);
 	
-	initLaplacianMatrix(sys);
+	initLaplacianMatrix(im);
 
-	for (i = 0; i < n; i++) {
-		if (sys->constraints[i] == 1) {
-			nlRightHandSideSet(0, i, sys->weights[i]);
+	for (i = 0; i < im->num_verts; i++) {
+		if (im->constraints[i] == 1) {
+			nlRightHandSideSet(0, i, im->weights[i]);
 		}
 		else {
 			nlRightHandSideSet(0, i, 0);
@@ -312,7 +325,7 @@ static void computeScalarField(LaplacianSystem *sys)
 	if (nlSolveAdvanced(NULL, NL_TRUE)) {
 		sys->has_solution = true;
 
-		for (vid = 0; vid < sys->total_verts; vid++) {
+		for (vid = 0; vid < im->num_verts; vid++) {
 			sys->U_field[vid] = nlGetVariable(0, vid);
 		}	
 	}
@@ -343,15 +356,16 @@ static void computeGradientFields(LaplacianSystem * sys)
 {
 	int fi, i, j, k;
 	float val, a[3][3], u[3], inv_a[3][3], gf1[3], g[3], w[3];
+	InputMesh *im = &sys->input_mesh;
 
-	for (fi = 0; fi < sys->total_faces; fi++) {
-		const unsigned int *vidf = sys->faces[fi];
+	for (fi = 0; fi < im->num_faces; fi++) {
+		const unsigned int *vidf = im->faces[fi];
 		i = vidf[0];
 		j = vidf[1];
 		k = vidf[2];
-		sub_v3_v3v3(a[0], sys->co[j], sys->co[i]);
-		sub_v3_v3v3(a[1], sys->co[k], sys->co[j]);
-		copy_v3_v3(a[2], sys->no[fi]);
+		sub_v3_v3v3(a[0], im->co[j], im->co[i]);
+		sub_v3_v3v3(a[1], im->co[k], im->co[j]);
+		copy_v3_v3(a[2], im->no[fi]);
 
 		/* Correct way*/
 		transpose_m3(a);
@@ -364,19 +378,20 @@ static void computeGradientFields(LaplacianSystem * sys)
 
 		/* Project Gradient fields on face*/
 		normalize_v3_v3(g, gf1);
-		val = dot_v3v3(g, sys->no[fi]);
-		mul_v3_v3fl(u, sys->no[fi], val);
+		val = dot_v3v3(g, im->no[fi]);
+		mul_v3_v3fl(u, im->no[fi], val);
 		sub_v3_v3v3(w, g, u);
 		normalize_v3_v3(sys->gf1[fi], w);
 
-		cross_v3_v3v3(g, sys->no[fi], sys->gf1[fi]);
+		cross_v3_v3v3(g, im->no[fi], sys->gf1[fi]);
 		normalize_v3_v3(sys->gf2[fi], g);
-		//cross_v3_v3v3(sys->gf2[fi], sys->no[fi], sys->gf1[fi]);
+		//cross_v3_v3v3(sys->gf2[fi], im->no[fi], sys->gf1[fi]);
 	}
 }
 
+#if 0
 /**
-* Random point, P, uniformly from within triangle ABC, method given by 
+* Random point, P, uniformly from within triangle ABC, method given by
 * Robert Osada, Thomas Funkhouser, Bernard Chazelle, and David Dobkin. 2002. Shape distributions. ACM Trans. Graph. 21,
 * 4 (October 2002), 807-832. DOI=10.1145/571647.571648 http://doi.acm.org/10.1145/571647.571648
 * a,b,c are the triangle points
@@ -391,7 +406,7 @@ static void uniformRandomPointWithinTriangle(float r[3], float a[3], float b[3],
 	r1 = BLI_frand();
 	r2 = BLI_frand();
 	va = 1.0f - sqrtf(r1);
-	vb = sqrtf(r1) * ( 1.0f - r2);
+	vb = sqrtf(r1) * (1.0f - r2);
 	vc = sqrtf(r1) * r2;
 	mul_v3_v3fl(pa, a, va);
 	mul_v3_v3fl(pb, b, vb);
@@ -403,6 +418,7 @@ static void uniformRandomPointWithinFace(float r[3], LaplacianSystem *sys, int i
 	vin = sys->faces[indexf];
 	uniformRandomPointWithinTriangle(r, sys->co[vin[0]], sys->co[vin[1]], sys->co[vin[2]]);
 }
+#endif // 0
 
 static LaplacianSystem* initSystem(QuadRemeshModifierData *qmd, Object *ob, DerivedMesh *dm)
 {
@@ -411,101 +427,97 @@ static LaplacianSystem* initSystem(QuadRemeshModifierData *qmd, Object *ob, Deri
 	MDeformVert *dvert = NULL;
 	MDeformVert *dv = NULL, *d;
 	LaplacianSystem *sys = MEM_callocN(sizeof(LaplacianSystem), "QuadRemeshCache");
+	InputMesh *im = &sys->input_mesh;
 
 	DM_ensure_tessface(dm);
 
 	/* Get vertices */
-	sys->total_verts = dm->getNumVerts(dm);
-	sys->co = MEM_mallocN(sizeof(float[3]) * sys->total_verts, "QuadRemeshCoordinates");
+	im->num_verts = dm->getNumVerts(dm);
+	im->co = MEM_mallocN(sizeof(float[3]) * im->num_verts, "QuadRemeshCoordinates");
 	MVert *arrayvect = dm->getVertArray(dm);
 	for (i = 0; i < dm->getNumVerts(dm); i++) {
-		copy_v3_v3(sys->co[i], arrayvect[i].co);
+		copy_v3_v3(im->co[i], arrayvect[i].co);
 	}
 
 	/* Get edges */
-	sys->edges = MEM_mallocN(sizeof(int[2]) * dm->getNumEdges(dm) * 2, "QuadRemeshEdges");
+	im->edges = MEM_mallocN(sizeof(int[2]) * dm->getNumEdges(dm) * 2, "QuadRemeshEdges");
 	MEdge *arrayedge = dm->getEdgeArray(dm);
-	for (sys->total_edges = 0, i = 0; i < dm->getNumEdges(dm); i++) {
-		sys->edges[sys->total_edges][0] = arrayedge[i].v1;
-		sys->edges[sys->total_edges][1] = arrayedge[i].v2;
-		sys->total_edges++;
+	for (im->num_edges = 0, i = 0; i < dm->getNumEdges(dm); i++) {
+		im->edges[im->num_edges][0] = arrayedge[i].v1;
+		im->edges[im->num_edges][1] = arrayedge[i].v2;
+		im->num_edges++;
 	}
 
 	/* Get faces */
 	MFace *tessface = dm->getTessFaceArray(dm);
-	sys->faces = MEM_mallocN(sizeof(int[3]) * dm->getNumTessFaces(dm) * 2, "QuadRemeshFaces");
-	for (sys->total_faces = 0, i = 0; i < dm->getNumTessFaces(dm); i++) {
-		sys->faces[sys->total_faces][0] = tessface[i].v1;
-		sys->faces[sys->total_faces][1] = tessface[i].v2;
-		sys->faces[sys->total_faces][2] = tessface[i].v3;
-		sys->total_faces++;
+	im->faces = MEM_mallocN(sizeof(int[3]) * dm->getNumTessFaces(dm) * 2, "QuadRemeshFaces");
+	for (im->num_faces = 0, i = 0; i < dm->getNumTessFaces(dm); i++) {
+		im->faces[im->num_faces][0] = tessface[i].v1;
+		im->faces[im->num_faces][1] = tessface[i].v2;
+		im->faces[im->num_faces][2] = tessface[i].v3;
+		im->num_faces++;
 
 		if (tessface[i].v4 != 0) {
-			sys->faces[sys->total_faces][0] = tessface[i].v1;
-			sys->faces[sys->total_faces][1] = tessface[i].v3;
-			sys->faces[sys->total_faces][2] = tessface[i].v4;
-			sys->total_faces++;
+			im->faces[im->num_faces][0] = tessface[i].v1;
+			im->faces[im->num_faces][1] = tessface[i].v3;
+			im->faces[im->num_faces][2] = tessface[i].v4;
+			im->num_faces++;
 
-			sys->edges[sys->total_edges][0] = tessface[i].v1;
-			sys->edges[sys->total_edges][1] = tessface[i].v3;
-			sys->total_edges++;
+			im->edges[im->num_edges][0] = tessface[i].v1;
+			im->edges[im->num_edges][1] = tessface[i].v3;
+			im->num_edges++;
 		}
 	}
 
 	/* Get features */
-	sys->constraints = MEM_callocN(sizeof(int) * sys->total_verts, __func__);
-	sys->weights = MEM_callocN(sizeof(float) * sys->total_verts, __func__);
+	im->constraints = MEM_callocN(sizeof(int) * im->num_verts, __func__);
+	im->weights = MEM_callocN(sizeof(float) * im->num_verts, __func__);
 
 	modifier_get_vgroup(ob, dm, qmd->anchor_grp_name, &dvert, &defgrp_index);
 	BLI_assert(dvert != NULL);
 
 	dv = dvert;
-	for (i = 0, sys->total_features = 0; i < sys->total_verts; i++, dv++) {
+	for (i = 0, im->num_features = 0; i < im->num_verts; i++, dv++) {
 		d = defvert_find_index(dv, defgrp_index);
 		wpaint = defvert_find_weight(dv, defgrp_index);
 
 		if (d && wpaint < 0.19 || wpaint > 0.89) {
-			sys->constraints[i] = 1;
-			sys->weights[i] = -1.0f + wpaint * 2.0f;
-			sys->total_features++;
+			im->constraints[i] = 1;
+			im->weights[i] = -1.0f + wpaint * 2.0f;
+			im->num_features++;
 		}
 	}
 
 	/* Allocate rest of memory */
-	sys->faces_edge = MEM_mallocN(sizeof(int[2]) * sys->total_edges, "QuadRemeshFacesEdge");
-	sys->no = MEM_callocN(sizeof(float[3]) * sys->total_faces, "QuadRemeshNormals");
+	im->faces_edge = MEM_mallocN(sizeof(int[2]) * im->num_edges, "QuadRemeshFacesEdge");
+	im->no = MEM_callocN(sizeof(float[3]) * im->num_faces, "QuadRemeshNormals");
 
-	sys->gf1 = MEM_mallocN(sizeof(float[3]) * sys->total_faces, "QuadRemeshGradientField1");
-	sys->gf2 = MEM_mallocN(sizeof(float[3]) * sys->total_faces, "QuadRemeshGradientField2");
-	sys->U_field = MEM_mallocN(sizeof(float) * sys->total_verts, "QuadRemeshUField");
-	sys->h1 = MEM_mallocN(sizeof(float) * sys->total_verts, "QuadRemeshH1");
-	sys->h2 = MEM_mallocN(sizeof(float) * sys->total_verts, "QuadRemeshH2");
+	sys->gf1 = MEM_mallocN(sizeof(float[3]) * im->num_faces, "QuadRemeshGradientField1");
+	sys->gf2 = MEM_mallocN(sizeof(float[3]) * im->num_faces, "QuadRemeshGradientField2");
+	sys->U_field = MEM_mallocN(sizeof(float) * im->num_verts, "QuadRemeshUField");
+	sys->h1 = MEM_mallocN(sizeof(float) * im->num_verts, "QuadRemeshH1");
+	sys->h2 = MEM_mallocN(sizeof(float) * im->num_verts, "QuadRemeshH2");
 	sys->gfsys1 = sys->gfsys2 = NULL;
 	
-	createFaceRingMap(sys);
-	createVertRingMap(sys);
-	createEdgeRingMap(sys);
-
-	createFacesByEdge(sys);
+	createFaceRingMap(im);
+	//createVertRingMap(sys);
+	createEdgeRingMap(im);
+	createFacesByEdge(im);
 
 	return sys;
 }
 
 static LaplacianSystem *QuadRemeshModifier_do(QuadRemeshModifierData *qmd, Object *ob, DerivedMesh *dm)
 {
-	int i;
+	//int i;
 	LaplacianSystem *sys = NULL;
 	
-	int defgrp_index;
-	MDeformVert *dvert = NULL;
-	MDeformVert *dv = NULL;
-	float mmin = 1000, mmax = 0;
-	float y;
-	int x;
-
-	qmd->flag |= MOD_QUADREMESH_COMPUTE_FLOW;
-	qmd->flag |= MOD_QUADREMESH_REMESH;
-	strcpy(qmd->anchor_grp_name, "Group");
+	//int defgrp_index;
+	//MDeformVert *dvert = NULL;
+	//MDeformVert *dv = NULL;
+	//float mmin = 1000, mmax = 0;
+	//float y;
+	//int x;
 
 	if (qmd->flag & MOD_QUADREMESH_COMPUTE_FLOW) {
 		if (strlen(qmd->anchor_grp_name) >= 1) {
@@ -642,6 +654,7 @@ static DerivedMesh *applyModifier(ModifierData *md,
 		result = dm;
 	}
 	
+	//CDDM_recalc_tessellation(result);
 	//CDDM_calc_edges_tessface(result);
 
 	return result;

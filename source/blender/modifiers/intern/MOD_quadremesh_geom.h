@@ -78,6 +78,39 @@ typedef struct GFLine {
 	int num_q;
 } GFLine;
 
+typedef struct InputMesh {
+	int num_verts, num_edges, num_faces, num_features;
+	float(*co)[3];					/* Original vertex coordinates */
+	float(*no)[3];					/* Original face normal */
+
+	unsigned int(*faces)[3];		/* Copy of MFace (tessface) v1-v3, v2-v4 */
+
+	unsigned int(*edges)[2];		/* Copy of edges v1-v2 */
+	unsigned int(*faces_edge)[2];	/* Faces by edges  */
+
+	int *ringf_indices;				/* Indices of faces per vertex */
+	int *ringv_indices;				/* Indices of neighbors(vertex) per vertex */
+	int *ringe_indices;				/* Indices of edges per vertex */
+	MeshElemMap *ringf_map;			/* Map of faces per vertex */
+	//MeshElemMap *ringv_map;			/* Map of vertex per vertex */
+	MeshElemMap *ringe_map;			/* Map of edges per vertex */
+
+	int *constraints;				/* Feature points constraints*/
+	float *weights;					/* Feature points weights*/
+} InputMesh;
+
+typedef struct OutputMesh {
+	int totvert, allocvert;
+	GFVert *mvert;	/* array of verts */
+	int totedge, allocedge;
+	GFEdge *medge;
+
+	int totloop, allocloop;
+	MLoop *loops;
+	int totpolys, allocpolys;
+	MPoly *polys;
+} OutputMesh;
+
 typedef struct LaplacianSystem LaplacianSystem;
 
 /* GradientFlowSysten, one gfsys for every gradient field */
@@ -99,47 +132,17 @@ typedef struct LaplacianSystem {
 	bool has_solution;
 	bool command_remesh;
 
-	int total_verts;
-	float(*co)[3];					/* Original vertex coordinates */
-	float(*no)[3];					/* Original face normal */
+	InputMesh input_mesh;
+	OutputMesh output_mesh;
+	
 	float *U_field;					/* Initial scalar field*/
 
-	int total_features;
-	int *constraints;				/* Feature points constraints*/
-	float *weights;					/* Feature points weights*/
-
-	int *ringf_indices;				/* Indices of faces per vertex */
-	int *ringv_indices;				/* Indices of neighbors(vertex) per vertex */
-	int *ringe_indices;				/* Indices of edges per vertex */
-	MeshElemMap *ringf_map;			/* Map of faces per vertex */
-	MeshElemMap *ringv_map;			/* Map of vertex per vertex */
-	MeshElemMap *ringe_map;			/* Map of edges per vertex */
-
-	int total_faces;
-	unsigned int(*faces)[3];		/* Copy of MFace (tessface) v1-v3, v2-v4 */
 	float(*gf1)[3], (*gf2)[3];		/* Gradient Fields g1 and g2 per face*/
-
 	float *h1, *h2;					/* Sampling distance functions h1 and h2 */
 	float h;
 
-	int total_edges;
-	unsigned int(*edges)[2];		/* Copy of edges v1-v2 */
-	unsigned int(*faces_edge)[2];	/* Faces by edges  */
-
 	NLContext *context;				/* System for solve general implicit rotations */
-
 	GradientFlowSystem *gfsys1, *gfsys2;
-
-	int totvert, allocvert;
-	GFVert *mvert;	/* array of verts */
-	int totedge, allocedge;
-	GFEdge *medge;
-
-	int totloop, allocloop;
-	MLoop *loops;
-	int totpolys, allocpolys;
-	MPoly *polys;
-
 	DerivedMesh *resultDM;
 } LaplacianSystem;
 
