@@ -332,7 +332,7 @@ static void unlinkVerts(OutputMesh *om, QREdgeLink *l)
 	deleteLink(om, ll2, l->brother);
 }
 
-static GFEdgeID addEdge(GradientFlowSystem *gfsys, MVertID in_v1, MVertID in_v2, int in_f)
+static GFEdgeID addGFEdge(GradientFlowSystem *gfsys, MVertID in_v1, MVertID in_v2, int in_f)
 {
 	if (gfsys->totedge == gfsys->allocedge) {
 		gfsys->allocedge = gfsys->allocedge * 2 + 10;
@@ -684,7 +684,7 @@ static void addSegmentToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, 
 	MVertID newv;
 
 	newv = addVert(&gfsys->sys->output_mesh, in_co, gfsys->sys->input_mesh.no[in_f]);
-	addEdge(gfsys, line->end, newv, in_f);
+	addGFEdge(gfsys, line->end, newv, in_f);
 
 	line->end = newv;
 }
@@ -959,6 +959,18 @@ static void deleteDegenerateVerts(OutputMesh *om)
 	sys->totvert = n;*/
 }
 
+static int addEdge(OutputMesh *om, unsigned int in_v1, unsigned int in_v2)
+{
+	if (om->totedge == om->allocedge) {
+		om->allocedge = om->allocedge * 2 + 10;
+		om->edges = MEM_reallocN(om->edges, om->allocedge * sizeof(MEdge));
+	}
+	om->edges[om->totedge].v1 = in_v1;
+	om->edges[om->totedge].v2 = in_v2;
+	
+	return om->totedge++;
+}
+
 static void makeEdges(OutputMesh *om)
 {
 	int i, j;
@@ -968,19 +980,36 @@ static void makeEdges(OutputMesh *om)
 		if (om->verts[i].flag & ME_HIDE) continue;
 		for (j = 0, it = om->vlinks[i].link; j < om->vlinks[i].num_links; j++, it = it->next) {
 			if (it->e < 0 && !(om->verts[it->v].flag & ME_HIDE)) {
-				if (om->totedge == om->allocedge) {
-					om->allocedge = om->allocedge * 2 + 10;
-					om->edges = MEM_reallocN(om->edges, om->allocedge * sizeof(MEdge));
-				}
-				om->edges[om->totedge].v1 = i;
-				om->edges[om->totedge].v2 = it->v;
-				//om->edges[om->totedge].flag = ME_EDGEDRAW;
-				it->e = om->totedge;
-				it->brother->e = om->totedge;
-				om->totedge++;
+				it->brother->e = it->e = addEdge(om, i, it->v);
 			}
 		}
 	}
+}
+
+static int addLoop(OutputMesh *om, unsigned int in_v, unsigned int in_e)
+{
+	if (om->totloop == om->allocloop) {
+		om->allocloop = om->allocloop * 2 + 10;
+		om->loops = MEM_reallocN(om->loops, om->allocloop * sizeof(MLoop));
+	}
+	om->loops[om->totloop].v = in_v;
+	om->loops[om->totloop].e = in_e;
+	
+	return om->totloop++;
+}
+
+static int addPoly(OutputMesh *om, int in_ls, int in_tl)
+{
+	if (om->totpolys == om->allocpolys) {
+		om->allocpolys = om->allocpolys * 2 + 10;
+		om->polys = MEM_reallocN(om->polys, om->allocpolys * sizeof(MPoly));
+	}
+	om->polys[om->totpolys].loopstart = in_ls;
+	om->polys[om->totpolys].totloop = in_tl;
+	om->polys[om->totpolys].mat_nr = 0;
+	om->polys[om->totpolys].flag = 0;
+
+	return om->totpolys++;
 }
 
 static void makePolys(OutputMesh *om)
@@ -999,29 +1028,13 @@ static void makePolys(OutputMesh *om)
 			v = i;
 			lit = it;
 			do {
-				if (om->totloop == om->allocloop) {
-					om->allocloop = om->allocloop * 2 + 10;
-					om->loops = MEM_reallocN(om->loops, om->allocloop * sizeof(MLoop));
-				}
-				om->loops[om->totloop].v = v;
-				om->loops[om->totloop].e = lit->e;
-				//om->edges[lit->e].flag |= ME_EDGEDRAW;
-				om->totloop++;
+				addLoop(om, v, lit->e);
 				v = lit->v;
 				lit->poly_on_right = true;
 				lit = lit->brother->next;
 			} while (v != i);
-			//return;
-			//if (om->totloop - s > 20) continue;
-			if (om->totpolys == om->allocpolys) {
-				om->allocpolys = om->allocpolys * 2 + 10;
-				om->polys = MEM_reallocN(om->polys, om->allocpolys * sizeof(MPoly));
-			}
-			om->polys[om->totpolys].loopstart = s;
-			om->polys[om->totpolys].totloop = om->totloop - s;
-			om->polys[om->totpolys].mat_nr = 0;
-			om->polys[om->totpolys].flag = 0;
-			om->totpolys++;
+			
+			addPoly(om, s, om->totloop - s);
 		}
 	}
 }
@@ -1085,6 +1098,7 @@ arrayedge[i].flag |= ME_EDGEDRAW;
 
 	computeFlowLines(sys);
 	generateIntersectionsOnFaces(sys);
+	deleteDegenerateVerts(om);
 	deleteDegenerateVerts(om);
 	makeEdges(om);
 	makePolys(om);
