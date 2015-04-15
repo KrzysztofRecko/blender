@@ -843,11 +843,10 @@ static void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 	} while (changeLineDirection(gfsys, &line));
 }
 
-void computeFlowLines(LaplacianSystem *sys) {
+static void computeFlowLines(LaplacianSystem *sys) {
 	GFSeed *seed;
 	int comp = 0;
 	
-	sys->output_mesh.memarena = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Output Mesh");
 	if (sys->gfsys1) deleteGradientFlowSystem(sys->gfsys1);
 	if (sys->gfsys2) deleteGradientFlowSystem(sys->gfsys2);
 	sys->gfsys1 = newGradientFlowSystem(sys, sys->h1, sys->gf1);
@@ -855,7 +854,7 @@ void computeFlowLines(LaplacianSystem *sys) {
 
 	while (!BLI_heap_is_empty(sys->gfsys1->heap_seeds)) {
 		seed = getTopSeedFromQueue(sys->gfsys1->heap_seeds);
-		if (++comp < QR_LINELIMIT)
+		//if (++comp < QR_LINELIMIT)
 			computeGFLine(sys->gfsys1, seed);
 		MEM_SAFE_FREE(seed);
 	}
@@ -864,11 +863,10 @@ void computeFlowLines(LaplacianSystem *sys) {
 	
 	while (!BLI_heap_is_empty(sys->gfsys2->heap_seeds)) {
 		seed = getTopSeedFromQueue(sys->gfsys2->heap_seeds);
-		if (++comp < QR_LINELIMIT)
+		//if (++comp < QR_LINELIMIT)
 			computeGFLine(sys->gfsys2, seed);
 		MEM_SAFE_FREE(seed);
 	}
-	
 }
 
 /* MESH GENERATION */
@@ -933,10 +931,15 @@ static void deleteDegenerateVerts(OutputMesh *om)
 	for (i = 0; i < om->totvert; i++) {
 		m = om->vlinks[i].num_links;
 
-		if (m == 1) {
-			verts[i].flag |= ME_HIDE;
+		if (m == 0) {
+			verts[i].flag = ME_HIDE;
+		}
+		else if (m == 1) {
+			verts[i].flag = ME_HIDE;
+			unlinkVerts(om, om->vlinks[i].link);
 		}
 		else if (m == 2) {
+			verts[i].flag = ME_HIDE;
 			a = om->vlinks[i].link->v;
 			b = om->vlinks[i].link->next->v;
 			unlinkVerts(om, om->vlinks[i].link);
@@ -962,15 +965,16 @@ static void makeEdges(OutputMesh *om)
 	QREdgeLink *it;
 
 	for (i = 0; i < om->totvert; i++) {
+		if (om->verts[i].flag & ME_HIDE) continue;
 		for (j = 0, it = om->vlinks[i].link; j < om->vlinks[i].num_links; j++, it = it->next) {
-			if (it->e < 0 && !(om->verts[it->v].flag & ME_HIDE) && !(om->verts[i].flag & ME_HIDE)) {
+			if (it->e < 0 && !(om->verts[it->v].flag & ME_HIDE)) {
 				if (om->totedge == om->allocedge) {
 					om->allocedge = om->allocedge * 2 + 10;
 					om->edges = MEM_reallocN(om->edges, om->allocedge * sizeof(MEdge));
 				}
 				om->edges[om->totedge].v1 = i;
 				om->edges[om->totedge].v2 = it->v;
-				//om->edges[om->totedge].flag |= ME_EDGEDRAW;
+				//om->edges[om->totedge].flag = ME_EDGEDRAW;
 				it->e = om->totedge;
 				it->brother->e = om->totedge;
 				om->totedge++;
@@ -1028,18 +1032,17 @@ void freeOutputMesh(OutputMesh *om)
 	MEM_SAFE_FREE(om->edges);
 	MEM_SAFE_FREE(om->polys);
 	MEM_SAFE_FREE(om->loops);
-	BLI_memarena_free(om->memarena);
+	if (om->memarena) {
+		BLI_memarena_free(om->memarena);
+		om->memarena = NULL;
+	}
 }
-
 
 void generateMesh(LaplacianSystem *sys)
 {
-	MVert *verts;
-	MEdge *edges;
-	MPoly *polys;
-	MLoop *loops;
 	OutputMesh *om = &sys->output_mesh;
-	int i;
+
+	sys->output_mesh.memarena = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Output Mesh");
 
 #if 0
 	/*result = CDDM_new(gfsys->totalf * 2, gfsys->totalf, 0, 0, 0);
@@ -1080,23 +1083,37 @@ arrayedge[i].flag |= ME_EDGEDRAW;
 					}*/
 #endif // 0
 
+	computeFlowLines(sys);
 	generateIntersectionsOnFaces(sys);
 	deleteDegenerateVerts(om);
 	makeEdges(om);
 	makePolys(om);
+}
 
-	sys->resultDM = CDDM_new(om->totvert, om->totedge, 0, om->totloop, om->totpolys);
+DerivedMesh *getResultMesh(LaplacianSystem *sys)
+{
+	MVert *verts;
+	MEdge *edges;
+	MPoly *polys;
+	MLoop *loops;
+	OutputMesh *om = &sys->output_mesh;
+	DerivedMesh *ret;
 
-	verts = sys->resultDM->getVertArray(sys->resultDM);
+	if (!om->totvert) return NULL;
+
+	ret = CDDM_new(om->totvert, om->totedge, 0, om->totloop, om->totpolys);
+
+	verts = ret->getVertArray(ret);
 	memcpy(verts, om->verts, om->totvert * sizeof(MVert));
-	edges = sys->resultDM->getEdgeArray(sys->resultDM);
+	edges = ret->getEdgeArray(ret);
 	memcpy(edges, om->edges, om->totedge * sizeof(MEdge));
-	loops = sys->resultDM->getLoopArray(sys->resultDM);
+	loops = ret->getLoopArray(ret);
 	memcpy(loops, om->loops, om->totloop * sizeof(MLoop));
-	polys = sys->resultDM->getPolyArray(sys->resultDM);
+	polys = ret->getPolyArray(ret);
 	memcpy(polys, om->polys, om->totpolys * sizeof(MPoly));
 
-	CDDM_recalc_tessellation(sys->resultDM);
-	CDDM_calc_edges_tessface(sys->resultDM);
-	freeOutputMesh(om);
+	CDDM_recalc_tessellation(ret);
+	CDDM_calc_edges_tessface(ret);
+
+	return ret;
 }

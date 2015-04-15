@@ -155,14 +155,13 @@ typedef struct LaplacianSystem {
 
 	NLContext *context;				/* System for solve general implicit rotations */
 	GradientFlowSystem *gfsys1, *gfsys2;
-	DerivedMesh *resultDM;
 } LaplacianSystem;
 
 GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys, float *mhfunction, float(*mgfield)[3]);
 void deleteGradientFlowSystem(GradientFlowSystem *gfsys);
-void computeFlowLines(LaplacianSystem *sys);
 void generateMesh(LaplacianSystem *sys);
 void freeOutputMesh(OutputMesh *om);
+DerivedMesh *getResultMesh(LaplacianSystem *sys);
 
 #endif /*openNl*/
 #endif /*__MOD_QUADREMESH_GEOM_H__*/

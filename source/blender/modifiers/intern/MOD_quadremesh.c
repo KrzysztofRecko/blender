@@ -66,6 +66,7 @@ static void deleteLaplacianSystem(LaplacianSystem *sys)
 	deleteGradientFlowSystem(sys->gfsys1);
 	deleteGradientFlowSystem(sys->gfsys2);
 	freeInputMesh(&sys->input_mesh);
+	freeOutputMesh(&sys->output_mesh);
 	
 	MEM_SAFE_FREE(sys->U_field);
 	MEM_SAFE_FREE(sys->h1);
@@ -76,7 +77,6 @@ static void deleteLaplacianSystem(LaplacianSystem *sys)
 	if (sys->context) {
 		nlDeleteContext(sys->context);
 	}
-	sys->resultDM = NULL;
 	
 	MEM_SAFE_FREE(sys);
 }
@@ -490,7 +490,6 @@ static LaplacianSystem* initSystem(QuadRemeshModifierData *qmd, Object *ob, Deri
 	sys->h1 = MEM_mallocN(sizeof(float) * im->num_verts, "QuadRemeshH1");
 	sys->h2 = MEM_mallocN(sizeof(float) * im->num_verts, "QuadRemeshH2");
 	sys->gfsys1 = sys->gfsys2 = NULL;
-	sys->resultDM = NULL;
 	
 	createFaceRingMap(im);
 	//createVertRingMap(sys);
@@ -557,7 +556,6 @@ static LaplacianSystem *QuadRemeshModifier_do(QuadRemeshModifierData *qmd, Objec
 		sys = qmd->cache_system;
 		if (sys->has_solution) {
 			sys->h = 2.0f;
-			computeFlowLines(sys);
 			generateMesh(sys);
 		}
 		qmd->flag &= ~MOD_QUADREMESH_REMESH;
@@ -630,20 +628,14 @@ static DerivedMesh *applyModifier(ModifierData *md,
 	DerivedMesh *dm,
 	ModifierApplyFlag UNUSED(flag))
 {
-	DerivedMesh *result;
+	DerivedMesh *result = dm;
 	
 	LaplacianSystem *sys = QuadRemeshModifier_do((QuadRemeshModifierData *)md, ob, dm);
 	
-	if (sys && sys->resultDM) {
-		result = sys->resultDM;
-		sys->resultDM = NULL;
+	if (sys) {
+		result = getResultMesh(sys);
+		if (!result) result = dm;
 	}
-	else{
-		result = dm;
-	}
-	
-	//CDDM_recalc_tessellation(result);
-	//CDDM_calc_edges_tessface(result);
 
 	return result;
 }
