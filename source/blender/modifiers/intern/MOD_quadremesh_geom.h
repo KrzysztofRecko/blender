@@ -37,14 +37,25 @@
 #include "BLI_heap.h"
 #include "BLI_linklist.h"
 #include "BKE_cdderivedmesh.h"
+#include "BLI_memarena.h"
 
 typedef int GFEdgeID;
-typedef int GFVertID;
+typedef int MEdgeID;
+typedef int MVertID;
 
-typedef struct GFVert {
-	float co[3];		/* Vert position */
-	GFVertID e[4];      /* 4 neighboring vertices: 2 for each gfsystem */
-} GFVert;
+typedef struct QREdgeLink {
+	struct QREdgeLink *next, *prev, *brother;
+	MEdgeID e;
+	MVertID v;
+	float ang;
+	bool poly_on_right;
+} QREdgeLink;
+
+typedef struct QREdgeLinkList {
+	QREdgeLink *link;
+	float vec[3];
+	int num_links;
+} QREdgeLinkList;
 
 typedef enum {
 	eSeedVert,
@@ -58,11 +69,12 @@ typedef struct GFSeed {
 } GFSeed;
 
 typedef struct GFEdge {
-	GFVertID v1, v2;	    /* Vert indices */
+	LinkNode *elinks;
+	MVertID v1, v2;	    /* End vert indices */
 } GFEdge;
 
 typedef struct GFLine {
-	GFVertID end, seed;
+	MVertID end, seed;
 	int d;
 	float oldco[3];
 
@@ -98,10 +110,12 @@ typedef struct InputMesh {
 
 typedef struct OutputMesh {
 	int totvert, allocvert;
-	GFVert *mvert;	/* array of verts */
-	int totedge, allocedge;
-	GFEdge *medge;
+	MVert *verts;
+	QREdgeLinkList *vlinks;
+	MemArena *memarena;
 
+	int totedge, allocedge;
+	MEdge *edges;
 	int totloop, allocloop;
 	MLoop *loops;
 	int totpolys, allocpolys;
@@ -115,6 +129,7 @@ typedef struct GradientFlowSystem {
 	int totedge, allocedge;
 	GFEdge *medge;	/* array of edges */
 	LinkNode **ringf_list;			/* Array list of of GFEdge per original face */
+	MemArena *memarena;
 
 	struct Heap *heap_seeds;
 
@@ -147,6 +162,7 @@ GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys, float *mhfunctio
 void deleteGradientFlowSystem(GradientFlowSystem *gfsys);
 void computeFlowLines(LaplacianSystem *sys);
 void generateMesh(LaplacianSystem *sys);
+void freeOutputMesh(OutputMesh *om);
 
 #endif /*openNl*/
 #endif /*__MOD_QUADREMESH_GEOM_H__*/

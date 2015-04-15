@@ -61,20 +61,11 @@ static void freeInputMesh(InputMesh *im)
 	MEM_SAFE_FREE(im->ringe_map);
 }
 
-static void freeOutputMesh(OutputMesh *om)
-{
-	MEM_SAFE_FREE(om->mvert);
-	MEM_SAFE_FREE(om->medge);
-	MEM_SAFE_FREE(om->polys);
-	MEM_SAFE_FREE(om->loops);
-}
-
 static void deleteLaplacianSystem(LaplacianSystem *sys)
 {
 	deleteGradientFlowSystem(sys->gfsys1);
 	deleteGradientFlowSystem(sys->gfsys2);
 	freeInputMesh(&sys->input_mesh);
-	freeOutputMesh(&sys->output_mesh);
 	
 	MEM_SAFE_FREE(sys->U_field);
 	MEM_SAFE_FREE(sys->h1);
@@ -85,6 +76,7 @@ static void deleteLaplacianSystem(LaplacianSystem *sys)
 	if (sys->context) {
 		nlDeleteContext(sys->context);
 	}
+	sys->resultDM = NULL;
 	
 	MEM_SAFE_FREE(sys);
 }
@@ -498,6 +490,7 @@ static LaplacianSystem* initSystem(QuadRemeshModifierData *qmd, Object *ob, Deri
 	sys->h1 = MEM_mallocN(sizeof(float) * im->num_verts, "QuadRemeshH1");
 	sys->h2 = MEM_mallocN(sizeof(float) * im->num_verts, "QuadRemeshH2");
 	sys->gfsys1 = sys->gfsys2 = NULL;
+	sys->resultDM = NULL;
 	
 	createFaceRingMap(im);
 	//createVertRingMap(sys);
@@ -637,16 +630,13 @@ static DerivedMesh *applyModifier(ModifierData *md,
 	DerivedMesh *dm,
 	ModifierApplyFlag UNUSED(flag))
 {
-	//DerivedMesh *dm2 = get_dm(ob, NULL, dm, NULL, false, false);
-	//QuadRemeshModifier_do((QuadRemeshModifierData *)md, ob, dm, (void *)dm->getVertArray(dm), dm->getNumVerts(dm));
-
-	
 	DerivedMesh *result;
 	
 	LaplacianSystem *sys = QuadRemeshModifier_do((QuadRemeshModifierData *)md, ob, dm);
 	
-	if (sys) {
+	if (sys && sys->resultDM) {
 		result = sys->resultDM;
+		sys->resultDM = NULL;
 	}
 	else{
 		result = dm;
