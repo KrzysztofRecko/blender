@@ -248,7 +248,8 @@ static MVertID addVert(OutputMesh *om, float in_co[3], float in_no[3])
 	}
 
 	copy_v3_v3(om->verts[om->totvert].co, in_co);
-	normal_float_to_short_v3(om->verts[om->totvert].no, in_no);
+	if (in_no)
+		normal_float_to_short_v3(om->verts[om->totvert].no, in_no);
 
 	om->vlinks[om->totvert].link = NULL;
 	om->vlinks[om->totvert].num_links = 0;
@@ -889,7 +890,7 @@ static void insertOnEdge(GradientFlowSystem *gfsys, MVertID in_vid, GFEdgeID in_
 
 	unlinkVerts(&gfsys->sys->output_mesh, (QREdgeLink*)it->link);
 	it->link = (void*)linkVerts(&gfsys->sys->output_mesh, va, in_vid);
-	BLI_linklist_insert_after(&it, (void*)linkVerts(&gfsys->sys->output_mesh, in_vid, vb));
+	BLI_linklist_prepend_arena(&it->next, (void*)linkVerts(&gfsys->sys->output_mesh, in_vid, vb), gfsys->memarena);
 }
 
 static void generateIntersectionsOnFaces(LaplacianSystem *sys)
@@ -967,6 +968,7 @@ static int addEdge(OutputMesh *om, unsigned int in_v1, unsigned int in_v2)
 	}
 	om->edges[om->totedge].v1 = in_v1;
 	om->edges[om->totedge].v2 = in_v2;
+	om->edges[om->totedge].flag = ME_EDGEDRAW;
 	
 	return om->totedge++;
 }
@@ -1039,6 +1041,19 @@ static void makePolys(OutputMesh *om)
 	}
 }
 
+void makeNormals(OutputMesh *om)
+{
+	int i, tv = om->totvert;
+	float npos[3];
+
+	for (i = 0; i < tv; i++) {
+		normal_short_to_float_v3(npos, om->verts[i].no);
+		mul_v3_fl(npos, 0.1f);
+		add_v3_v3(npos, om->verts[i].co);
+		addEdge(om, i, addVert(om, npos, NULL));
+	}
+}
+
 void freeOutputMesh(OutputMesh *om)
 {
 	MEM_SAFE_FREE(om->verts);
@@ -1098,10 +1113,10 @@ arrayedge[i].flag |= ME_EDGEDRAW;
 
 	computeFlowLines(sys);
 	generateIntersectionsOnFaces(sys);
-	deleteDegenerateVerts(om);
-	deleteDegenerateVerts(om);
+	//deleteDegenerateVerts(om);
 	makeEdges(om);
-	makePolys(om);
+	//makePolys(om);
+	makeNormals(om);
 }
 
 DerivedMesh *getResultMesh(LaplacianSystem *sys)
@@ -1128,6 +1143,7 @@ DerivedMesh *getResultMesh(LaplacianSystem *sys)
 
 	CDDM_recalc_tessellation(ret);
 	CDDM_calc_edges_tessface(ret);
+	//ret->dirty |= DM_DIRTY_NORMALS;
 
 	return ret;
 }
