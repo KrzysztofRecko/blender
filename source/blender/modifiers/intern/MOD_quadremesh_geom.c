@@ -49,89 +49,6 @@
 
 
 #if 0 /* UNUSED ROUTINES */
-int addEdgeTwoFacesGFSystem(GradientFlowSystem *gfsys, int index_v1, int index_v2, int index_face1, int index_face2)
-{
-	int pos = addEdgeGFMesh(gfsys->mesh, index_v1, index_v2, index_face1);
-	if (index_face1 >= 0) {
-		if (gfsys->ringf_list[index_face1]) {
-			addNodeGFList(gfsys->ringf_list[index_face1], pos);
-		}
-		else{
-			gfsys->ringf_list[index_face1] = newGFList(pos);
-		}
-	}
-	if (index_face2 >= 0) {
-		if (gfsys->ringf_list[index_face2]) {
-			addNodeGFList(gfsys->ringf_list[index_face2], pos);
-		}
-		else{
-			gfsys->ringf_list[index_face2] = newGFList(pos);
-		}
-	}
-	return pos;
-
-}
-
-bool isOnSegmentLine(float p1[3], float p2[3], float q[3]){
-	if (fabsf(len_v3v3(p1, q) + len_v3v3(p2, q) - len_v3v3(p1, p2)) < MOD_QUADREMESH_MIN_LEN) {
-		return true;
-	}
-	return false;
-}
-
-/*
-* Return 1 if the intersections exist
-* Return -1 if the intersections does not exist
-*/
-bool intersecionLineSegmentWithVector(float r[3], float p1[3], float p2[3], float ori[3], float dir[3])
-{
-	float v[3], i1[3], i2[3];
-	int i;
-
-	add_v3_v3v3(v, ori, dir);
-	i = isect_line_line_v3(p1, p2, ori, v, i1, i2);
-	if (i == 0) {
-		sub_v3_v3v3(i1, p1, ori);
-		normalize_v3(i1);
-		if (equals_v3v3(i1, dir)) {
-			copy_v3_v3(r, p1);
-		}
-		else {
-			copy_v3_v3(r, p2);
-		}
-	}
-	else {
-		sub_v3_v3v3(v, i1, ori);
-		normalize_v3(v);
-		if (equals_v3v3(v, dir)) {
-			if (isOnSegmentLine(p1, p2, i1)) {
-				copy_v3_v3(r, i1);
-			}
-			else{
-				return false;
-			}
-		}
-		else {
-			return false;
-		}
-	}
-	return true;
-}
-
-bool intersectionVectorWithTriangle(float r[3], float p1[3], float p2[3], float p3[3], float ori[3], float dir[3])
-{
-	if (intersecionLineSegmentWithVector(r, p1, p2, ori, dir) == 1) {
-		return true;
-	}
-	else if (intersecionLineSegmentWithVector(r, p2, p3, ori, dir) == 1) {
-		return true;
-	}
-	else if (intersecionLineSegmentWithVector(r, p3, p1, ori, dir) == 1) {
-		return true;
-	}
-	return false;
-
-}
 
 bool nextPointFromVertex(float r_co[3], int *r_face, int *r_edge, GradientFlowSystem *gfsys, int in_v)
 {
@@ -163,50 +80,6 @@ bool nextPointFromVertex(float r_co[3], int *r_face, int *r_edge, GradientFlowSy
 	}
 
 	return false;
-}
-
-/* Project Gradient fields on face*/
-void projectVectorOnFace(float r[3], float no[3], float dir[3])
-{
-	float g[3], val, u[3], w[3];
-	normalize_v3_v3(g, dir);
-	val = dot_v3v3(g, no);
-	mul_v3_v3fl(u, no, val);
-	sub_v3_v3v3(w, g, u);
-	normalize_v3_v3(r, w);
-}
-
-int getThirdVert(LaplacianSystem *sys, int oldface, int v1, int v2)
-{
-	int a, b;
-
-	if      (v1 == sys->faces[oldface][0]) a = 0;
-	else if (v1 == sys->faces[oldface][1]) a = 1;
-	else if (v1 == sys->faces[oldface][2]) a = 2;
-	else a = 4;
-
-	if      (v2 == sys->faces[oldface][0]) b = 0;
-	else if (v2 == sys->faces[oldface][1]) b = 1;
-	else if (v2 == sys->faces[oldface][2]) b = 2;
-	else b = 4;
-
-	BLI_assert(a + b < 4 && a != b);
-	return sys->faces[oldface][3 - a - b];
-}
-
-bool getSecondAndThirdVert(int *r1, int *r2, LaplacianSystem *sys, int face, int v)
-{
-	int a;
-
-	if      (v == sys->faces[face][0]) a = 0;
-	else if (v == sys->faces[face][1]) a = 1;
-	else if (v == sys->faces[face][2]) a = 2;
-	else return false;
-
-	*r1 = sys->faces[face][(a + 1) % 3];
-	*r2 = sys->faces[face][(a + 2) % 3];
-
-	return true;
 }
 
 /*
@@ -1065,45 +938,6 @@ void generateMesh(LaplacianSystem *sys)
 	OutputMesh *om = &sys->output_mesh;
 
 	sys->output_mesh.memarena = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Output Mesh");
-
-#if 0
-	/*result = CDDM_new(gfsys->totalf * 2, gfsys->totalf, 0, 0, 0);
-arrayvect = result->getVertArray(result);
-for (i = 0; i < gfsys->totalf; i++) {
-float cent[3], v[3];
-cent_tri_v3(cent, sys->co[sys->faces[i][0]], sys->co[sys->faces[i][1]], sys->co[sys->faces[i][2]]);
-mul_v3_fl(gfsys->gfield[i], 0.1f);
-add_v3_v3v3(v, cent, gfsys->gfield[i]);
-copy_v3_v3(arrayvect[i * 2].co, v);
-copy_v3_v3(arrayvect[i * 2 + 1].co, cent);
-}
-arrayedge = result->getEdgeArray(result);
-for (i = 0; i < gfsys->totalf; i++) {
-arrayedge[i].v1 = i * 2;
-arrayedge[i].v2 = i * 2 + 1;
-arrayedge[i].flag |= ME_EDGEDRAW;
-}*/
-
-	/*sys->resultDM = CDDM_new(sys->totvert,
-					sys->gfsys1->totedge + sys->gfsys2->totedge,
-					0, 0, 0);
-					arrayvect = sys->resultDM->getVertArray(sys->resultDM);
-					for (i = 0; i < sys->totvert; i++) {
-					copy_v3_v3(arrayvect[i].co, sys->verts[i].co);
-					}
-
-					arrayedge = sys->resultDM->getEdgeArray(sys->resultDM);
-					for (i = 0; i < sys->gfsys1->totedge; i++) {
-					arrayedge[i].v1 = sys->gfsys1->medge[i].v1;
-					arrayedge[i].v2 = sys->gfsys1->medge[i].v2;
-					arrayedge[i].flag |= ME_EDGEDRAW;
-					}
-					for (i = 0; i < sys->gfsys2->totedge; i++) {
-					arrayedge[i + sys->gfsys1->totedge].v1 = sys->gfsys2->medge[i].v1;
-					arrayedge[i + sys->gfsys1->totedge].v2 = sys->gfsys2->medge[i].v2;
-					arrayedge[i + sys->gfsys1->totedge].flag |= ME_EDGEDRAW;
-					}*/
-#endif // 0
 
 	computeFlowLines(sys);
 	generateIntersectionsOnFaces(sys);
