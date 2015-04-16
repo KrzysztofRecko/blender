@@ -126,8 +126,6 @@ typedef struct LaplacianSystem LaplacianSystem;
 
 /* GradientFlowSysten, one gfsys for every gradient field */
 typedef struct GradientFlowSystem {
-	int totedge, allocedge;
-	GFEdge *medge;	/* array of edges */
 	LinkNode **ringf_list;			/* Array list of of GFEdge per original face */
 	MemArena *memarena;
 
