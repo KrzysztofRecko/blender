@@ -124,6 +124,11 @@ typedef struct OutputMesh {
 
 typedef struct LaplacianSystem LaplacianSystem;
 
+#define QR_SAMPLING_RATE 0.03f
+#define QR_MINDIST 0.04f
+#define QR_SEEDPROB 0.75f
+#define QR_SEEDDIST 0.08f
+
 /* GradientFlowSysten, one gfsys for every gradient field */
 typedef struct GradientFlowSystem {
 	LinkNode **ringf_list;			/* Array list of of GFEdge per original face */
@@ -142,6 +147,7 @@ typedef struct LaplacianSystem {
 	bool has_solution;
 	bool command_remesh;
 
+	struct QuadRemeshModifierData *qmd;
 	InputMesh input_mesh;
 	OutputMesh output_mesh;
 	

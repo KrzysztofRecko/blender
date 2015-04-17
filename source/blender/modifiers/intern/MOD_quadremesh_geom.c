@@ -42,10 +42,7 @@
 #include "MOD_util.h"
 
 //#define QR_SHOWQUERIES
-#define QR_LINELIMIT 40000
-#define QR_SAMPLING_RATE 0.03f
-#define QR_MINDIST 0.04f
-#define QR_SEEDDIST 0.08f
+#define QR_LINELIMIT 1000000
 
 
 #if 0 /* UNUSED ROUTINES */
@@ -510,7 +507,7 @@ static int queryDirection(GradientFlowSystem *gfsys, float in_co[3], int in_f, f
 static bool checkPoint(GradientFlowSystem *gfsys, float in_oldco[3], float in_newco[3], int in_f, float dist, float maxdist)
 {
 	int d;
-	bool make_seed = BLI_frand() > 0.75f;
+	bool make_seed = BLI_frand() > gfsys->sys->qmd->seeding_probability;
 	float seg[3], dir[3];
 	InputMesh *im = &gfsys->sys->input_mesh;
 
@@ -587,7 +584,9 @@ static void initGFLine(GradientFlowSystem *gfsys, GFLine *line, GFSeed *in_seed)
 
 static bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, float in_newco[3])
 {
-	const float chklen = QR_SAMPLING_RATE; /* sampling rate */
+	const float chklen = gfsys->sys->qmd->sampling_interval;
+	const float maxdist = gfsys->sys->qmd->max_line_dist;
+	const float seeddist = maxdist * 2.0f;
 
 	int i;
 	float seg[3], newchk[3];
@@ -600,7 +599,7 @@ static bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, fl
 	curlen = len_v3(seg);
 
 	if (line->seed == -1) {
-		if (!checkPoint(gfsys, in_newco, line->oldco, in_f, QR_MINDIST, QR_SEEDDIST)) return false;
+		if (!checkPoint(gfsys, in_newco, line->oldco, in_f, maxdist, seeddist)) return false;
 
 		line->end = line->seed = addVert(&gfsys->sys->output_mesh, line->oldco, gfsys->sys->input_mesh.no[in_f]);
 		line->lastchklen = line->qlen = 0.0f;
@@ -612,9 +611,9 @@ static bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, fl
 		mul_v3_v3fl(newchk, seg, (line->lastchklen + chklen - line->qlen) / curlen);
 		add_v3_v3(newchk, line->oldco);
 
-		if (!checkPoint(gfsys, line->lastchk, newchk, in_f, QR_MINDIST, QR_SEEDDIST)) {
 			if (line->num_q == 0) addSegmentToLine(gfsys, line, in_f, line->lastchk);
 			else addSegmentToLine(gfsys, line, line->qf[0], line->lastchk);
+		if (!checkPoint(gfsys, line->lastchk, newchk, in_f, maxdist, seeddist)) {
 			
 			line->num_q = 0;
 			return false;
@@ -722,7 +721,7 @@ static void computeFlowLines(LaplacianSystem *sys) {
 
 	while (!BLI_heap_is_empty(sys->gfsys1->heap_seeds)) {
 		seed = getTopSeedFromQueue(sys->gfsys1->heap_seeds);
-		//if (++comp < QR_LINELIMIT)
+		if (++comp < QR_LINELIMIT)
 			computeGFLine(sys->gfsys1, seed);
 		MEM_SAFE_FREE(seed);
 	}
@@ -731,7 +730,7 @@ static void computeFlowLines(LaplacianSystem *sys) {
 	
 	while (!BLI_heap_is_empty(sys->gfsys2->heap_seeds)) {
 		seed = getTopSeedFromQueue(sys->gfsys2->heap_seeds);
-		//if (++comp < QR_LINELIMIT)
+		if (++comp < QR_LINELIMIT)
 			computeGFLine(sys->gfsys2, seed);
 		MEM_SAFE_FREE(seed);
 	}
@@ -923,6 +922,8 @@ void makeNormals(OutputMesh *om)
 
 void freeOutputMesh(OutputMesh *om)
 {
+	om->totvert = om->allocvert = om->totedge = om->allocedge = 0;
+	om->totloop = om->allocloop = om->totpolys = om->allocpolys = 0;
 	MEM_SAFE_FREE(om->verts);
 	MEM_SAFE_FREE(om->edges);
 	MEM_SAFE_FREE(om->polys);

@@ -1449,6 +1449,7 @@ typedef struct QuadRemeshModifierData {
 	ModifierData modifier;
 	char anchor_grp_name[64];  /* MAX_VGROUP_NAME */
 	short flag, pad[3];
+	float sampling_interval, max_line_dist, seeding_probability, seeding_dist;
 	void *cache_system;  /* runtime only */
 
 } QuadRemeshModifierData;

@@ -4268,6 +4268,14 @@ static void rna_def_modifier_quadremesh(BlenderRNA *brna)
 	RNA_def_property_ui_text(prop, "Vertex group for feature points",
 		"Name of Vertex Group which determines feature points");
 	RNA_def_property_string_funcs(prop, NULL, NULL, "rna_QuadRemeshModifier_anchor_grp_name_set");
+	RNA_def_property_update(prop, 0, "rna_Modifier_update");
+
+	prop = RNA_def_property(srna, "max_line_dist", PROP_FLOAT, PROP_NONE);
+	RNA_def_property_float_sdna(prop, NULL, "max_line_dist");
+	RNA_def_property_range(prop, 0.001f, 10.0f);
+	RNA_def_property_ui_range(prop, 0.001f, 10.0f, 0.1, 1);
+	RNA_def_property_ui_text(prop, "Remeshing Line Density", "Line Density");
+	RNA_def_property_update(prop, 0, "rna_Modifier_update");
 
 	prop = RNA_def_property(srna, "is_computeflow", PROP_BOOLEAN, PROP_NONE);
 	RNA_def_property_boolean_funcs(prop, "rna_QuadRemeshModifier_is_computeflow_get", NULL);

@@ -1012,7 +1012,7 @@ class DATA_PT_modifiers(ModifierButtonsPanel, Panel):
     def QUADREMESH(self, layout, ob, md):
         is_computeflow = md.is_computeflow
         is_remesh = md.is_remesh
-		
+
         row = layout.row()
         row.label(text="Features Vertex Group:")
 
@@ -1026,11 +1026,15 @@ class DATA_PT_modifiers(ModifierButtonsPanel, Panel):
         row.operator("object.quadremesh_computeflow", text="Recompute Flow" if is_computeflow else "Compute Flow")        
 
         layout.separator()
+        #row = layout.row()
+        layout.prop(md, "max_line_dist")
+
+        layout.separator()
 
         row = layout.row()
         row.enabled = bool(md.vertex_group)
         row.operator("object.quadremesh_remesh", text="Remesh")        
-		
+         
     @staticmethod
     def vertex_weight_mask(layout, ob, md):
         layout.label(text="Influence/Mask Options:")

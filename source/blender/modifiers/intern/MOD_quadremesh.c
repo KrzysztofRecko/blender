@@ -421,6 +421,7 @@ static LaplacianSystem* initSystem(QuadRemeshModifierData *qmd, Object *ob, Deri
 	LaplacianSystem *sys = MEM_callocN(sizeof(LaplacianSystem), "QuadRemeshCache");
 	InputMesh *im = &sys->input_mesh;
 
+	sys->qmd = qmd;
 	DM_ensure_tessface(dm);
 
 	/* Get vertices */
@@ -583,6 +584,10 @@ static void initData(ModifierData *md)
 	lmd->anchor_grp_name[0] = '\0';
 	lmd->flag = 0;
 	lmd->cache_system = NULL;
+	lmd->max_line_dist = QR_MINDIST;
+	lmd->sampling_interval = QR_SAMPLING_RATE;
+	lmd->seeding_dist = QR_SEEDDIST;
+	lmd->seeding_probability = QR_SEEDPROB;
 }
 
 static void copyData(ModifierData *md, ModifierData *target)
