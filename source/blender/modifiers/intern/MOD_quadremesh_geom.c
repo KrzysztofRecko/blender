@@ -109,24 +109,7 @@ void estimateNumberGFVerticesEdges(int ve[2], LaplacianSystem *sys, float h)
 }
 #endif // UNUSED ROUTINES
 
-static MVertID addVert(OutputMesh *om, float in_co[3], float in_no[3], int in_e)
-{
-	if (om->totvert == om->allocvert) {
-		om->allocvert = om->allocvert * 2 + 10;
-		om->verts = MEM_reallocN(om->verts, sizeof(MVert) * om->allocvert);
-		om->vlinks = MEM_reallocN(om->vlinks, sizeof(QREdgeLinkList) * om->allocvert);
-	}
-
-	copy_v3_v3(om->verts[om->totvert].co, in_co);
-	if (in_no)
-		normal_float_to_short_v3(om->verts[om->totvert].no, in_no);
-
-	om->vlinks[om->totvert].link = NULL;
-	om->vlinks[om->totvert].num_links = 0;
-	om->vlinks[om->totvert].e = in_e;
-	
-	return om->totvert++;
-}
+/* QREDGELINK STUFF */
 
 static QREdgeLink *insertLink(OutputMesh *om, MVertID in_a, MVertID in_b)
 {
@@ -205,21 +188,64 @@ static void unlinkVerts(OutputMesh *om, QREdgeLink *l)
 	deleteLink(om, ll2, l->brother);
 }
 
-static GFEdge *addGFEdge(GradientFlowSystem *gfsys, MVertID in_v1, MVertID in_v2, int in_ef, bool is_on_edge)
+/* ADDING STUFF TO OUTPUT MESH */
+
+static MVertID addVert(OutputMesh *om, float in_co[3], float in_no[3], int in_e)
 {
-	GFEdge *newe = BLI_memarena_alloc(gfsys->memarena, sizeof(GFEdge));
+	if (om->totvert == om->allocvert) {
+		om->allocvert = om->allocvert * 2 + 10;
+		om->verts = MEM_reallocN(om->verts, sizeof(MVert) * om->allocvert);
+		om->vlinks = MEM_reallocN(om->vlinks, sizeof(QREdgeLinkList) * om->allocvert);
+	}
 
-	newe->v1 = in_v1;
-	newe->v2 = in_v2;
+	copy_v3_v3(om->verts[om->totvert].co, in_co);
+	if (in_no)
+		normal_float_to_short_v3(om->verts[om->totvert].no, in_no);
 
-	BLI_linklist_prepend_arena(&newe->elinks, (void*)linkVerts(&gfsys->sys->output_mesh, in_v1, in_v2), gfsys->memarena);
-
-	if (is_on_edge)
-		BLI_linklist_prepend_arena(&gfsys->ringe[in_ef], (void*)newe, gfsys->memarena);
-	else
-		BLI_linklist_prepend_arena(&gfsys->ringf[in_ef], (void*)newe, gfsys->memarena);
+	om->vlinks[om->totvert].link = NULL;
+	om->vlinks[om->totvert].num_links = 0;
+	om->vlinks[om->totvert].e = in_e;
 	
-	return newe;
+	return om->totvert++;
+}
+
+static int addEdge(OutputMesh *om, unsigned int in_v1, unsigned int in_v2)
+{
+	if (om->totedge == om->allocedge) {
+		om->allocedge = om->allocedge * 2 + 10;
+		om->edges = MEM_reallocN(om->edges, om->allocedge * sizeof(MEdge));
+	}
+	om->edges[om->totedge].v1 = in_v1;
+	om->edges[om->totedge].v2 = in_v2;
+	om->edges[om->totedge].flag = ME_EDGEDRAW;
+	
+	return om->totedge++;
+}
+
+static int addLoop(OutputMesh *om, unsigned int in_v, unsigned int in_e)
+{
+	if (om->totloop == om->allocloop) {
+		om->allocloop = om->allocloop * 2 + 10;
+		om->loops = MEM_reallocN(om->loops, om->allocloop * sizeof(MLoop));
+	}
+	om->loops[om->totloop].v = in_v;
+	om->loops[om->totloop].e = in_e;
+	
+	return om->totloop++;
+}
+
+static int addPoly(OutputMesh *om, int in_ls, int in_tl)
+{
+	if (om->totpolys == om->allocpolys) {
+		om->allocpolys = om->allocpolys * 2 + 10;
+		om->polys = MEM_reallocN(om->polys, om->allocpolys * sizeof(MPoly));
+	}
+	om->polys[om->totpolys].loopstart = in_ls;
+	om->polys[om->totpolys].totloop = in_tl;
+	om->polys[om->totpolys].mat_nr = 0;
+	om->polys[om->totpolys].flag = 0;
+
+	return om->totpolys++;
 }
 
 /* SEED QUEUE */
@@ -332,6 +358,41 @@ void deleteGradientFlowSystem(GradientFlowSystem *gfsys)
 		MEM_SAFE_FREE(gfsys->ringf);
 		MEM_SAFE_FREE(gfsys);
 	}
+}
+
+static GFEdge *addGFEdge(GradientFlowSystem *gfsys, MVertID in_v1, MVertID in_v2, int in_ef, bool is_on_edge)
+{
+	GFEdge *newe = BLI_memarena_alloc(gfsys->memarena, sizeof(GFEdge));
+
+	newe->v1 = in_v1;
+	newe->v2 = in_v2;
+
+	BLI_linklist_prepend_arena(&newe->elinks, (void*)linkVerts(&gfsys->sys->output_mesh, in_v1, in_v2), gfsys->memarena);
+
+	if (is_on_edge)
+		BLI_linklist_prepend_arena(&gfsys->ringe[in_ef], (void*)newe, gfsys->memarena);
+	else
+		BLI_linklist_prepend_arena(&gfsys->ringf[in_ef], (void*)newe, gfsys->memarena);
+	
+	return newe;
+}
+
+static void insertOnEdge(OutputMesh *om, MVertID in_vid, GFEdge *in_e)
+{
+	MVert *verts = om->verts;
+	LinkNode *it = in_e->elinks;
+	MVertID va, vb;
+	float len = len_squared_v3v3(verts[in_e->v1].co, verts[in_vid].co);
+
+	for (va = in_e->v1, vb = ((QREdgeLink*)it->link)->v; vb != in_e->v2;
+		 va = vb, it = it->next, vb = ((QREdgeLink*)it->link)->v)
+	{
+		if (len_squared_v3v3(verts[in_e->v1].co, verts[vb].co) > len) break;
+	}
+
+	unlinkVerts(om, (QREdgeLink*)it->link);
+	it->link = (void*)linkVerts(om, va, in_vid);
+	BLI_linklist_prepend_arena(&it->next, (void*)linkVerts(om, in_vid, vb), om->memarena);
 }
 
 /* GENERAL PURPOSE FUNCTIONS FOR GETTING AROUND THE FACES */
@@ -551,24 +612,6 @@ static float getSamplingDistanceFunctionOnFace(GradientFlowSystem *gfsys, int in
 	h3 = gfsys->hfunction[im->faces[in_f][2]];
 
 	return uv[0] * h1 + uv[1] * h2 + (1.0f - uv[0] - uv[1]) * h3;
-}
-
-static void insertOnEdge(OutputMesh *om, MVertID in_vid, GFEdge *in_e)
-{
-	MVert *verts = om->verts;
-	LinkNode *it = in_e->elinks;
-	MVertID va, vb;
-	float len = len_squared_v3v3(verts[in_e->v1].co, verts[in_vid].co);
-
-	for (va = in_e->v1, vb = ((QREdgeLink*)it->link)->v; vb != in_e->v2;
-		 va = vb, it = it->next, vb = ((QREdgeLink*)it->link)->v)
-	{
-		if (len_squared_v3v3(verts[in_e->v1].co, verts[vb].co) > len) break;
-	}
-
-	unlinkVerts(om, (QREdgeLink*)it->link);
-	it->link = (void*)linkVerts(om, va, in_vid);
-	BLI_linklist_prepend_arena(&it->next, (void*)linkVerts(om, in_vid, vb), om->memarena);
 }
 
 /* GFLINE STUFF */
@@ -834,7 +877,7 @@ static void generateIntersectionsOnFaces(LaplacianSystem *sys)
 
 static void deleteDegenerateVerts(OutputMesh *om)
 {
-	int i, n, m;
+	int i, m;
 	MVertID a, b;
 	MVert *verts = om->verts;
 
@@ -869,19 +912,6 @@ static void deleteDegenerateVerts(OutputMesh *om)
 	sys->totvert = n;*/
 }
 
-static int addEdge(OutputMesh *om, unsigned int in_v1, unsigned int in_v2)
-{
-	if (om->totedge == om->allocedge) {
-		om->allocedge = om->allocedge * 2 + 10;
-		om->edges = MEM_reallocN(om->edges, om->allocedge * sizeof(MEdge));
-	}
-	om->edges[om->totedge].v1 = in_v1;
-	om->edges[om->totedge].v2 = in_v2;
-	om->edges[om->totedge].flag = ME_EDGEDRAW;
-	
-	return om->totedge++;
-}
-
 static void makeEdges(OutputMesh *om)
 {
 	int i, j;
@@ -897,36 +927,10 @@ static void makeEdges(OutputMesh *om)
 	}
 }
 
-static int addLoop(OutputMesh *om, unsigned int in_v, unsigned int in_e)
-{
-	if (om->totloop == om->allocloop) {
-		om->allocloop = om->allocloop * 2 + 10;
-		om->loops = MEM_reallocN(om->loops, om->allocloop * sizeof(MLoop));
-	}
-	om->loops[om->totloop].v = in_v;
-	om->loops[om->totloop].e = in_e;
-	
-	return om->totloop++;
-}
-
-static int addPoly(OutputMesh *om, int in_ls, int in_tl)
-{
-	if (om->totpolys == om->allocpolys) {
-		om->allocpolys = om->allocpolys * 2 + 10;
-		om->polys = MEM_reallocN(om->polys, om->allocpolys * sizeof(MPoly));
-	}
-	om->polys[om->totpolys].loopstart = in_ls;
-	om->polys[om->totpolys].totloop = in_tl;
-	om->polys[om->totpolys].mat_nr = 0;
-	om->polys[om->totpolys].flag = 0;
-
-	return om->totpolys++;
-}
-
 static void makePolys(OutputMesh *om)
 {
-	int i, j, d, s, dd;
-	MVertID v, n;
+	int i, j, s;
+	MVertID v;
 	QREdgeLink *it, *lit;
 
 	for (i = 0; i < om->totvert; i++) {
@@ -950,7 +954,7 @@ static void makePolys(OutputMesh *om)
 	}
 }
 
-void makeNormals(OutputMesh *om)
+static void makeNormals(OutputMesh *om)
 {
 	int i, tv = om->totvert;
 	float npos[3];
