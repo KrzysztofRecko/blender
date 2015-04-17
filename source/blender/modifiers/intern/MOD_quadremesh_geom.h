@@ -39,7 +39,6 @@
 #include "BKE_cdderivedmesh.h"
 #include "BLI_memarena.h"
 
-typedef int GFEdgeID;
 typedef int MEdgeID;
 typedef int MVertID;
 
@@ -55,6 +54,7 @@ typedef struct QREdgeLinkList {
 	QREdgeLink *link;
 	float vec[3];
 	int num_links;
+	int e;
 } QREdgeLinkList;
 
 typedef enum {
@@ -75,14 +75,14 @@ typedef struct GFEdge {
 
 typedef struct GFLine {
 	MVertID end, seed;
-	int d;
+	int d, olde;
 	float oldco[3];
 
 	float lastchk[3];
 	float lastchklen;
 
 	float qco[10][3];
-	int qf[10];
+	int qf[10], qe[10];
 	float qlen;
 	int num_q;
 } GFLine;
@@ -109,11 +109,11 @@ typedef struct InputMesh {
 } InputMesh;
 
 typedef struct OutputMesh {
+	MemArena *memarena;
+	QREdgeLinkList *vlinks;
+	
 	int totvert, allocvert;
 	MVert *verts;
-	QREdgeLinkList *vlinks;
-	MemArena *memarena;
-
 	int totedge, allocedge;
 	MEdge *edges;
 	int totloop, allocloop;
@@ -131,13 +131,13 @@ typedef struct LaplacianSystem LaplacianSystem;
 
 /* GradientFlowSysten, one gfsys for every gradient field */
 typedef struct GradientFlowSystem {
-	LinkNode **ringf_list;			/* Array list of of GFEdge per original face */
 	MemArena *memarena;
-
+	LinkNode **ringf;               /* Lists of GFEdge per original faces */
+	LinkNode **ringe;               /* Lists of GFEdge per original edges */
 	struct Heap *heap_seeds;
 
 	float *hfunction;
-	float(*gfield)[3];				/* Gradient Field g1 */
+	float(*gfield)[3];				/* Gradient Field */
 
 	LaplacianSystem *sys;
 } GradientFlowSystem;
