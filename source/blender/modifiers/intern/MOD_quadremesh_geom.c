@@ -138,7 +138,7 @@ static bool isectLines(const float v1[3], const float v2[3],
 		return false;
 	}
 	/* test if the two lines are coplanar */
-	else if (d > -0.001f && d < 0.001f) {
+	else if (d > -0.000001f && d < 0.000001f) {
 		float f1, f2;
 		cross_v3_v3v3(cb, c, b);
 		cross_v3_v3v3(ca, c, a);
@@ -158,13 +158,9 @@ static bool isectLines(const float v1[3], const float v2[3],
 
 			return true; /* intersection found */
 		}
-		else {
-			return false;
-		}
 	}
-	else {
-		return false;
-	}
+	
+	return false;
 }
 
 static bool isPointOnSegment(float in_v[3], float in_l1[3], float in_l2[3])
@@ -227,16 +223,16 @@ static QREdgeLink *insertLink(OutputMesh *om, MVertID in_a, MVertID in_b)
 	//if (dot_v3v3(vno, vno) < FLT_EPSILON) return l;
 
 	if (om->vlinks[in_a].num_links == 0) {
-		om->vlinks[in_a].link = l;
-		l->next = l;
-		l->prev = l;
-		l->ang = 0.0f;
-
 		sub_v3_v3v3(om->vlinks[in_a].vec, om->verts[in_b].co, om->verts[in_a].co);
 		normal_short_to_float_v3(vno, om->verts[in_a].no);
 		project_v3_v3v3(vec, om->vlinks[in_a].vec, vno);
 		sub_v3_v3(om->vlinks[in_a].vec, vec);
 		normalize_v3(om->vlinks[in_a].vec);
+
+		om->vlinks[in_a].link = l;
+		l->next = l;
+		l->prev = l;
+		l->ang = 0.0f;
 	}
 	else {
 		normal_short_to_float_v3(vno, om->verts[in_a].no);
@@ -266,7 +262,8 @@ static QREdgeLink *linkVerts(OutputMesh *om, MVertID in_v1, MVertID in_v2)
 {
 	QREdgeLink *l1, *l2;
 
-	if (l1 = getLink(om, in_v1, in_v2))
+	l1 = getLink(om, in_v1, in_v2);
+	if (l1)
 		return l1;
 
 	l1 = insertLink(om, in_v1, in_v2);
@@ -464,6 +461,8 @@ void deleteGradientFlowSystem(GradientFlowSystem *gfsys)
 	}
 }
 
+/* GFEDGE ROUTINES */
+
 static void appendOnGFEdge(GradientFlowSystem *gfsys, GFEdge *in_e, MVertID in_v, QREdgeLink *in_elink, float in_dist)
 {
 	GFEdgeLink *newl = BLI_memarena_alloc(gfsys->memarena, sizeof(GFEdgeLink));
@@ -548,9 +547,8 @@ static void insertOnGFEdge(GradientFlowSystem *gfsys, GFEdge *in_e, MVertID in_v
 		else if (tmp < in_e->v1->dist)
 			prependOnGFEdge(gfsys, in_e, in_vid, getLink(om, in_vid, in_e->v1->v), tmp);
 		else {
-			it = in_e->v1;
-			while (it->next && it->next->dist < tmp)
-				it = it->next;
+			for (it = in_e->v1; it->next && it->next->dist < tmp; it = it->next);
+
 			insertAfterOnGFEdge(gfsys, in_e, it, in_vid, tmp);
 		}
 	}
@@ -672,7 +670,7 @@ static bool intersectSegmentWithOthersOnFace(GradientFlowSystem *gfsys, float in
 /**
  * 0 - intersection found
  * 1 - intersection not found
- * 2 - wrong direction for this face 
+ * 2 - wrong direction for this face
  */
 static int queryDirection(GradientFlowSystem *gfsys, float in_co[3], int in_f, float in_dir[3], float dist, float maxdist, bool make_seed)
 {
@@ -1041,39 +1039,57 @@ static void generateIntersectionsOnFaces(LaplacianSystem *sys)
 
 static void deleteDegenerateVerts(OutputMesh *om)
 {
-	int i, m;
-	MVertID a, b;
-	MVert *verts = om->verts;
+	int i, m, n;
+	MVertID a, b, *vertmap;
+	MVert *newverts;
+	QREdgeLinkList *newlinks;
+	QREdgeLink *it;
 
-	for (i = 0; i < om->totvert; i++) {
+	vertmap = MEM_mallocN(sizeof(MVertID) * om->totvert, __func__);
+
+	for (i = 0, n = 0; i < om->totvert; i++) {
 		m = om->vlinks[i].num_links;
 
 		if (m == 0) {
-			verts[i].flag = ME_HIDE;
+			vertmap[i] = -1;
 		}
 		else if (m == 1) {
-			verts[i].flag = ME_HIDE;
+			vertmap[i] = -1;
 			unlinkVerts(om, om->vlinks[i].link);
 		}
 		else if (m == 2) {
-			verts[i].flag = ME_HIDE;
+			vertmap[i] = -1;
 			a = om->vlinks[i].link->v;
 			b = om->vlinks[i].link->next->v;
 			unlinkVerts(om, om->vlinks[i].link);
 			unlinkVerts(om, om->vlinks[i].link);
 			linkVerts(om, a, b);
 		}
+		else vertmap[i] = n++;
 	}
 
-	/*for (i = 0, n = 0; i < sys->totvert; i++) {
-		if (verts[i].e[0] == -2) continue;
+	newverts = MEM_mallocN(sizeof(MVert) * n, "Newverts");
+	newlinks = MEM_callocN(sizeof(QREdgeLinkList) * n, "Newlinks");
 
-		copy_v3_v3(verts[n].co, verts[i].co);
-		copy_v4_v4_int(verts[n].e, verts[i].e);
+	for (i = 0, n = 0; i < om->totvert; i++) {
+		if (vertmap[i] == -1) continue;
+
+		memcpy(&newverts[n], &om->verts[i], sizeof(MVert));
+		memcpy(&newlinks[n], &om->vlinks[i], sizeof(QREdgeLink));
+
+		it = newlinks[n].link;
+		do {
+			it->v = vertmap[it->v];
+			it = it->next;
+		} while (it != newlinks[n].link);
 		n++;
 	}
 
-	sys->totvert = n;*/
+	MEM_SAFE_FREE(om->verts);
+	MEM_SAFE_FREE(om->vlinks);
+	om->totvert = n;
+	om->verts = newverts;
+	om->vlinks = newlinks;
 }
 
 static void makeEdges(OutputMesh *om)
