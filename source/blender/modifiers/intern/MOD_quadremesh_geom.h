@@ -54,7 +54,6 @@ typedef struct QREdgeLinkList {
 	QREdgeLink *link;
 	float vec[3];
 	int num_links;
-	int e;
 } QREdgeLinkList;
 
 typedef enum {
@@ -68,9 +67,16 @@ typedef struct GFSeed {
 	GFSeedType type;
 } GFSeed;
 
+typedef struct GFEdgeLink {
+	struct GFEdgeLink *next;
+	MVertID v;
+	QREdgeLink *elink;
+	float dist;
+} GFEdgeLink;
+
 typedef struct GFEdge {
-	LinkNode *elinks;
-	MVertID v1, v2;	    /* End vert indices */
+	GFEdgeLink *v1, *v2;
+	float dir[3], orig[3];
 } GFEdge;
 
 typedef struct GFLine {
@@ -133,7 +139,7 @@ typedef struct LaplacianSystem LaplacianSystem;
 typedef struct GradientFlowSystem {
 	MemArena *memarena;
 	LinkNode **ringf;               /* Lists of GFEdge per original faces */
-	LinkNode **ringe;               /* Lists of GFEdge per original edges */
+	GFEdge *ringe;                  /* GFEdges per original edges */
 	struct Heap *heap_seeds;
 
 	float *hfunction;
