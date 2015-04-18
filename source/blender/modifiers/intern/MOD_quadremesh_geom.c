@@ -365,7 +365,7 @@ static void addSeedToQueue(Heap *aheap, float in_co[3], bool is_vertex, int in_v
 	GFSeed *seed = MEM_mallocN(sizeof(GFSeed), __func__);
 	copy_v3_v3(seed->co, in_co);
 	seed->val = in_val;
-	seed->type = is_vertex ? eSeedVert : eSeedFace;
+	seed->type = is_vertex ? eVert : eFace;
 
 	BLI_heap_insert(aheap, weight, seed);
 }
@@ -434,7 +434,7 @@ GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys, float *mhfunctio
 	gfsys->memarena = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Gradient FLow System");
 	gfsys->ringf = MEM_callocN(sizeof(LinkNode *) * sys->input_mesh.num_faces, "GFListFaces");
 	gfsys->ringe = MEM_callocN(sizeof(GFEdge) * sys->input_mesh.num_edges, "GFListEdges");
-	gfsys->heap_seeds = BLI_heap_new();
+	gfsys->seeds = BLI_heap_new();
 
 	gfsys->sys = sys;
 	gfsys->hfunction = mhfunction;
@@ -443,7 +443,7 @@ GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys, float *mhfunctio
 	lverts = findFeaturesOnMesh(&sys->input_mesh, sizeverts);
 	
 	for (i = 0; i < sizeverts[0]; i++)
-		addSeedToQueue(gfsys->heap_seeds, sys->input_mesh.co[lverts[i]], true, lverts[i], 0.0f);
+		addSeedToQueue(gfsys->seeds, sys->input_mesh.co[lverts[i]], true, lverts[i], 0.0f);
 	
 	MEM_SAFE_FREE(lverts);
 	
@@ -454,7 +454,7 @@ void deleteGradientFlowSystem(GradientFlowSystem *gfsys)
 {
 	if (gfsys) {
 		BLI_memarena_free(gfsys->memarena);
-		BLI_heap_free(gfsys->heap_seeds, MEM_freeN);
+		BLI_heap_free(gfsys->seeds, MEM_freeN);
 		MEM_SAFE_FREE(gfsys->ringe);
 		MEM_SAFE_FREE(gfsys->ringf);
 		MEM_SAFE_FREE(gfsys);
@@ -739,7 +739,7 @@ static int queryDirection(GradientFlowSystem *gfsys, float in_co[3], int in_f, f
 			addEdgeGFSystem(gfsys, vf1, vf2, 0);
 #endif
 
-			addSeedToQueue(gfsys->heap_seeds, newco2, false, in_f, -maxdist);
+			addSeedToQueue(gfsys->seeds, newco2, false, in_f, -maxdist);
 			return 1;
 		}
 
@@ -903,7 +903,7 @@ static void computeGFLine(GradientFlowSystem *gfsys, GFSeed *in_seed)
 	initGFLine(gfsys, &line, in_seed);
 
 	do {
-		if (in_seed->type == eSeedVert) {
+		if (in_seed->type == eVert) {
 			is_vertex = true;
 			v = in_seed->val;
 			f = 0;
@@ -971,8 +971,8 @@ static void computeFlowLines(LaplacianSystem *sys) {
 	sys->gfsys1 = newGradientFlowSystem(sys, sys->h1, sys->gf1);
 	sys->gfsys2 = newGradientFlowSystem(sys, sys->h2, sys->gf2);
 
-	while (!BLI_heap_is_empty(sys->gfsys1->heap_seeds)) {
-		seed = getTopSeedFromQueue(sys->gfsys1->heap_seeds);
+	while (!BLI_heap_is_empty(sys->gfsys1->seeds)) {
+		seed = getTopSeedFromQueue(sys->gfsys1->seeds);
 		if (++comp < QR_LINELIMIT)
 			computeGFLine(sys->gfsys1, seed);
 		MEM_SAFE_FREE(seed);
@@ -980,8 +980,8 @@ static void computeFlowLines(LaplacianSystem *sys) {
 
 	comp = 0;
 	
-	while (!BLI_heap_is_empty(sys->gfsys2->heap_seeds)) {
-		seed = getTopSeedFromQueue(sys->gfsys2->heap_seeds);
+	while (!BLI_heap_is_empty(sys->gfsys2->seeds)) {
+		seed = getTopSeedFromQueue(sys->gfsys2->seeds);
 		if (++comp < QR_LINELIMIT)
 			computeGFLine(sys->gfsys2, seed);
 		MEM_SAFE_FREE(seed);

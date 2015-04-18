@@ -39,6 +39,11 @@
 #include "BKE_cdderivedmesh.h"
 #include "BLI_memarena.h"
 
+#define QR_SAMPLING_RATE 0.03f
+#define QR_MINDIST 0.04f
+#define QR_SEEDPROB 0.75f
+#define QR_SEEDDIST 0.08f
+
 typedef int MEdgeID;
 typedef int MVertID;
 
@@ -57,14 +62,15 @@ typedef struct QREdgeLinkList {
 } QREdgeLinkList;
 
 typedef enum {
-	eSeedVert,
-	eSeedFace
-} GFSeedType;
+	eVert,
+	eEdge,
+	eFace
+} GFPointType;
 
 typedef struct GFSeed {
 	float co[3];
 	int val;
-	GFSeedType type;
+	GFPointType type;
 } GFSeed;
 
 typedef struct GFEdgeLink {
@@ -128,24 +134,17 @@ typedef struct OutputMesh {
 	MPoly *polys;
 } OutputMesh;
 
-typedef struct LaplacianSystem LaplacianSystem;
-
-#define QR_SAMPLING_RATE 0.03f
-#define QR_MINDIST 0.04f
-#define QR_SEEDPROB 0.75f
-#define QR_SEEDDIST 0.08f
-
 /* GradientFlowSysten, one gfsys for every gradient field */
 typedef struct GradientFlowSystem {
 	MemArena *memarena;
 	LinkNode **ringf;               /* Lists of GFEdge per original faces */
 	GFEdge *ringe;                  /* GFEdges per original edges */
-	struct Heap *heap_seeds;
+	struct Heap *seeds;
 
 	float *hfunction;
 	float(*gfield)[3];				/* Gradient Field */
 
-	LaplacianSystem *sys;
+	struct LaplacianSystem *sys;
 } GradientFlowSystem;
 
 typedef struct LaplacianSystem {
@@ -156,15 +155,14 @@ typedef struct LaplacianSystem {
 	struct QuadRemeshModifierData *qmd;
 	InputMesh input_mesh;
 	OutputMesh output_mesh;
+	GradientFlowSystem *gfsys1, *gfsys2;
 	
 	float *U_field;					/* Initial scalar field*/
-
 	float(*gf1)[3], (*gf2)[3];		/* Gradient Fields g1 and g2 per face*/
 	float *h1, *h2;					/* Sampling distance functions h1 and h2 */
 	float h;
 
 	NLContext *context;				/* System for solve general implicit rotations */
-	GradientFlowSystem *gfsys1, *gfsys2;
 } LaplacianSystem;
 
 GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys, float *mhfunction, float(*mgfield)[3]);
