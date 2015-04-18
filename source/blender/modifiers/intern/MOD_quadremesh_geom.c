@@ -390,6 +390,8 @@ static void insertOnEdge(OutputMesh *om, MVertID in_vid, GFEdge *in_e)
 		if (len_squared_v3v3(verts[in_e->v1].co, verts[vb].co) > len) break;
 	}
 
+	if (in_vid == va || in_vid == vb) return;
+
 	unlinkVerts(om, (QREdgeLink*)it->link);
 	it->link = (void*)linkVerts(om, va, in_vid);
 	BLI_linklist_prepend_arena(&it->next, (void*)linkVerts(om, in_vid, vb), om->memarena);
@@ -690,8 +692,8 @@ static bool addPointToLine(GradientFlowSystem *gfsys, GFLine *line, int in_f, in
 		add_v3_v3(newchk, line->oldco);
 
 		if (!checkPoint(gfsys, line->lastchk, newchk, in_f, maxdist, seeddist)) {
-			if (line->num_q == 0) addSegmentToLine(gfsys, line, in_f, -1, line->lastchk);
-			else addSegmentToLine(gfsys, line, line->qf[0], -1, line->lastchk);
+			if (line->num_q == 0) addSegmentToLine(gfsys, line, in_f, line->olde == in_e ? in_e : -1, line->lastchk);
+			else addSegmentToLine(gfsys, line, line->qf[0], line->olde == line->qe[0] ? line->qe[0] : -1, line->lastchk);
 			
 			line->num_q = 0;
 			return false;
@@ -831,7 +833,6 @@ static void mergeVertsOnEdges(LaplacianSystem *sys)
 
 			for (it = gfsysit->ringe[e]; it; it = it->next) {
 				edge = (GFEdge*)it->link;
-				if (v == edge->v1 || v == edge->v2) continue;
 
 				lambda = closest_to_line_v3(r, sys->output_mesh.verts[v].co,
 											sys->output_mesh.verts[edge->v1].co,
@@ -843,6 +844,61 @@ static void mergeVertsOnEdges(LaplacianSystem *sys)
 		if (gfsysit == sys->gfsys2) return;
 		gfsysit = sys->gfsys2;
 	} while (1);
+}
+
+static bool isectLines(const float v1[3], const float v2[3],
+                       const float v3[3], const float v4[3],
+                       float vi[3], float *r_lambda)
+{
+	float a[3], b[3], c[3], ab[3], cb[3], ca[3], dir1[3], dir2[3];
+	float d, div;
+
+	sub_v3_v3v3(c, v3, v1);
+	sub_v3_v3v3(a, v2, v1);
+	sub_v3_v3v3(b, v4, v3);
+
+	normalize_v3_v3(dir1, a);
+	normalize_v3_v3(dir2, b);
+	d = dot_v3v3(dir1, dir2);
+	if (d == 1.0f || d == -1.0f) {
+		/* colinear */
+		return false;
+	}
+
+	cross_v3_v3v3(ab, a, b);
+	d = dot_v3v3(c, ab);
+	div = dot_v3v3(ab, ab);
+
+	/* test zero length line */
+	if (UNLIKELY(div == 0.0f)) {
+		return false;
+	}
+	/* test if the two lines are coplanar */
+	else if (d > -0.001f && d < 0.001f) {
+		float f1, f2;
+		cross_v3_v3v3(cb, c, b);
+		cross_v3_v3v3(ca, c, a);
+
+		f1 = dot_v3v3(cb, ab) / div;
+		f2 = dot_v3v3(ca, ab) / div;
+
+		if (f1 >= 0.0f && f1 <= 1.0f &&
+		    f2 >= 0.0f && f2 <= 1.0f)
+		{
+			mul_v3_fl(a, f1);
+			add_v3_v3v3(vi, v1, a);
+
+			if (r_lambda) *r_lambda = f1;
+
+			return true; /* intersection found */
+		}
+		else {
+			return false;
+		}
+	}
+	else {
+		return false;
+	}
 }
 
 static void generateIntersectionsOnFaces(LaplacianSystem *sys)
@@ -860,11 +916,11 @@ static void generateIntersectionsOnFaces(LaplacianSystem *sys)
 			for (iter2 = sys->gfsys2->ringf[f]; iter2; iter2 = iter2->next) {
 				e2 = (GFEdge*)iter2->link;
 
-				if (isect_line_line_strict_v3(sys->output_mesh.verts[e1->v1].co,
-					                          sys->output_mesh.verts[e1->v2].co,
-					                          sys->output_mesh.verts[e2->v1].co,
-					                          sys->output_mesh.verts[e2->v2].co,
-					                          isection, &lambda))
+				if (isectLines(sys->output_mesh.verts[e1->v1].co,
+					           sys->output_mesh.verts[e1->v2].co,
+					           sys->output_mesh.verts[e2->v1].co,
+					           sys->output_mesh.verts[e2->v2].co,
+					           isection, &lambda))
 				{
 					newv = addVert(&sys->output_mesh, isection, sys->input_mesh.no[f], -1);
 					insertOnEdge(&sys->output_mesh, newv, e1);
@@ -991,9 +1047,9 @@ void generateMesh(LaplacianSystem *sys)
 	computeFlowLines(sys);
 	mergeVertsOnEdges(sys);
 	generateIntersectionsOnFaces(sys);
-	//deleteDegenerateVerts(om);
+	deleteDegenerateVerts(om);
 	makeEdges(om);
-	makePolys(om);
+	//makePolys(om);
 	//makeNormals(om);
 }
 
@@ -1019,7 +1075,7 @@ DerivedMesh *getResultMesh(LaplacianSystem *sys)
 	polys = ret->getPolyArray(ret);
 	memcpy(polys, om->polys, om->totpolys * sizeof(MPoly));
 
-	CDDM_recalc_tessellation(ret);
+	//CDDM_recalc_tessellation(ret);
 	//CDDM_calc_edges_tessface(ret);
 	//ret->dirty |= DM_DIRTY_NORMALS;
 
