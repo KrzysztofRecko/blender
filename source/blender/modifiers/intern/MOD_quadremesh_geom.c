@@ -46,7 +46,6 @@
 
 
 #if 0 /* UNUSED ROUTINES */
-
 bool nextPointFromVertex(float r_co[3], int *r_face, int *r_edge, GradientFlowSystem *gfsys, int in_v)
 {
 	int i, f, vf1, vf2;
@@ -122,13 +121,13 @@ static bool isectLines(const float v1[3], const float v2[3],
 	sub_v3_v3v3(a, v2, v1);
 	sub_v3_v3v3(b, v4, v3);
 
-	normalize_v3_v3(dir1, a);
-	normalize_v3_v3(dir2, b);
-	d = dot_v3v3(dir1, dir2);
-	if (d == 1.0f || d == -1.0f) {
-		/* colinear */
-		return false;
-	}
+	//normalize_v3_v3(dir1, a);
+	//normalize_v3_v3(dir2, b);
+	//d = dot_v3v3(dir1, dir2);
+	//if (d == 1.0f || d == -1.0f) {
+	//	/* colinear */
+	//	return false;
+	//}
 
 	cross_v3_v3v3(ab, a, b);
 	d = dot_v3v3(c, ab);
@@ -176,6 +175,27 @@ static bool isPointOnSegment(float in_v[3], float in_l1[3], float in_l2[3])
 	return dot_v3v3(a, b) >= 0.0f;
 }
 
+float angleTwoVectorsAxis(const float v1[3], const float v2[3], const float axis[3])
+{
+	float v2_proj[3], tproj[3];
+	float angle;
+
+	/* project the vectors onto the axis */
+	project_v3_v3v3(tproj, v2, axis);
+	sub_v3_v3v3(v2_proj, v2, tproj);
+	normalize_v3(v2_proj);
+
+	angle = angle_normalized_v3v3(v1, v2_proj);
+
+	/* calculate the sign (reuse 'tproj') */
+	cross_v3_v3v3(tproj, v2_proj, v1);
+	if (dot_v3v3(tproj, axis) < 0.0f) {
+		angle = ((float)(M_PI * 2.0)) - angle;
+	}
+
+	return angle;
+}
+
 /* QREDGELINK STUFF */
 
 static QREdgeLink *getLink(OutputMesh *om, MVertID in_v1, MVertID in_v2)
@@ -197,7 +217,7 @@ static QREdgeLink *getLink(OutputMesh *om, MVertID in_v1, MVertID in_v2)
 
 static QREdgeLink *insertLink(OutputMesh *om, MVertID in_a, MVertID in_b)
 {
-	float vno[3];
+	float vno[3], vec[3];
 	QREdgeLink *it, *l = BLI_memarena_alloc(om->memarena, sizeof(QREdgeLink));
 
 	l->e = -1;
@@ -211,19 +231,26 @@ static QREdgeLink *insertLink(OutputMesh *om, MVertID in_a, MVertID in_b)
 		l->next = l;
 		l->prev = l;
 		l->ang = 0.0f;
-		copy_v3_v3(om->vlinks[in_a].vec, om->verts[in_b].co);
+
+		sub_v3_v3v3(om->vlinks[in_a].vec, om->verts[in_b].co, om->verts[in_a].co);
+		normal_short_to_float_v3(vno, om->verts[in_a].no);
+		project_v3_v3v3(vec, om->vlinks[in_a].vec, vno);
+		sub_v3_v3(om->vlinks[in_a].vec, vec);
+		normalize_v3(om->vlinks[in_a].vec);
 	}
 	else {
 		normal_short_to_float_v3(vno, om->verts[in_a].no);
-		l->ang = angle_signed_on_axis_v3v3v3_v3(om->vlinks[in_a].vec, om->verts[in_a].co, om->verts[in_b].co, vno);
+		sub_v3_v3v3(vec, om->verts[in_b].co, om->verts[in_a].co);
+		l->ang = angleTwoVectorsAxis(om->vlinks[in_a].vec, vec, vno);
 
 		if (l->ang <= om->vlinks[in_a].link->ang) {
 			it = om->vlinks[in_a].link->prev;
 			om->vlinks[in_a].link = l;
 		}
-		else
+		else {
 			for (it = om->vlinks[in_a].link; it->next != om->vlinks[in_a].link; it = it->next)
 				if (it->next->ang > l->ang) break;
+		}
 
 		it->next->prev = l;
 		l->next = it->next;
@@ -404,32 +431,23 @@ static int *findFeaturesOnMesh(InputMesh *im, int size[2])
 
 GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys, float *mhfunction, float(*mgfield)[3])
 {
-	int ve[2], i;
-	int *lverts, sizeverts[2];
+	int i, *lverts, sizeverts[2];
 	GradientFlowSystem *gfsys = MEM_callocN(sizeof(GradientFlowSystem), "GradientFlowSystem");
 	
 	gfsys->memarena = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Gradient FLow System");
-
-	lverts = NULL;
-
-	//estimateNumberGFVerticesEdges(ve, sys, sys->h);
-	
-	gfsys->sys = sys;
-	//gfsys->mesh = newGradientFlowMesh(ve[0], ve[1]);
-	
 	gfsys->ringf = MEM_callocN(sizeof(LinkNode *) * sys->input_mesh.num_faces, "GFListFaces");
 	gfsys->ringe = MEM_callocN(sizeof(GFEdge) * sys->input_mesh.num_edges, "GFListEdges");
-	
 	gfsys->heap_seeds = BLI_heap_new();
-	
-	lverts = findFeaturesOnMesh(&sys->input_mesh, sizeverts);
-	
-	for (i = 0; i < sizeverts[0]; i++) {
-		addSeedToQueue(gfsys->heap_seeds, sys->input_mesh.co[lverts[i]], true, lverts[i], 0.0f);
-	}
-	
+
+	gfsys->sys = sys;
 	gfsys->hfunction = mhfunction;
 	gfsys->gfield = mgfield;
+
+	lverts = findFeaturesOnMesh(&sys->input_mesh, sizeverts);
+	
+	for (i = 0; i < sizeverts[0]; i++)
+		addSeedToQueue(gfsys->heap_seeds, sys->input_mesh.co[lverts[i]], true, lverts[i], 0.0f);
+	
 	MEM_SAFE_FREE(lverts);
 	
 	return gfsys;
