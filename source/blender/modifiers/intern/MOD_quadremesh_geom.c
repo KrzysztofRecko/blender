@@ -114,7 +114,7 @@ static bool isectLines(const float v1[3], const float v2[3],
                        const float v3[3], const float v4[3],
                        float vi[3], float *r_lambda)
 {
-	float a[3], b[3], c[3], ab[3], cb[3], ca[3], dir1[3], dir2[3];
+	float a[3], b[3], c[3], ab[3], cb[3], ca[3];//, dir1[3], dir2[3];
 	float d, div;
 
 	sub_v3_v3v3(c, v3, v1);
@@ -219,8 +219,6 @@ static QREdgeLink *insertLink(OutputMesh *om, MVertID in_a, MVertID in_b)
 	l->e = -1;
 	l->v = in_b;
 	l->poly_on_right = false;
-	//sub_v3_v3v3(vno, om->verts[in_a].co, om->verts[in_b].co);
-	//if (dot_v3v3(vno, vno) < FLT_EPSILON) return l;
 
 	if (om->vlinks[in_a].num_links == 0) {
 		sub_v3_v3v3(om->vlinks[in_a].vec, om->verts[in_b].co, om->verts[in_a].co);
@@ -244,8 +242,10 @@ static QREdgeLink *insertLink(OutputMesh *om, MVertID in_a, MVertID in_b)
 			om->vlinks[in_a].link = l;
 		}
 		else {
-			for (it = om->vlinks[in_a].link; it->next != om->vlinks[in_a].link; it = it->next)
-				if (it->next->ang > l->ang) break;
+			for (it = om->vlinks[in_a].link; it->next != om->vlinks[in_a].link; it = it->next) {
+				if (it->next->ang > l->ang)
+					break;
+			}
 		}
 
 		it->next->prev = l;
@@ -1077,23 +1077,6 @@ static void computeFlowLines(LaplacianSystem *sys) {
 
 /* MESH GENERATION */
 
-static void mergeVertsOnEdges(LaplacianSystem *sys)
-{
-	int v, e;
-	float lambda, r[3];
-	GFEdgeLink *it;
-	GFEdge *edge;
-
-	for (e = 0; e < sys->input_mesh.num_edges; e++) {
-		/*for (it = sys->gfsys1->ringe[e].v1; it; it = it->next) {
-			insertOnGFEdge(sys->gfsys2, &sys->gfsys2->ringe[e], it->v);
-		}*/
-		for (it = sys->gfsys2->ringe[e].v1; it; it = it->next) {
-			insertOnGFEdge(sys->gfsys1, &sys->gfsys1->ringe[e], it->v);
-		}
-	}
-}
-
 static void generateIntersectionsOnFaces(LaplacianSystem *sys)
 {
 	int f;
@@ -1257,7 +1240,6 @@ void generateMesh(LaplacianSystem *sys)
 	sys->output_mesh.memarena = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Output Mesh");
 
 	computeFlowLines(sys);
-	mergeVertsOnEdges(sys);
 	generateIntersectionsOnFaces(sys);
 	deleteDegenerateVerts(om);
 	makeEdges(om);
