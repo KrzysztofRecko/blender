@@ -71,6 +71,7 @@ typedef struct GFEdgeLink {
 typedef struct GFEdge {
 	GFEdgeLink *v1, *v2;
 	float dir[3], orig[3];
+	int num_links;
 } GFEdge;
 
 typedef enum {
@@ -122,6 +123,8 @@ typedef struct InputMesh {
 typedef struct OutputMesh {
 	MemArena *memarena;
 	QREdgeLinkList *vlinks;
+	MVertID *vonvs;
+	GFEdge *ringe;                  /* GFEdges per original edges */
 	
 	int totvert, allocvert;
 	MVert *verts;
@@ -137,7 +140,6 @@ typedef struct OutputMesh {
 typedef struct GradientFlowSystem {
 	MemArena *memarena;
 	LinkNode **ringf;               /* Lists of GFEdge per original faces */
-	GFEdge *ringe;                  /* GFEdges per original edges */
 	struct Heap *seeds;
 
 	float *hfunction;
