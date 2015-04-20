@@ -1047,25 +1047,25 @@ static void deleteDegenerateVerts(OutputMesh *om)
 
 	vertmap = MEM_mallocN(sizeof(MVertID) * om->totvert, __func__);
 
-	for (i = 0, n = 0; i < om->totvert; i++) {
+	for (i = 0; i < om->totvert; i++) {
 		m = om->vlinks[i].num_links;
 
-		if (m == 0) {
-			vertmap[i] = -1;
-		}
-		else if (m == 1) {
-			vertmap[i] = -1;
+		if (m == 1)
 			unlinkVerts(om, om->vlinks[i].link);
-		}
 		else if (m == 2) {
-			vertmap[i] = -1;
 			a = om->vlinks[i].link->v;
 			b = om->vlinks[i].link->next->v;
 			unlinkVerts(om, om->vlinks[i].link);
 			unlinkVerts(om, om->vlinks[i].link);
 			linkVerts(om, a, b);
 		}
-		else vertmap[i] = n++;
+	}
+
+	for (i = 0, n = 0; i < om->totvert; i++) {
+		if (om->vlinks[i].num_links == 0)
+			vertmap[i] = -1;
+		else
+			vertmap[i] = n++;
 	}
 
 	newverts = MEM_mallocN(sizeof(MVert) * n, "Newverts");
@@ -1087,6 +1087,7 @@ static void deleteDegenerateVerts(OutputMesh *om)
 
 	MEM_SAFE_FREE(om->verts);
 	MEM_SAFE_FREE(om->vlinks);
+	MEM_SAFE_FREE(vertmap);
 	om->totvert = n;
 	om->verts = newverts;
 	om->vlinks = newlinks;
