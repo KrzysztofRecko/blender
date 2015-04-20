@@ -61,18 +61,6 @@ typedef struct QREdgeLinkList {
 	int num_links;
 } QREdgeLinkList;
 
-typedef enum {
-	eVert,
-	eEdge,
-	eFace
-} GFPointType;
-
-typedef struct GFSeed {
-	float co[3];
-	int val;
-	GFPointType type;
-} GFSeed;
-
 typedef struct GFEdgeLink {
 	struct GFEdgeLink *next;
 	MVertID v;
@@ -85,18 +73,29 @@ typedef struct GFEdge {
 	float dir[3], orig[3];
 } GFEdge;
 
-typedef struct GFLine {
-	MVertID end, seed;
-	int d, olde;
-	float oldco[3];
+typedef enum {
+	eVert,
+	eEdge,
+	eFace
+} GFPointType;
 
-	float lastchk[3];
+typedef struct GFPoint {
+	float co[3];
+	int f, v, e;
+	MVertID id;
+	GFPointType type;
+} GFPoint;
+
+typedef struct GFLine {
+	GFPoint end, seed, lastchkp;
+	GFPoint *oldp;
+	int d;
+
 	float lastchklen;
 
-	float qco[10][3];
-	int qf[10], qe[10];
 	float qlen;
 	int num_q;
+	GFPoint q[10];
 } GFLine;
 
 typedef struct InputMesh {
