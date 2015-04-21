@@ -321,6 +321,7 @@ static MVertID addVert(OutputMesh *om, float in_co[3], float in_no[3])
 		om->vlinks = MEM_reallocN(om->vlinks, sizeof(QREdgeLinkList) * om->allocvert);
 	}
 
+	om->verts[om->totvert].flag = 0;
 	copy_v3_v3(om->verts[om->totvert].co, in_co);
 	if (in_no)
 		normal_float_to_short_v3(om->verts[om->totvert].no, in_no);
