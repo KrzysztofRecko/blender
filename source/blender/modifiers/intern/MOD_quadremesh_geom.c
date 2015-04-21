@@ -632,12 +632,11 @@ static int getOtherFaceAdjacentToEdge(InputMesh *im, int in_f, int in_e)
  *         2 -           -||-           2nd vertex of result edge
  *         3 - other error (eg. input outside of triangle)
  */
-static int nextPoint(float r_co[3], int *r_edge, GradientFlowSystem *gfsys, int in_f, float in_co[3], float in_dir[3])
+static int nextPoint(float r_co[3], int *r_edge, InputMesh *im, int in_f, float in_co[3], float in_dir[3])
 {
 	int i, pick = -1, v = -1;
 	bool is_on_vertex = false;
 	float a[3][3], b[3][3], c[2][3], co2[3], dummy[3];
-	InputMesh *im = &gfsys->sys->input_mesh;
 
 	/* check if direction is coplanar to triangle */
 	/* check if point is inside triangle */
@@ -722,7 +721,7 @@ static int queryDirection(GradientFlowSystem *gfsys, float in_co[3], int in_f, f
 			return 2;
 		if (dot_v3v3(im->no[oldf], im->no[in_f]) < 0.0f) mul_v3_fl(dir, -1.0f);
 
-		if (nextPoint(newco, &e, gfsys, in_f, oldco, dir)) return 2;
+		if (nextPoint(newco, &e, im, in_f, oldco, dir)) return 2;
 		oldf = in_f;
 
 		sub_v3_v3v3(c, newco, oldco);
@@ -1030,7 +1029,7 @@ static void computeGFLine(GradientFlowSystem *gfsys, GFPoint *in_seed)
 					p.f = im->ringf_map[p.v].indices[i];
 
 					mul_v3_v3fl(gf, gfsys->gfield[p.f], dir);
-					if (!nextPoint(p.co, &p.e, gfsys, p.f, line.oldp->co, gf)) {
+					if (!nextPoint(p.co, &p.e, im, p.f, line.oldp->co, gf)) {
 						p.type = eEdge;
 						break;
 					}
@@ -1039,7 +1038,7 @@ static void computeGFLine(GradientFlowSystem *gfsys, GFPoint *in_seed)
 			}
 			else {
 				mul_v3_v3fl(gf, gfsys->gfield[p.f], dir);
-				r = nextPoint(p.co, &newe, gfsys, p.f, line.oldp->co, gf);
+				r = nextPoint(p.co, &newe, im, p.f, line.oldp->co, gf);
 
 				if (r == 1) {
 					p.type = eVert;
