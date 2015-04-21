@@ -412,7 +412,7 @@ static void uniformRandomPointWithinFace(float r[3], LaplacianSystem *sys, int i
 }
 #endif // 0
 
-static LaplacianSystem* initSystem(QuadRemeshModifierData *qmd, Object *ob, DerivedMesh *dm)
+static LaplacianSystem *initSystem(QuadRemeshModifierData *qmd, Object *ob, DerivedMesh *dm)
 {
 	int i, defgrp_index;
 	float wpaint;
@@ -663,6 +663,7 @@ ModifierTypeInfo modifierType_QuadRemesh = {
 	/* type */              eModifierTypeType_Nonconstructive,
 	/* flags */             eModifierTypeFlag_AcceptsMesh |
 							eModifierTypeFlag_AcceptsCVs,
+
 	/* copyData */          copyData,
 	/* deformVerts */       NULL,
 	/* deformMatrices */    NULL,
