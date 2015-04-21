@@ -202,11 +202,11 @@ static void getPerpendicularToNormal(float r[3], float in_a[3], float in_b[3], f
 	sub_v3_v3(r, proj);
 }
 
-/* QREDGELINK STUFF */
+/* QRDiskCycle STUFF */
 
-static QREdgeLink *getLink(OutputMesh *om, MVertID in_v1, MVertID in_v2)
+static QRDiskLink *getLink(OutputMesh *om, MVertID in_v1, MVertID in_v2)
 {
-	QREdgeLink *it;
+	QRDiskLink *it;
 
 	it = om->vlinks[in_v1].link;
 	while(it) {
@@ -221,12 +221,12 @@ static QREdgeLink *getLink(OutputMesh *om, MVertID in_v1, MVertID in_v2)
 	return NULL;
 }
 
-static QREdgeLink *insertLink(OutputMesh *om, MVertID in_a, MVertID in_b)
+static QRDiskLink *insertLink(OutputMesh *om, MVertID in_a, MVertID in_b)
 {
 	float vec[3], no[3];
-	QREdgeLink *it, *l;
+	QRDiskLink *it, *l;
 
-	l = BLI_memarena_alloc(om->memarena, sizeof(QREdgeLink));
+	l = BLI_memarena_alloc(om->memarena, sizeof(QRDiskLink));
 
 	l->e = -1;
 	l->v = in_b;
@@ -268,9 +268,9 @@ static QREdgeLink *insertLink(OutputMesh *om, MVertID in_a, MVertID in_b)
 	return l;
 }
 
-static QREdgeLink *linkVerts(OutputMesh *om, MVertID in_v1, MVertID in_v2)
+static QRDiskLink *linkVerts(OutputMesh *om, MVertID in_v1, MVertID in_v2)
 {
-	QREdgeLink *l1, *l2;
+	QRDiskLink *l1, *l2;
 
 	l1 = getLink(om, in_v1, in_v2);
 	if (l1)
@@ -285,7 +285,7 @@ static QREdgeLink *linkVerts(OutputMesh *om, MVertID in_v1, MVertID in_v2)
 	return l1;
 }
 
-static void deleteLink(OutputMesh *om, QREdgeLinkList *ll, QREdgeLink *l)
+static void deleteLink(OutputMesh *om, QRDiskCycle *ll, QRDiskLink *l)
 {
 	BLI_assert(ll->num_links != 0);
 
@@ -300,9 +300,9 @@ static void deleteLink(OutputMesh *om, QREdgeLinkList *ll, QREdgeLink *l)
 	ll->num_links--;
 }
 
-static void unlinkVerts(OutputMesh *om, QREdgeLink *l)
+static void unlinkVerts(OutputMesh *om, QRDiskLink *l)
 {
-	QREdgeLinkList *ll1, *ll2;
+	QRDiskCycle *ll1, *ll2;
 
 	ll2 = &om->vlinks[l->v];
 	ll1 = &om->vlinks[l->brother->v];
@@ -318,7 +318,7 @@ static MVertID addVert(OutputMesh *om, float in_co[3], float in_no[3])
 	if (om->totvert == om->allocvert) {
 		om->allocvert = om->allocvert * 2 + 10;
 		om->verts = MEM_reallocN(om->verts, sizeof(MVert) * om->allocvert);
-		om->vlinks = MEM_reallocN(om->vlinks, sizeof(QREdgeLinkList) * om->allocvert);
+		om->vlinks = MEM_reallocN(om->vlinks, sizeof(QRDiskCycle) * om->allocvert);
 	}
 
 	om->verts[om->totvert].flag = 0;
@@ -1138,8 +1138,8 @@ static void deleteDegenerateVerts(OutputMesh *om)
 	int i, m, n;
 	MVertID a, b, *vertmap;
 	MVert *newverts;
-	QREdgeLinkList *newlinks;
-	QREdgeLink *it;
+	QRDiskCycle *newlinks;
+	QRDiskLink *it;
 
 	vertmap = MEM_mallocN(sizeof(MVertID) * om->totvert, __func__);
 
@@ -1165,13 +1165,13 @@ static void deleteDegenerateVerts(OutputMesh *om)
 	}
 
 	newverts = MEM_mallocN(sizeof(MVert) * n, "Newverts");
-	newlinks = MEM_callocN(sizeof(QREdgeLinkList) * n, "Newlinks");
+	newlinks = MEM_callocN(sizeof(QRDiskCycle) * n, "Newlinks");
 
 	for (i = 0, n = 0; i < om->totvert; i++) {
 		if (vertmap[i] == -1) continue;
 
 		memcpy(&newverts[n], &om->verts[i], sizeof(MVert));
-		memcpy(&newlinks[n], &om->vlinks[i], sizeof(QREdgeLinkList));
+		memcpy(&newlinks[n], &om->vlinks[i], sizeof(QRDiskCycle));
 
 		it = newlinks[n].link;
 		do {
@@ -1192,7 +1192,7 @@ static void deleteDegenerateVerts(OutputMesh *om)
 static void makeEdges(OutputMesh *om)
 {
 	int i, j;
-	QREdgeLink *it;
+	QRDiskLink *it;
 
 	for (i = 0; i < om->totvert; i++) {
 		if (om->verts[i].flag & ME_HIDE) continue;
@@ -1208,7 +1208,7 @@ static void makePolys(OutputMesh *om)
 {
 	int i, j, s;
 	MVertID v;
-	QREdgeLink *it, *lit;
+	QRDiskLink *it, *lit;
 
 	for (i = 0; i < om->totvert; i++) {
 		if (om->verts[i].flag & ME_HIDE) continue;

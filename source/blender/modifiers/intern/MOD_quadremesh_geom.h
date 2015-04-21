@@ -47,24 +47,24 @@
 typedef int MEdgeID;
 typedef int MVertID;
 
-typedef struct QREdgeLink {
-	struct QREdgeLink *next, *prev, *brother;
+typedef struct QRDiskLink {
+	struct QRDiskLink *next, *prev, *brother;
 	MEdgeID e;
 	MVertID v;
 	float ang;
 	bool poly_on_right;
-} QREdgeLink;
+} QRDiskLink;
 
-typedef struct QREdgeLinkList {
-	QREdgeLink *link;
+typedef struct QRDiskCycle {
+	QRDiskLink *link;
 	float vec[3];
 	int num_links;
-} QREdgeLinkList;
+} QRDiskCycle;
 
 typedef struct GFEdgeLink {
 	struct GFEdgeLink *next;
 	MVertID v;
-	QREdgeLink *elink;
+	QRDiskLink *elink;
 	float dist;
 } GFEdgeLink;
 
@@ -122,7 +122,7 @@ typedef struct InputMesh {
 
 typedef struct OutputMesh {
 	MemArena *memarena;
-	QREdgeLinkList *vlinks;
+	QRDiskCycle *vlinks;
 	MVertID *vonvs;
 	GFEdge *ringe;                  /* GFEdges per original edges */
 	
