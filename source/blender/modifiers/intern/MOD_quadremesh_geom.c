@@ -541,7 +541,9 @@ static void insertOnGFEdge(GradientFlowSystem *gfsys, GFEdge *in_e, MVertID in_v
 	}
 	else if (in_e->num_links == 1) {
 		sub_v3_v3v3(in_e->dir, verts[in_vid].co, in_e->orig);
-		if ((tmp = len_v3(in_e->dir)) < FLT_EPSILON)
+		tmp = len_v3(in_e->dir);
+
+		if (tmp < FLT_EPSILON)
 			return;
 
 		appendOnGFEdge(gfsys, in_e, in_vid, tmp);
@@ -549,11 +551,10 @@ static void insertOnGFEdge(GradientFlowSystem *gfsys, GFEdge *in_e, MVertID in_v
 	}
 	else {
 		sub_v3_v3v3(vec, verts[in_vid].co, in_e->orig);
-		if ((tmp = len_v3(vec)) < FLT_EPSILON) 
-			return;
+		tmp = dot_v3v3(vec, in_e->dir);
 
-		if (dot_v3v3(vec, in_e->dir) < 0.0f)
-			tmp = -tmp;
+		//if (IS_EQF(tmp, 0.0f))
+			//return;
 
 		if (tmp > in_e->v2->dist)
 			appendOnGFEdge(gfsys, in_e, in_vid, tmp);
