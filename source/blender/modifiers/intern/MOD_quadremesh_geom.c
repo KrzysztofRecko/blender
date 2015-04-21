@@ -1159,7 +1159,7 @@ static void deleteDegenerateVerts(OutputMesh *om)
 		if (vertmap[i] == -1) continue;
 
 		memcpy(&newverts[n], &om->verts[i], sizeof(MVert));
-		memcpy(&newlinks[n], &om->vlinks[i], sizeof(QREdgeLink));
+		memcpy(&newlinks[n], &om->vlinks[i], sizeof(QREdgeLinkList));
 
 		it = newlinks[n].link;
 		do {
@@ -1237,6 +1237,7 @@ void freeOutputMesh(OutputMesh *om)
 	om->totvert = om->allocvert = om->totedge = om->allocedge = 0;
 	om->totloop = om->allocloop = om->totpolys = om->allocpolys = 0;
 	MEM_SAFE_FREE(om->verts);
+	MEM_SAFE_FREE(om->vlinks);
 	MEM_SAFE_FREE(om->edges);
 	MEM_SAFE_FREE(om->polys);
 	MEM_SAFE_FREE(om->loops);
