@@ -61,18 +61,18 @@ typedef struct QRDiskCycle {
 	int num_links;
 } QRDiskCycle;
 
-typedef struct GFEdgeLink {
-	struct GFEdgeLink *next;
+typedef struct QREdgeLink {
+	struct QREdgeLink *next;
 	MVertID v;
 	QRDiskLink *elink;
 	float dist;
-} GFEdgeLink;
+} QREdgeLink;
 
-typedef struct GFEdge {
-	GFEdgeLink *v1, *v2;
+typedef struct QREdge {
+	QREdgeLink *v1, *v2;
 	float dir[3], orig[3];
 	int num_links;
-} GFEdge;
+} QREdge;
 
 typedef enum {
 	eVert,
@@ -124,7 +124,7 @@ typedef struct OutputMesh {
 	MemArena *memarena;
 	QRDiskCycle *vlinks;
 	MVertID *vonvs;
-	GFEdge *ringe;                  /* GFEdges per original edges */
+	QREdge *ringe;                  /* QREdges per original edges */
 	
 	int totvert, allocvert;
 	MVert *verts;
@@ -139,7 +139,7 @@ typedef struct OutputMesh {
 /* GradientFlowSysten, one gfsys for every gradient field */
 typedef struct GradientFlowSystem {
 	MemArena *memarena;
-	LinkNode **ringf;               /* Lists of GFEdge per original faces */
+	LinkNode **ringf;               /* Lists of QREdge per original faces */
 	struct Heap *seeds;
 
 	float *hfunction;

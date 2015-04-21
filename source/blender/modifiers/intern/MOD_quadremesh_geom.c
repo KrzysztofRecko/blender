@@ -477,11 +477,11 @@ void deleteGradientFlowSystem(GradientFlowSystem *gfsys)
 	}
 }
 
-/* GFEDGE ROUTINES */
+/* QREdge ROUTINES */
 
-static void appendOnGFEdge(GradientFlowSystem *gfsys, GFEdge *in_e, MVertID in_v, float in_dist)
+static void appendOnQREdge(GradientFlowSystem *gfsys, QREdge *in_e, MVertID in_v, float in_dist)
 {
-	GFEdgeLink *newl = BLI_memarena_alloc(gfsys->memarena, sizeof(GFEdgeLink));
+	QREdgeLink *newl = BLI_memarena_alloc(gfsys->memarena, sizeof(QREdgeLink));
 
 	newl->v = in_v;
 	newl->dist = in_dist;
@@ -497,9 +497,9 @@ static void appendOnGFEdge(GradientFlowSystem *gfsys, GFEdge *in_e, MVertID in_v
 	}
 }
 
-static void prependOnGFEdge(GradientFlowSystem *gfsys, GFEdge *in_e, MVertID in_v, float in_dist)
+static void prependOnQREdge(GradientFlowSystem *gfsys, QREdge *in_e, MVertID in_v, float in_dist)
 {
-	GFEdgeLink *newl = BLI_memarena_alloc(gfsys->memarena, sizeof(GFEdgeLink));
+	QREdgeLink *newl = BLI_memarena_alloc(gfsys->memarena, sizeof(QREdgeLink));
 
 	newl->v = in_v;
 	newl->dist = in_dist;
@@ -511,9 +511,9 @@ static void prependOnGFEdge(GradientFlowSystem *gfsys, GFEdge *in_e, MVertID in_
 		in_e->v2 = newl;
 }
 
-static void insertAfterOnGFEdge(GradientFlowSystem *gfsys, GFEdge *in_e, GFEdgeLink *in_l, MVertID in_v, float in_dist)
+static void insertAfterOnQREdge(GradientFlowSystem *gfsys, QREdge *in_e, QREdgeLink *in_l, MVertID in_v, float in_dist)
 {
-	GFEdgeLink *newl = BLI_memarena_alloc(gfsys->memarena, sizeof(GFEdgeLink));
+	QREdgeLink *newl = BLI_memarena_alloc(gfsys->memarena, sizeof(QREdgeLink));
 
 	newl->v = in_v;
 	newl->dist = in_dist;
@@ -529,15 +529,15 @@ static void insertAfterOnGFEdge(GradientFlowSystem *gfsys, GFEdge *in_e, GFEdgeL
 	in_l->next = newl;
 }
 
-static void insertOnGFEdge(GradientFlowSystem *gfsys, GFEdge *in_e, MVertID in_vid)
+static void insertOnQREdge(GradientFlowSystem *gfsys, QREdge *in_e, MVertID in_vid)
 {
 	float tmp, vec[3];
 	OutputMesh *om = &gfsys->sys->output_mesh;
 	MVert *verts = om->verts;
-	GFEdgeLink *it;
+	QREdgeLink *it;
 
 	if (in_e->num_links == 0) {
-		appendOnGFEdge(gfsys, in_e, in_vid, 0.0f);
+		appendOnQREdge(gfsys, in_e, in_vid, 0.0f);
 		copy_v3_v3(in_e->orig, verts[in_vid].co);
 	}
 	else if (in_e->num_links == 1) {
@@ -547,7 +547,7 @@ static void insertOnGFEdge(GradientFlowSystem *gfsys, GFEdge *in_e, MVertID in_v
 		if (tmp < FLT_EPSILON)
 			return;
 
-		appendOnGFEdge(gfsys, in_e, in_vid, tmp);
+		appendOnQREdge(gfsys, in_e, in_vid, tmp);
 		mul_v3_fl(in_e->dir, 1.0f / tmp);
 	}
 	else {
@@ -558,21 +558,21 @@ static void insertOnGFEdge(GradientFlowSystem *gfsys, GFEdge *in_e, MVertID in_v
 			//return;
 
 		if (tmp > in_e->v2->dist)
-			appendOnGFEdge(gfsys, in_e, in_vid, tmp);
+			appendOnQREdge(gfsys, in_e, in_vid, tmp);
 		else if (tmp < in_e->v1->dist)
-			prependOnGFEdge(gfsys, in_e, in_vid, tmp);
+			prependOnQREdge(gfsys, in_e, in_vid, tmp);
 		else {
 			for (it = in_e->v1; it->next && it->next->dist < tmp; it = it->next);
 			if (in_vid == it->v || in_vid == it->next->v) return;
-			insertAfterOnGFEdge(gfsys, in_e, it, in_vid, tmp);
+			insertAfterOnQREdge(gfsys, in_e, it, in_vid, tmp);
 		}
 	}
 	in_e->num_links++;
 }
 
-static void linkOnGFEdge(GradientFlowSystem *gfsys, GFEdge *in_e, MVertID in_v1, MVertID in_v2)
+static void linkOnQREdge(GradientFlowSystem *gfsys, QREdge *in_e, MVertID in_v1, MVertID in_v2)
 {
-	GFEdgeLink *it;
+	QREdgeLink *it;
 
 	for (it = in_e->v1; it && it->next && it->v != in_v1; it = it->next)
 		if (it->v == in_v2) {
@@ -585,18 +585,18 @@ static void linkOnGFEdge(GradientFlowSystem *gfsys, GFEdge *in_e, MVertID in_v1,
 			it->elink = linkVerts(&gfsys->sys->output_mesh, it->v, it->next->v);
 }
 
-static GFEdge *addGFEdge(GradientFlowSystem *gfsys, MVertID in_v1, MVertID in_v2, int in_f)
+static QREdge *addQREdge(GradientFlowSystem *gfsys, MVertID in_v1, MVertID in_v2, int in_f)
 {
-	GFEdge *newe = BLI_memarena_calloc(gfsys->memarena, sizeof(GFEdge));
+	QREdge *newe = BLI_memarena_calloc(gfsys->memarena, sizeof(QREdge));
 
-	insertOnGFEdge(gfsys, newe, in_v1);
-	insertOnGFEdge(gfsys, newe, in_v2);
+	insertOnQREdge(gfsys, newe, in_v1);
+	insertOnQREdge(gfsys, newe, in_v2);
 	BLI_linklist_prepend_arena(&gfsys->ringf[in_f], (void*)newe, gfsys->memarena);
 	
 	return newe;
 }
 
-static bool isectSegmentWithGFEdge(OutputMesh *om, float in_a[3], float in_b[3], GFEdge *in_e)
+static bool isectSegmentWithQREdge(OutputMesh *om, float in_a[3], float in_b[3], QREdge *in_e)
 {
 	return isectLines(in_a, in_b, om->verts[in_e->v1->v].co, om->verts[in_e->v2->v].co, NULL, NULL);
 }
@@ -685,13 +685,13 @@ static int nextPoint(float r_co[3], int *r_edge, GradientFlowSystem *gfsys, int 
 
 static bool intersectSegmentWithOthersOnFace(GradientFlowSystem *gfsys, float in_a[3], float in_b[3], int in_f)
 {
-	GFEdge *e;
+	QREdge *e;
 	LinkNode *iter;
 
 	for (iter = gfsys->ringf[in_f]; iter; iter = iter->next) {
-		e = (GFEdge*)iter->link;
+		e = (QREdge*)iter->link;
 		
-		if (isectSegmentWithGFEdge(&gfsys->sys->output_mesh, in_a, in_b, e))
+		if (isectSegmentWithQREdge(&gfsys->sys->output_mesh, in_a, in_b, e))
 			return true;
 	}
 
@@ -864,33 +864,33 @@ static void addGFPoint(GradientFlowSystem *gfsys, GFPoint *in_p)
 static void addSegmentToLine(GradientFlowSystem *gfsys, GFLine *line, GFPoint *in_p)
 {
 	int i;
-	GFEdge *e;
+	QREdge *e;
 
 	addGFPoint(gfsys, in_p);
 
 	if (in_p->type == eVert) {
 		for (i = 0; i < gfsys->sys->input_mesh.ringe_map[in_p->v].count; i++)
-			insertOnGFEdge(gfsys, &gfsys->sys->output_mesh.ringe[gfsys->sys->input_mesh.ringe_map[in_p->v].indices[i]], in_p->id);
+			insertOnQREdge(gfsys, &gfsys->sys->output_mesh.ringe[gfsys->sys->input_mesh.ringe_map[in_p->v].indices[i]], in_p->id);
 
 		if (line->end.type == eEdge)
-			linkOnGFEdge(gfsys, &gfsys->sys->output_mesh.ringe[line->end.e], line->end.id, in_p->id);
+			linkOnQREdge(gfsys, &gfsys->sys->output_mesh.ringe[line->end.e], line->end.id, in_p->id);
 
-		//addGFEdge(gfsys, line->end, newv, in_p->f);
+		//addQREdge(gfsys, line->end, newv, in_p->f);
 	}
 	else if (in_p->type == eEdge) {
-		insertOnGFEdge(gfsys, &gfsys->sys->output_mesh.ringe[in_p->e], in_p->id);
+		insertOnQREdge(gfsys, &gfsys->sys->output_mesh.ringe[in_p->e], in_p->id);
 
 		if (line->end.type == eEdge && line->end.e == in_p->e) {
-			linkOnGFEdge(gfsys, &gfsys->sys->output_mesh.ringe[in_p->e], line->end.id, in_p->id);
+			linkOnQREdge(gfsys, &gfsys->sys->output_mesh.ringe[in_p->e], line->end.id, in_p->id);
 		}
 		else {
-			e = addGFEdge(gfsys, line->end.id, in_p->id, in_p->f);
-			linkOnGFEdge(gfsys, e, line->end.id, in_p->id);
+			e = addQREdge(gfsys, line->end.id, in_p->id, in_p->f);
+			linkOnQREdge(gfsys, e, line->end.id, in_p->id);
 		}
 	}
 	else {
-		e = addGFEdge(gfsys, line->end.id, in_p->id, in_p->f);
-		linkOnGFEdge(gfsys, e, line->end.id, in_p->id);
+		e = addQREdge(gfsys, line->end.id, in_p->id, in_p->f);
+		linkOnQREdge(gfsys, e, line->end.id, in_p->id);
 	}
 
 	memcpy(&line->end, in_p, sizeof(GFPoint));
@@ -956,7 +956,7 @@ static bool initGFLine(GradientFlowSystem *gfsys, GFLine *line, GFPoint *in_seed
 
 	if (line->seed.type == eVert) {
 		for (i = 0; i < gfsys->sys->input_mesh.ringe_map[line->seed.v].count; i++)
-			insertOnGFEdge(gfsys, &gfsys->sys->output_mesh.ringe[gfsys->sys->input_mesh.ringe_map[line->seed.v].indices[i]], line->seed.id);
+			insertOnQREdge(gfsys, &gfsys->sys->output_mesh.ringe[gfsys->sys->input_mesh.ringe_map[line->seed.v].indices[i]], line->seed.id);
 	}
 
 	return true;
@@ -1107,16 +1107,16 @@ static void generateIntersectionsOnFaces(LaplacianSystem *sys)
 {
 	int f;
 	float isection[3], lambda;
-	GFEdge *e1, *e2;
+	QREdge *e1, *e2;
 	LinkNode *iter1, *iter2;
 	MVertID newv;
 
 	for (f = 0; f < sys->input_mesh.num_faces; f++) {
 		for (iter1 = sys->gfsys1->ringf[f]; iter1; iter1 = iter1->next) {
-			e1 = (GFEdge*)iter1->link;
+			e1 = (QREdge*)iter1->link;
 
 			for (iter2 = sys->gfsys2->ringf[f]; iter2; iter2 = iter2->next) {
-				e2 = (GFEdge*)iter2->link;
+				e2 = (QREdge*)iter2->link;
 
 				if (isectLines(sys->output_mesh.verts[e1->v1->v].co,
 					           sys->output_mesh.verts[e1->v2->v].co,
@@ -1125,8 +1125,8 @@ static void generateIntersectionsOnFaces(LaplacianSystem *sys)
 					           isection, &lambda))
 				{
 					newv = addVert(&sys->output_mesh, isection, sys->input_mesh.no[f]);
-					insertOnGFEdge(sys->gfsys1, e1, newv);
-					insertOnGFEdge(sys->gfsys2, e2, newv);
+					insertOnQREdge(sys->gfsys1, e1, newv);
+					insertOnQREdge(sys->gfsys2, e2, newv);
 				}
 			}
 		}
@@ -1271,7 +1271,7 @@ void generateMesh(LaplacianSystem *sys)
 	sys->output_mesh.vonvs = MEM_mallocN(sizeof(MVertID) * sys->input_mesh.num_verts, __func__);
 	for (i = 0; i < sys->input_mesh.num_verts; i++)
 		sys->output_mesh.vonvs[i] = -1;
-	om->ringe = MEM_callocN(sizeof(GFEdge) * sys->input_mesh.num_edges, "GFListEdges");
+	om->ringe = MEM_callocN(sizeof(QREdge) * sys->input_mesh.num_edges, "GFListEdges");
 
 	computeFlowLines(sys);
 	generateIntersectionsOnFaces(sys);
