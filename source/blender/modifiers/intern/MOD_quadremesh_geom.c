@@ -193,6 +193,15 @@ float absoluteAngleAxis(const float v1[3], const float v2[3], const float axis[3
 	return angle;
 }
 
+static void getPerpendicularToNormal(float r[3], float in_a[3], float in_b[3], float in_no[3])
+{
+	float proj[3];
+
+	sub_v3_v3v3(r, in_b, in_a);
+	project_v3_v3v3(proj, r, in_no);
+	sub_v3_v3(r, proj);
+}
+
 /* QREDGELINK STUFF */
 
 static QREdgeLink *getLink(OutputMesh *om, MVertID in_v1, MVertID in_v2)
@@ -214,35 +223,29 @@ static QREdgeLink *getLink(OutputMesh *om, MVertID in_v1, MVertID in_v2)
 
 static QREdgeLink *insertLink(OutputMesh *om, MVertID in_a, MVertID in_b)
 {
-	float vno[3], vec[3], proj[3];
-	QREdgeLink *it, *l = BLI_memarena_alloc(om->memarena, sizeof(QREdgeLink));
+	float vec[3], no[3];
+	QREdgeLink *it, *l;
+
+	l = BLI_memarena_alloc(om->memarena, sizeof(QREdgeLink));
 
 	l->e = -1;
 	l->v = in_b;
 	l->poly_on_right = false;
 
-	if (om->vlinks[in_a].num_links == 0) {
-		sub_v3_v3v3(om->vlinks[in_a].vec, om->verts[in_b].co, om->verts[in_a].co);
-		normal_short_to_float_v3(vno, om->verts[in_a].no);
-		project_v3_v3v3(vec, om->vlinks[in_a].vec, vno);
-		sub_v3_v3(om->vlinks[in_a].vec, vec);
-		normalize_v3(om->vlinks[in_a].vec);
+	normal_short_to_float_v3(no, om->verts[in_a].no);
+	getPerpendicularToNormal(vec, om->verts[in_a].co, om->verts[in_b].co, no);
+	normalize_v3(vec);
 
+	if (om->vlinks[in_a].num_links == 0) {
 		om->vlinks[in_a].link = l;
+		copy_v3_v3(om->vlinks[in_a].vec, vec);
+
 		l->next = l;
 		l->prev = l;
 		l->ang = 0.0f;
 	}
 	else {
-		normal_short_to_float_v3(vno, om->verts[in_a].no);
-		sub_v3_v3v3(vec, om->verts[in_b].co, om->verts[in_a].co);
-
-		/* project the vectors onto the axis */
-		project_v3_v3v3(proj, vec, vno);
-		sub_v3_v3v3(vec, vec, proj);
-		normalize_v3(vec);
-
-		l->ang = absoluteAngleAxis(om->vlinks[in_a].vec, vec, vno);
+		l->ang = absoluteAngleAxis(om->vlinks[in_a].vec, vec, no);
 
 		if (l->ang <= om->vlinks[in_a].link->ang) {
 			it = om->vlinks[in_a].link->prev;
