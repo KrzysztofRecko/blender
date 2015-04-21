@@ -87,7 +87,19 @@ typedef struct GFPoint {
 	GFPointType type;
 } GFPoint;
 
+/* GradientFlowSysten, one gfsys for every gradient field */
+typedef struct GradientFlowSystem {
+	struct Heap *seeds;
+
+	LinkNode **ringf;
+	//float *h;
+	float(*gf)[3];				/* Gradient Field */
+
+	struct LaplacianSystem *sys;
+} GradientFlowSystem;
+
 typedef struct GFLine {
+	GradientFlowSystem *gfsys;
 	GFPoint end, seed, lastchkp;
 	GFPoint *oldp;
 	int d;
@@ -125,6 +137,7 @@ typedef struct OutputMesh {
 	QRDiskCycle *vlinks;
 	MVertID *vonvs;
 	QREdge *ringe;                  /* QREdges per original edges */
+	LinkNode **ringf[2];               /* Lists of QREdge per original faces */
 	
 	int totvert, allocvert;
 	MVert *verts;
@@ -136,38 +149,19 @@ typedef struct OutputMesh {
 	MPoly *polys;
 } OutputMesh;
 
-/* GradientFlowSysten, one gfsys for every gradient field */
-typedef struct GradientFlowSystem {
-	MemArena *memarena;
-	LinkNode **ringf;               /* Lists of QREdge per original faces */
-	struct Heap *seeds;
-
-	float *hfunction;
-	float(*gfield)[3];				/* Gradient Field */
-
-	struct LaplacianSystem *sys;
-} GradientFlowSystem;
-
 typedef struct LaplacianSystem {
-	bool command_compute_flow;
 	bool has_solution;
-	bool command_remesh;
 
 	struct QuadRemeshModifierData *qmd;
 	InputMesh input_mesh;
 	OutputMesh output_mesh;
-	GradientFlowSystem *gfsys1, *gfsys2;
+	GradientFlowSystem *gfsys[2];
 	
 	float *U_field;					/* Initial scalar field*/
-	float(*gf1)[3], (*gf2)[3];		/* Gradient Fields g1 and g2 per face*/
-	float *h1, *h2;					/* Sampling distance functions h1 and h2 */
-	float h;
 
 	NLContext *context;				/* System for solve general implicit rotations */
 } LaplacianSystem;
 
-GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys, float *mhfunction, float(*mgfield)[3]);
-void deleteGradientFlowSystem(GradientFlowSystem *gfsys);
 void generateMesh(LaplacianSystem *sys);
 void freeOutputMesh(OutputMesh *om);
 DerivedMesh *getResultMesh(LaplacianSystem *sys);
