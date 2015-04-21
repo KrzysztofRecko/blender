@@ -171,22 +171,23 @@ static bool isPointOnSegment(float in_v[3], float in_l1[3], float in_l2[3])
 	return dot_v3v3(a, b) >= 0.0f;
 }
 
-float angleTwoVectorsAxis(const float v1[3], const float v2[3], const float axis[3])
+float absoluteAngleAxis(const float v1[3], const float v2[3], const float axis[3])
 {
-	float v2_proj[3], tproj[3];
-	float angle;
+	float tproj[3];
+	float angle, angle2, dot;
 
-	/* project the vectors onto the axis */
-	project_v3_v3v3(tproj, v2, axis);
-	sub_v3_v3v3(v2_proj, v2, tproj);
-	normalize_v3(v2_proj);
+	//angle = angle_normalized_v3v3(v1, v2);
 
-	angle = angle_normalized_v3v3(v1, v2_proj);
+	dot = dot_v3v3(v1, v2);
+	CLAMP(dot, -1.0f, 1.0f);
+	angle = acos(dot);
+	//if (!IS_EQF(angle - angle2, 0.0f))
+		//printf("%.8f  |  %.8f, %.8f, %.8f\n", angle - angle2, angle, angle2, dot_v3v3(v1, v2_proj));
 
 	/* calculate the sign (reuse 'tproj') */
-	cross_v3_v3v3(tproj, v2_proj, v1);
+	cross_v3_v3v3(tproj, v2, v1);
 	if (dot_v3v3(tproj, axis) < 0.0f) {
-		angle = ((float)(M_PI * 2.0)) - angle;
+		angle = ((float)(M_PI * 2.0f)) - angle;
 	}
 
 	return angle;
@@ -213,7 +214,7 @@ static QREdgeLink *getLink(OutputMesh *om, MVertID in_v1, MVertID in_v2)
 
 static QREdgeLink *insertLink(OutputMesh *om, MVertID in_a, MVertID in_b)
 {
-	float vno[3], vec[3];
+	float vno[3], vec[3], proj[3];
 	QREdgeLink *it, *l = BLI_memarena_alloc(om->memarena, sizeof(QREdgeLink));
 
 	l->e = -1;
@@ -235,7 +236,13 @@ static QREdgeLink *insertLink(OutputMesh *om, MVertID in_a, MVertID in_b)
 	else {
 		normal_short_to_float_v3(vno, om->verts[in_a].no);
 		sub_v3_v3v3(vec, om->verts[in_b].co, om->verts[in_a].co);
-		l->ang = angleTwoVectorsAxis(om->vlinks[in_a].vec, vec, vno);
+
+		/* project the vectors onto the axis */
+		project_v3_v3v3(proj, vec, vno);
+		sub_v3_v3v3(vec, vec, proj);
+		normalize_v3(vec);
+
+		l->ang = absoluteAngleAxis(om->vlinks[in_a].vec, vec, vno);
 
 		if (l->ang <= om->vlinks[in_a].link->ang) {
 			it = om->vlinks[in_a].link->prev;
