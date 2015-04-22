@@ -1160,6 +1160,34 @@ static void deleteDegenerateVerts(OutputMesh *om)
 	om->vlinks = newlinks;
 }
 
+static void hideEdgesOnFaces(OutputMesh *om, InputMesh *im)
+{
+	int f;
+	QREdge *e;
+	QREdgeLink *itel;
+	LinkNode *it;
+
+	for (f = 0; f < im->num_faces; f++) {
+		for (it = om->ringf[0][f]; it; it = it->next) {
+			e = (QREdge*)it->link;
+			for (itel = e->v1; itel; itel = itel->next)
+				if (itel->elink) {
+					itel->elink->e = 0;
+					itel->elink->brother->e = 0;
+				}
+		}
+
+		for (it = om->ringf[1][f]; it; it = it->next) {
+			e = (QREdge*)it->link;
+			for (itel = e->v1; itel; itel = itel->next)
+				if (itel->elink) {
+					itel->elink->e = 0;
+					itel->elink->brother->e = 0;
+				}
+		}
+	}
+}
+
 static void makeEdges(OutputMesh *om)
 {
 	int i, j;
@@ -1252,6 +1280,7 @@ void generateMesh(LaplacianSystem *sys)
 	generateIntersectionsOnFaces(om, &sys->input_mesh);
 	deleteDegenerateVerts(om);
 	//deleteDegenerateVerts(om);
+	//hideEdgesOnFaces(om, &sys->input_mesh);
 	makeEdges(om);
 	makePolys(om);
 	//makeNormals(om);

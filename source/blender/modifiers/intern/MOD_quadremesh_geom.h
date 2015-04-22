@@ -122,10 +122,8 @@ typedef struct InputMesh {
 	unsigned int(*faces_edge)[2];	/* Faces by edges  */
 
 	int *ringf_indices;				/* Indices of faces per vertex */
-	int *ringv_indices;				/* Indices of neighbors(vertex) per vertex */
 	int *ringe_indices;				/* Indices of edges per vertex */
 	MeshElemMap *ringf_map;			/* Map of faces per vertex */
-	//MeshElemMap *ringv_map;			/* Map of vertex per vertex  - unused right now */
 	MeshElemMap *ringe_map;			/* Map of edges per vertex */
 
 	int *constraints;				/* Feature points constraints*/
