@@ -431,8 +431,14 @@ static LaplacianSystem *initSystem(QuadRemeshModifierData *qmd, Object *ob, Deri
 	float wpaint;
 	MDeformVert *dvert = NULL;
 	MDeformVert *dv = NULL, *d;
-	LaplacianSystem *sys = MEM_callocN(sizeof(LaplacianSystem), "QuadRemeshCache");
-	InputMesh *im = &sys->input_mesh;
+	LaplacianSystem *sys;
+	InputMesh *im;
+
+	if (strlen(qmd->anchor_grp_name) <= 1)
+		return NULL;
+
+	sys = MEM_callocN(sizeof(LaplacianSystem), "QuadRemeshCache");
+	im = &sys->input_mesh;
 
 	sys->qmd = qmd;
 	DM_ensure_tessface(dm);
@@ -517,11 +523,12 @@ static LaplacianSystem *initSystem(QuadRemeshModifierData *qmd, Object *ob, Deri
 	return sys;
 }
 
+#if 0
 static LaplacianSystem *QuadRemeshModifier_do(QuadRemeshModifierData *qmd, Object *ob, DerivedMesh *dm)
 {
 	//int i;
 	LaplacianSystem *sys = qmd->cache_system;
-	
+
 	//int defgrp_index;
 	//MDeformVert *dvert = NULL;
 	//MDeformVert *dv = NULL;
@@ -529,55 +536,44 @@ static LaplacianSystem *QuadRemeshModifier_do(QuadRemeshModifierData *qmd, Objec
 	//float y;
 	//int x;
 
-	if (qmd->flag & MOD_QUADREMESH_COMPUTE_FLOW) {
-		if (strlen(qmd->anchor_grp_name) >= 1) {
-			if (sys)
-				deleteLaplacianSystem(sys);
 
-			sys = initSystem(qmd, ob, dm);
 
-			//if (sys->has_solution) {
-				
-				//computeSampleDistanceFunctions(sys, 2.0f, 10.0f);
+	//if (sys->has_solution) {
 
-				/* normalization of vgroup weights */
-				/*if (!defgroup_find_name(ob, "QuadRemeshFlow")) {
-					BKE_defgroup_new(ob, "QuadRemeshFlow");
-					modifier_get_vgroup(ob, dm, "QuadRemeshFlow", &dvert, &defgrp_index);
-					BLI_assert(dvert != NULL);
-					dv = dvert;
+	//computeSampleDistanceFunctions(sys, 2.0f, 10.0f);
 
-					for (i = 0; i < numVerts; i++) {
-						mmin = min_ff(mmin, sys->U_field[i]);
-						mmax = max_ff(mmax, sys->U_field[i]);
-					}
+	/* normalization of vgroup weights */
+	/*if (!defgroup_find_name(ob, "QuadRemeshFlow")) {
+		BKE_defgroup_new(ob, "QuadRemeshFlow");
+		modifier_get_vgroup(ob, dm, "QuadRemeshFlow", &dvert, &defgrp_index);
+		BLI_assert(dvert != NULL);
+		dv = dvert;
 
-					for (i = 0; i < numVerts; i++) {
-						y = (sys->U_field[i] - mmin) / (mmax - mmin);
-						x = y * 60;
-						y = (x % 2 == 0 ? 0.1 : 0.9);
-						defvert_add_index_notest(dv, defgrp_index, y);
-						dv++;
-					}
-				}*/
-			//}
+		for (i = 0; i < numVerts; i++) {
+		mmin = min_ff(mmin, sys->U_field[i]);
+		mmax = max_ff(mmax, sys->U_field[i]);
 		}
-		
-		qmd->flag &= ~MOD_QUADREMESH_COMPUTE_FLOW;
+
+		for (i = 0; i < numVerts; i++) {
+		y = (sys->U_field[i] - mmin) / (mmax - mmin);
+		x = y * 60;
+		y = (x % 2 == 0 ? 0.1 : 0.9);
+		defvert_add_index_notest(dv, defgrp_index, y);
+		dv++;
+		}
+		}*/
+	//}
+}
+
+qmd->flag &= ~MOD_QUADREMESH_COMPUTE_FLOW;
 	}
 
 	qmd->cache_system = sys;
 
 	return sys;
 }
+#endif // 0
 
-#else  /* WITH_OPENNL */
-static void QuadRemeshModifier_do(
-        QuadRemeshModifierData *lmd, Object *ob, DerivedMesh *dm,
-        float (*vertexCos)[3], int numVerts)
-{
-	(void)lmd, (void)ob, (void)dm, (void)vertexCos, (void)numVerts;
-}
 #endif  /* WITH_OPENNL */
 
 static void initData(ModifierData *md)
@@ -636,13 +632,33 @@ static DerivedMesh *applyModifier(ModifierData *md,
 	ModifierApplyFlag UNUSED(flag))
 {
 	DerivedMesh *result = dm;
-	
-	LaplacianSystem *sys = QuadRemeshModifier_do((QuadRemeshModifierData *)md, ob, dm);
+	QuadRemeshModifierData *qmd = (QuadRemeshModifierData *)md;
+	LaplacianSystem *sys = qmd->cache_system;
+
+#ifdef WITH_OPENNL
+	if (qmd->flag & MOD_QUADREMESH_ALL_DIRTY) {
+		if (sys)
+				deleteLaplacianSystem(sys);
+
+		sys = initSystem(qmd, ob, dm);
+	}
 	
 	if (sys) {
-		result = getResultMesh(sys);
-		if (!result) result = dm;
+		if (qmd->flag & MOD_QUADREMESH_REMESH) {
+			if (sys->cache_mesh)
+				sys->cache_mesh->release(sys->cache_mesh);
+
+			sys->cache_mesh = makeResultMesh(sys);
+		}
+
+		qmd->flag = 0;
+
+		if (sys->cache_mesh)
+			result = CDDM_copy(sys->cache_mesh);
 	}
+
+	qmd->cache_system = sys;
+#endif /* WITH_OPENNL */
 
 	return result;
 }

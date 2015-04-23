@@ -2308,7 +2308,7 @@ static int quadremesh_computeflow_exec(bContext *C, wmOperator *op)
 
 	if (!lmd)
 		return OPERATOR_CANCELLED;
-	lmd->flag |= MOD_QUADREMESH_COMPUTE_FLOW;
+	lmd->flag |= MOD_QUADREMESH_ALL_DIRTY;
 	/*if (lmd->flag & MOD_QUADREMESH_COMPUTE_FLOW) {
 		lmd->flag &= ~MOD_QUADREMESH_COMPUTE_FLOW;
 	}

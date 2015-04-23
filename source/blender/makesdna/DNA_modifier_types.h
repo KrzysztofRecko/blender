@@ -1456,8 +1456,8 @@ typedef struct QuadRemeshModifierData {
 
 /* QuadRemesh modifier flags */
 enum {
-	MOD_QUADREMESH_COMPUTE_FLOW = (1 << 1),
-	MOD_QUADREMESH_REMESH = (1 << 2)
+	MOD_QUADREMESH_REMESH = (1 << 1),
+	MOD_QUADREMESH_ALL_DIRTY = (1 << 2),
 };
 
 typedef struct DataTransferModifierData {

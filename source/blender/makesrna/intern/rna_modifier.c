@@ -752,7 +752,7 @@ static int rna_LaplacianDeformModifier_is_bind_get(PointerRNA *ptr)
 static int rna_QuadRemeshModifier_is_computeflow_get(PointerRNA *ptr)
 {
 	QuadRemeshModifierData *qmd = (QuadRemeshModifierData *)ptr->data;
-	return (qmd->flag & MOD_QUADREMESH_COMPUTE_FLOW);
+	return (qmd->flag & MOD_QUADREMESH_ALL_DIRTY);
 }
 
 static int rna_QuadRemeshModifier_is_remesh_get(PointerRNA *ptr)

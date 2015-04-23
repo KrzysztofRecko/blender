@@ -151,6 +151,7 @@ typedef struct LaplacianSystem {
 	float *U_field;					/* Initial scalar field*/
 
 	NLContext *context;				/* System for solve general implicit rotations */
+	DerivedMesh *cache_mesh;
 } LaplacianSystem;
 
 void freeOutputMesh(OutputMesh *om);

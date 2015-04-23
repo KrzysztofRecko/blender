@@ -1162,6 +1162,7 @@ static void makeEdges(OutputMesh *om, MEdge *r_edges)
 				r_edges[e].bweight = 0;
 				r_edges[e].crease = 0;
 				r_edges[e].flag = ME_EDGEDRAW;
+				e++;
 			}
 		}
 	}
