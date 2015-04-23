@@ -566,13 +566,6 @@ static LaplacianSystem *QuadRemeshModifier_do(QuadRemeshModifierData *qmd, Objec
 		qmd->flag &= ~MOD_QUADREMESH_COMPUTE_FLOW;
 	}
 
-	if (qmd->flag & MOD_QUADREMESH_REMESH && sys) {
-		if (sys->has_solution) {
-			generateMesh(sys);
-		}
-		qmd->flag &= ~MOD_QUADREMESH_REMESH;
-	}
-
 	qmd->cache_system = sys;
 
 	return sys;

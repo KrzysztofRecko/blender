@@ -202,28 +202,28 @@ static void getPerpendicularToNormal(float r[3], float in_a[3], float in_b[3], f
 	sub_v3_v3(r, proj);
 }
 
-/* QRDiskCycle STUFF */
+/* QRVert STUFF */
 
-static QRDiskLink *getLink(OutputMesh *om, MVertID in_v1, MVertID in_v2)
+static QRDiskLink *getLink(OutputMesh *om, QRVertID in_v1, QRVertID in_v2)
 {
 	QRDiskLink *it;
 
-	it = om->vlinks[in_v1].link;
+	it = om->verts[in_v1].link;
 	while(it) {
 		if (it->v == in_v2)
 			return it;
 		
 		it = it->next;
-		if (it == om->vlinks[in_v1].link)
+		if (it == om->verts[in_v1].link)
 			break;
 	}
 
 	return NULL;
 }
 
-static QRDiskLink *insertLink(OutputMesh *om, MVertID in_a, MVertID in_b)
+static QRDiskLink *insertLink(OutputMesh *om, QRVertID in_a, QRVertID in_b)
 {
-	float vec[3], no[3];
+	float vec[3];
 	QRDiskLink *it, *l;
 
 	l = BLI_memarena_alloc(om->memarena, sizeof(QRDiskLink));
@@ -232,27 +232,26 @@ static QRDiskLink *insertLink(OutputMesh *om, MVertID in_a, MVertID in_b)
 	l->v = in_b;
 	l->poly_on_right = false;
 
-	normal_short_to_float_v3(no, om->verts[in_a].no);
-	getPerpendicularToNormal(vec, om->verts[in_a].co, om->verts[in_b].co, no);
+	getPerpendicularToNormal(vec, om->verts[in_a].co, om->verts[in_b].co, om->verts[in_a].no);
 	normalize_v3(vec);
 
-	if (om->vlinks[in_a].num_links == 0) {
-		om->vlinks[in_a].link = l;
-		copy_v3_v3(om->vlinks[in_a].vec, vec);
+	if (om->verts[in_a].num_links == 0) {
+		om->verts[in_a].link = l;
+		copy_v3_v3(om->verts[in_a].vec, vec);
 
 		l->next = l;
 		l->prev = l;
 		l->ang = 0.0f;
 	}
 	else {
-		l->ang = absoluteAngleAxis(om->vlinks[in_a].vec, vec, no);
+		l->ang = absoluteAngleAxis(om->verts[in_a].vec, vec, om->verts[in_a].no);
 
-		if (l->ang <= om->vlinks[in_a].link->ang) {
-			it = om->vlinks[in_a].link->prev;
-			om->vlinks[in_a].link = l;
+		if (l->ang <= om->verts[in_a].link->ang) {
+			it = om->verts[in_a].link->prev;
+			om->verts[in_a].link = l;
 		}
 		else {
-			for (it = om->vlinks[in_a].link; it->next != om->vlinks[in_a].link; it = it->next) {
+			for (it = om->verts[in_a].link; it->next != om->verts[in_a].link; it = it->next) {
 				if (it->next->ang > l->ang)
 					break;
 			}
@@ -263,12 +262,12 @@ static QRDiskLink *insertLink(OutputMesh *om, MVertID in_a, MVertID in_b)
 		l->prev = it;
 		it->next = l;
 	}
-	om->vlinks[in_a].num_links++;
+	om->verts[in_a].num_links++;
 
 	return l;
 }
 
-static QRDiskLink *linkVerts(OutputMesh *om, MVertID in_v1, MVertID in_v2)
+static QRDiskLink *linkVerts(OutputMesh *om, QRVertID in_v1, QRVertID in_v2)
 {
 	QRDiskLink *l1, *l2;
 
@@ -282,10 +281,12 @@ static QRDiskLink *linkVerts(OutputMesh *om, MVertID in_v1, MVertID in_v2)
 	l1->brother = l2;
 	l2->brother = l1;
 
+	om->num_edges++;
+
 	return l1;
 }
 
-static void deleteLink(OutputMesh *om, QRDiskCycle *ll, QRDiskLink *l)
+static void deleteLink(OutputMesh *om, QRVert *ll, QRDiskLink *l)
 {
 	BLI_assert(ll->num_links != 0);
 
@@ -302,73 +303,34 @@ static void deleteLink(OutputMesh *om, QRDiskCycle *ll, QRDiskLink *l)
 
 static void unlinkVerts(OutputMesh *om, QRDiskLink *l)
 {
-	QRDiskCycle *ll1, *ll2;
+	QRVert *ll1, *ll2;
 
-	ll2 = &om->vlinks[l->v];
-	ll1 = &om->vlinks[l->brother->v];
+	ll2 = &om->verts[l->v];
+	ll1 = &om->verts[l->brother->v];
 
 	deleteLink(om, ll1, l);
 	deleteLink(om, ll2, l->brother);
+
+	om->num_edges--;
 }
 
 /* ADDING STUFF TO OUTPUT MESH */
 
-static MVertID addVert(OutputMesh *om, float in_co[3], float in_no[3])
+static QRVertID addVert(OutputMesh *om, float in_co[3], float in_no[3])
 {
-	if (om->totvert == om->allocvert) {
-		om->allocvert = om->allocvert * 2 + 10;
-		om->verts = MEM_reallocN(om->verts, sizeof(MVert) * om->allocvert);
-		om->vlinks = MEM_reallocN(om->vlinks, sizeof(QRDiskCycle) * om->allocvert);
+	if (om->num_verts == om->alloc_verts) {
+		om->alloc_verts = om->alloc_verts * 2 + 10;
+		om->verts = MEM_reallocN(om->verts, sizeof(QRVert) * om->alloc_verts);
 	}
 
-	om->verts[om->totvert].flag = 0;
-	copy_v3_v3(om->verts[om->totvert].co, in_co);
+	copy_v3_v3(om->verts[om->num_verts].co, in_co);
 	if (in_no)
-		normal_float_to_short_v3(om->verts[om->totvert].no, in_no);
+		copy_v3_v3(om->verts[om->num_verts].no, in_no);
 
-	om->vlinks[om->totvert].link = NULL;
-	om->vlinks[om->totvert].num_links = 0;
+	om->verts[om->num_verts].link = NULL;
+	om->verts[om->num_verts].num_links = 0;
 	
-	return om->totvert++;
-}
-
-static int addEdge(OutputMesh *om, unsigned int in_v1, unsigned int in_v2)
-{
-	if (om->totedge == om->allocedge) {
-		om->allocedge = om->allocedge * 2 + 10;
-		om->edges = MEM_reallocN(om->edges, om->allocedge * sizeof(MEdge));
-	}
-	om->edges[om->totedge].v1 = in_v1;
-	om->edges[om->totedge].v2 = in_v2;
-	om->edges[om->totedge].flag = ME_EDGEDRAW;
-	
-	return om->totedge++;
-}
-
-static int addLoop(OutputMesh *om, unsigned int in_v, unsigned int in_e)
-{
-	if (om->totloop == om->allocloop) {
-		om->allocloop = om->allocloop * 2 + 10;
-		om->loops = MEM_reallocN(om->loops, om->allocloop * sizeof(MLoop));
-	}
-	om->loops[om->totloop].v = in_v;
-	om->loops[om->totloop].e = in_e;
-	
-	return om->totloop++;
-}
-
-static int addPoly(OutputMesh *om, int in_ls, int in_tl)
-{
-	if (om->totpolys == om->allocpolys) {
-		om->allocpolys = om->allocpolys * 2 + 10;
-		om->polys = MEM_reallocN(om->polys, om->allocpolys * sizeof(MPoly));
-	}
-	om->polys[om->totpolys].loopstart = in_ls;
-	om->polys[om->totpolys].totloop = in_tl;
-	om->polys[om->totpolys].mat_nr = 0;
-	om->polys[om->totpolys].flag = 0;
-
-	return om->totpolys++;
+	return om->num_verts++;
 }
 
 /* SEED QUEUE */
@@ -458,7 +420,7 @@ static void getInitialSeeds(GradientFlowSystem *gfsys)
 
 /* QREdge ROUTINES */
 
-static void appendOnQREdge(OutputMesh *om, QREdge *in_e, MVertID in_v, float in_dist)
+static void appendOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_v, float in_dist)
 {
 	QREdgeLink *newl = BLI_memarena_alloc(om->memarena, sizeof(QREdgeLink));
 
@@ -476,7 +438,7 @@ static void appendOnQREdge(OutputMesh *om, QREdge *in_e, MVertID in_v, float in_
 	}
 }
 
-static void prependOnQREdge(OutputMesh *om, QREdge *in_e, MVertID in_v, float in_dist)
+static void prependOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_v, float in_dist)
 {
 	QREdgeLink *newl = BLI_memarena_alloc(om->memarena, sizeof(QREdgeLink));
 
@@ -490,7 +452,7 @@ static void prependOnQREdge(OutputMesh *om, QREdge *in_e, MVertID in_v, float in
 		in_e->v2 = newl;
 }
 
-static void insertAfterOnQREdge(OutputMesh *om, QREdge *in_e, QREdgeLink *in_l, MVertID in_v, float in_dist)
+static void insertAfterOnQREdge(OutputMesh *om, QREdge *in_e, QREdgeLink *in_l, QRVertID in_v, float in_dist)
 {
 	QREdgeLink *newl = BLI_memarena_alloc(om->memarena, sizeof(QREdgeLink));
 
@@ -508,10 +470,10 @@ static void insertAfterOnQREdge(OutputMesh *om, QREdge *in_e, QREdgeLink *in_l, 
 	in_l->next = newl;
 }
 
-static void insertOnQREdge(OutputMesh *om, QREdge *in_e, MVertID in_vid)
+static void insertOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_vid)
 {
 	float tmp, vec[3];
-	MVert *verts = om->verts;
+	QRVert *verts = om->verts;
 	QREdgeLink *it;
 
 	if (in_e->num_links == 0) {
@@ -548,7 +510,7 @@ static void insertOnQREdge(OutputMesh *om, QREdge *in_e, MVertID in_vid)
 	in_e->num_links++;
 }
 
-static void linkOnQREdge(OutputMesh *om, QREdge *in_e, MVertID in_v1, MVertID in_v2)
+static void linkOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_v1, QRVertID in_v2)
 {
 	QREdgeLink *it;
 
@@ -563,7 +525,7 @@ static void linkOnQREdge(OutputMesh *om, QREdge *in_e, MVertID in_v1, MVertID in
 			it->elink = linkVerts(om, it->v, it->next->v);
 }
 
-static QREdge *addQREdgeToList(OutputMesh *om, LinkNode **list, MVertID in_v1, MVertID in_v2)
+static QREdge *addQREdgeToList(OutputMesh *om, LinkNode **list, QRVertID in_v1, QRVertID in_v2)
 {
 	QREdge *newe = BLI_memarena_calloc(om->memarena, sizeof(QREdge));
 
@@ -797,14 +759,13 @@ static float getSamplingDistanceFunctionOnFace(GradientFlowSystem *gfsys, int in
 }
 #endif // 0
 
-
 /* GFLINE STUFF */
 
 static void addGFPoint(InputMesh *im, OutputMesh *om, GFPoint *in_p)
 {
 	int i;
 	float no[3];
-	MVertID newv;
+	QRVertID newv;
 
 	if (in_p->type == eVert) {
 		if (om->vonvs[in_p->v] == -1) {
@@ -1082,7 +1043,7 @@ static void generateIntersectionsOnFaces(OutputMesh *om, InputMesh *im)
 	float isection[3], lambda;
 	QREdge *e1, *e2;
 	LinkNode *iter1, *iter2;
-	MVertID newv;
+	QRVertID newv;
 
 	for (f = 0; f < im->num_faces; f++) {
 		for (iter1 = om->ringf[0][f]; iter1; iter1 = iter1->next) {
@@ -1107,57 +1068,52 @@ static void generateIntersectionsOnFaces(OutputMesh *om, InputMesh *im)
 static void deleteDegenerateVerts(OutputMesh *om)
 {
 	int i, m, n;
-	MVertID a, b, *vertmap;
-	MVert *newverts;
-	QRDiskCycle *newlinks;
+	QRVertID a, b, *vertmap;
+	QRVert *newverts;
 	QRDiskLink *it;
 
-	vertmap = MEM_mallocN(sizeof(MVertID) * om->totvert, __func__);
-
-	for (i = 0; i < om->totvert; i++) {
-		m = om->vlinks[i].num_links;
+	for (i = 0; i < om->num_verts; i++) {
+		m = om->verts[i].num_links;
 
 		if (m == 1)
-			unlinkVerts(om, om->vlinks[i].link);
+			unlinkVerts(om, om->verts[i].link);
 		else if (m == 2) {
-			a = om->vlinks[i].link->v;
-			b = om->vlinks[i].link->next->v;
-			unlinkVerts(om, om->vlinks[i].link);
-			unlinkVerts(om, om->vlinks[i].link);
+			a = om->verts[i].link->v;
+			b = om->verts[i].link->next->v;
+			unlinkVerts(om, om->verts[i].link);
+			unlinkVerts(om, om->verts[i].link);
 			linkVerts(om, a, b);
 		}
 	}
 
-	for (i = 0, n = 0; i < om->totvert; i++) {
-		if (om->vlinks[i].num_links == 0)
+	vertmap = MEM_mallocN(sizeof(QRVertID) * om->num_verts, __func__);
+
+	for (i = 0, n = 0; i < om->num_verts; i++) {
+		if (om->verts[i].num_links == 0)
 			vertmap[i] = -1;
 		else
 			vertmap[i] = n++;
 	}
 
-	newverts = MEM_mallocN(sizeof(MVert) * n, "Newverts");
-	newlinks = MEM_callocN(sizeof(QRDiskCycle) * n, "Newlinks");
+	newverts = MEM_callocN(sizeof(QRVert) * n, "Newlinks");
 
-	for (i = 0, n = 0; i < om->totvert; i++) {
+	for (i = 0, n = 0; i < om->num_verts; i++) {
 		if (vertmap[i] == -1) continue;
 
-		memcpy(&newverts[n], &om->verts[i], sizeof(MVert));
-		memcpy(&newlinks[n], &om->vlinks[i], sizeof(QRDiskCycle));
+		memcpy(&newverts[n], &om->verts[i], sizeof(QRVert));
 
-		it = newlinks[n].link;
+		it = newverts[n].link;
 		do {
 			it->v = vertmap[it->v];
 			it = it->next;
-		} while (it != newlinks[n].link);
+		} while (it != newverts[n].link);
 		n++;
 	}
 
 	MEM_SAFE_FREE(om->verts);
-	MEM_SAFE_FREE(om->vlinks);
 	MEM_SAFE_FREE(vertmap);
-	om->totvert = n;
+	om->num_verts = n;
 	om->verts = newverts;
-	om->vlinks = newlinks;
 }
 
 static void hideEdgesOnFaces(OutputMesh *om, InputMesh *im)
@@ -1188,51 +1144,71 @@ static void hideEdgesOnFaces(OutputMesh *om, InputMesh *im)
 	}
 }
 
-static void makeEdges(OutputMesh *om)
+static void makeEdges(OutputMesh *om, MEdge *r_edges)
 {
-	int i, j;
+	int i, j, e;
 	QRDiskLink *it;
 
-	for (i = 0; i < om->totvert; i++) {
-		if (om->verts[i].flag & ME_HIDE) continue;
-		for (j = 0, it = om->vlinks[i].link; j < om->vlinks[i].num_links; j++, it = it->next) {
-			if (it->e < 0 && !(om->verts[it->v].flag & ME_HIDE)) {
-				it->brother->e = it->e = addEdge(om, i, it->v);
+	for (i = 0, e = 0; i < om->num_verts; i++) {
+		for (j = 0, it = om->verts[i].link;
+			 j < om->verts[i].num_links;
+			 j++, it = it->next)
+		{
+			if (it->e < 0) {
+				it->brother->e = it->e = e;
+
+				r_edges[e].v1 = i;
+				r_edges[e].v2 = it->v;
+				r_edges[e].bweight = 0;
+				r_edges[e].crease = 0;
+				r_edges[e].flag = ME_EDGEDRAW;
 			}
 		}
 	}
 }
 
-static void makePolys(OutputMesh *om)
+static void makePolys(OutputMesh *om, MPoly *r_polys, MLoop *r_loops)
 {
-	int i, j, s;
-	MVertID v;
+	int i, j, s, num_loops, num_polys;
+	QRVertID v;
 	QRDiskLink *it, *lit;
 
-	for (i = 0; i < om->totvert; i++) {
-		if (om->verts[i].flag & ME_HIDE) continue;
+	num_loops = 0;
+	num_polys = 0;
 
-		for (j = 0, it = om->vlinks[i].link; j < om->vlinks[i].num_links; j++, it = it->next) {
+	for (i = 0; i < om->num_verts; i++) {
+		for (j = 0, it = om->verts[i].link;
+			 j < om->verts[i].num_links;
+			 j++, it = it->next)
+		{
 			if (it->poly_on_right) continue;
 
-			s = om->totloop;
+			s = num_loops;
 			v = i;
 			lit = it;
 			do {
-				addLoop(om, v, lit->e);
+				r_loops[num_loops].v = v;
+				r_loops[num_loops].e = lit->e;
+				num_loops++;
+
 				v = lit->v;
 				lit->poly_on_right = true;
 				lit = lit->brother->next;
 			} while (v != i);
 			
-			addPoly(om, s, om->totloop - s);
+			r_polys[num_polys].loopstart = s;
+			r_polys[num_polys].totloop = num_loops - s;
+			r_polys[num_polys].mat_nr = 0;
+			r_polys[num_polys].flag = 0;
+			num_polys++;
 		}
 	}
 }
 
+#if 0
 static void makeNormals(OutputMesh *om)
 {
-	int i, tv = om->totvert;
+	int i, tv = om->vert;
 	float npos[3];
 
 	for (i = 0; i < tv; i++) {
@@ -1242,16 +1218,24 @@ static void makeNormals(OutputMesh *om)
 		addEdge(om, i, addVert(om, npos, NULL));
 	}
 }
+#endif // 0
+
+static void initOutputMesh(OutputMesh *om, InputMesh *im)
+{
+	om->num_verts = om->alloc_verts = om->num_edges = 0;
+
+	om->memarena = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Output Mesh");
+	om->vonvs = MEM_mallocN(sizeof(QRVertID) * im->num_verts, __func__);
+	fill_vn_i(om->vonvs, im->num_verts, -1);
+	om->ringe = MEM_callocN(sizeof(QREdge) * im->num_edges, "GFListEdges");
+	om->ringf[0] = MEM_callocN(sizeof(LinkNode *) * im->num_faces, "GFListFaces");
+	om->ringf[1] = MEM_callocN(sizeof(LinkNode *) * im->num_faces, "GFListFaces");
+}
 
 void freeOutputMesh(OutputMesh *om)
 {
-	om->totvert = om->allocvert = om->totedge = om->allocedge = 0;
-	om->totloop = om->allocloop = om->totpolys = om->allocpolys = 0;
+	om->num_edges = om->num_verts = om->alloc_verts = 0;
 	MEM_SAFE_FREE(om->verts);
-	MEM_SAFE_FREE(om->vlinks);
-	MEM_SAFE_FREE(om->edges);
-	MEM_SAFE_FREE(om->polys);
-	MEM_SAFE_FREE(om->loops);
 	MEM_SAFE_FREE(om->vonvs);
 	MEM_SAFE_FREE(om->ringe);
 	MEM_SAFE_FREE(om->ringf[0]);
@@ -1262,52 +1246,42 @@ void freeOutputMesh(OutputMesh *om)
 	}
 }
 
-void generateMesh(LaplacianSystem *sys)
+DerivedMesh *makeResultMesh(LaplacianSystem *sys)
 {
 	int i;
+	MVert *verts;
 	OutputMesh *om = &sys->output_mesh;
+	DerivedMesh *ret;
 
-	freeOutputMesh(om);
-	sys->output_mesh.memarena = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Output Mesh");
-	sys->output_mesh.vonvs = MEM_mallocN(sizeof(MVertID) * sys->input_mesh.num_verts, __func__);
-	for (i = 0; i < sys->input_mesh.num_verts; i++)
-		sys->output_mesh.vonvs[i] = -1;
-	om->ringe = MEM_callocN(sizeof(QREdge) * sys->input_mesh.num_edges, "GFListEdges");
-	om->ringf[0] = sys->gfsys[0]->ringf = MEM_callocN(sizeof(LinkNode *) * sys->input_mesh.num_faces, "GFListFaces");
-	om->ringf[1] = sys->gfsys[1]->ringf = MEM_callocN(sizeof(LinkNode *) * sys->input_mesh.num_faces, "GFListFaces");
+	initOutputMesh(om, &sys->input_mesh);
+	sys->gfsys[0]->ringf = om->ringf[0];
+	sys->gfsys[1]->ringf = om->ringf[1];
 
 	computeFlowLines(sys);
 	generateIntersectionsOnFaces(om, &sys->input_mesh);
 	deleteDegenerateVerts(om);
-	//deleteDegenerateVerts(om);
 	//hideEdgesOnFaces(om, &sys->input_mesh);
-	makeEdges(om);
-	makePolys(om);
 	//makeNormals(om);
-}
 
-DerivedMesh *getResultMesh(LaplacianSystem *sys)
-{
-	MVert *verts;
-	MEdge *edges;
-	MPoly *polys;
-	MLoop *loops;
-	OutputMesh *om = &sys->output_mesh;
-	DerivedMesh *ret;
+	if (!om->num_verts)
+		return NULL;
 
-	if (!om->totvert) return NULL;
-
-	ret = CDDM_new(om->totvert, om->totedge, 0, om->totloop, om->totpolys);
+	ret = CDDM_new(om->num_verts, om->num_edges, 0,
+				   om->num_edges * 2, 2 + om->num_edges - om->num_verts);
 
 	verts = ret->getVertArray(ret);
-	memcpy(verts, om->verts, om->totvert * sizeof(MVert));
-	edges = ret->getEdgeArray(ret);
-	memcpy(edges, om->edges, om->totedge * sizeof(MEdge));
-	loops = ret->getLoopArray(ret);
-	memcpy(loops, om->loops, om->totloop * sizeof(MLoop));
-	polys = ret->getPolyArray(ret);
-	memcpy(polys, om->polys, om->totpolys * sizeof(MPoly));
 
+	for (i = 0; i < om->num_verts; i++) {
+		copy_v3_v3(verts[i].co, om->verts[i].co);
+		normal_float_to_short_v3(verts[i].no, om->verts[i].no);
+		verts[i].bweight = 0;
+		verts[i].flag = 0;
+	}
+
+	makeEdges(om, ret->getEdgeArray(ret));
+	makePolys(om, ret->getPolyArray(ret), ret->getLoopArray(ret));
+
+	freeOutputMesh(om);
 	CDDM_recalc_tessellation(ret);
 	//CDDM_calc_edges_tessface(ret);
 	//ret->dirty |= DM_DIRTY_NORMALS;

@@ -45,25 +45,25 @@
 #define QR_SEEDDIST 0.08f
 
 typedef int MEdgeID;
-typedef int MVertID;
+typedef int QRVertID;
 
 typedef struct QRDiskLink {
 	struct QRDiskLink *next, *prev, *brother;
 	MEdgeID e;
-	MVertID v;
+	QRVertID v;
 	float ang;
 	bool poly_on_right;
 } QRDiskLink;
 
-typedef struct QRDiskCycle {
+typedef struct QRVert {
 	QRDiskLink *link;
-	float vec[3];
+	float co[3], no[3], vec[3];
 	int num_links;
-} QRDiskCycle;
+} QRVert;
 
 typedef struct QREdgeLink {
 	struct QREdgeLink *next;
-	MVertID v;
+	QRVertID v;
 	QRDiskLink *elink;
 	float dist;
 } QREdgeLink;
@@ -83,7 +83,7 @@ typedef enum {
 typedef struct GFPoint {
 	float co[3];
 	int f, v, e;
-	MVertID id;
+	QRVertID id;
 	GFPointType type;
 } GFPoint;
 
@@ -117,7 +117,6 @@ typedef struct InputMesh {
 	float(*no)[3];					/* Original face normal */
 
 	unsigned int(*faces)[3];		/* Copy of MFace (tessface) v1-v3, v2-v4 */
-
 	unsigned int(*edges)[2];		/* Copy of edges v1-v2 */
 	unsigned int(*faces_edge)[2];	/* Faces by edges  */
 
@@ -132,19 +131,13 @@ typedef struct InputMesh {
 
 typedef struct OutputMesh {
 	MemArena *memarena;
-	QRDiskCycle *vlinks;
-	MVertID *vonvs;
+	QRVert *verts;
+	QRVertID *vonvs;
 	QREdge *ringe;                  /* QREdges per original edges */
 	LinkNode **ringf[2];               /* Lists of QREdge per original faces */
 	
-	int totvert, allocvert;
-	MVert *verts;
-	int totedge, allocedge;
-	MEdge *edges;
-	int totloop, allocloop;
-	MLoop *loops;
-	int totpolys, allocpolys;
-	MPoly *polys;
+	int num_verts, alloc_verts;
+	int num_edges;
 } OutputMesh;
 
 typedef struct LaplacianSystem {
@@ -160,9 +153,8 @@ typedef struct LaplacianSystem {
 	NLContext *context;				/* System for solve general implicit rotations */
 } LaplacianSystem;
 
-void generateMesh(LaplacianSystem *sys);
 void freeOutputMesh(OutputMesh *om);
-DerivedMesh *getResultMesh(LaplacianSystem *sys);
+DerivedMesh *makeResultMesh(LaplacianSystem *sys);
 
 #endif /*openNl*/
 #endif /*__MOD_QUADREMESH_GEOM_H__*/
