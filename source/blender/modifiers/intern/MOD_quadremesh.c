@@ -173,8 +173,10 @@ static void deleteLaplacianSystem(LaplacianSystem *sys)
 {
 	freeInputMesh(&sys->input_mesh);
 	freeOutputMesh(&sys->output_mesh);
-	freeGradientFlowSystem(sys->gfsys[0]);
-	freeGradientFlowSystem(sys->gfsys[1]);
+	if (sys->gfsys[0])
+		freeGradientFlowSystem(sys->gfsys[0]);
+	if (sys->gfsys[1])
+		freeGradientFlowSystem(sys->gfsys[1]);
 	
 	MEM_SAFE_FREE(sys->U_field);
 	
@@ -508,17 +510,17 @@ static LaplacianSystem *initSystem(QuadRemeshModifierData *qmd, Object *ob, Deri
 		}
 	}
 
-	sys->gfsys[0] = newGradientFlowSystem(sys);
-	sys->gfsys[1] = newGradientFlowSystem(sys);
-
 	createFaceRingMap(im);
 	createEdgeRingMap(im);
 	createFacesByEdge(im);
 
 	computeScalarField(sys);
 
-	if (sys->has_solution)
+	if (sys->has_solution) {
+		sys->gfsys[0] = newGradientFlowSystem(sys);
+		sys->gfsys[1] = newGradientFlowSystem(sys);
 		computeGradientFields(sys);
+	}
 
 	return sys;
 }
@@ -600,9 +602,7 @@ static void copyData(ModifierData *md, ModifierData *target)
 static bool isDisabled(ModifierData *md, int UNUSED(useRenderParams))
 {
 	QuadRemeshModifierData *lmd = (QuadRemeshModifierData *)md;
-	//if (lmd->anchor_grp_name[0]) return 0;
-	//return 1;
-	return 0;
+	LaplacianSystem *sys = lmd->cache_system;
 }
 
 static CustomDataMask requiredDataMask(Object *UNUSED(ob), ModifierData *md)
@@ -635,6 +635,9 @@ static DerivedMesh *applyModifier(ModifierData *md,
 	QuadRemeshModifierData *qmd = (QuadRemeshModifierData *)md;
 	LaplacianSystem *sys = qmd->cache_system;
 
+	qmd->flag |= MOD_QUADREMESH_ALL_DIRTY;
+	qmd->flag |= MOD_QUADREMESH_REMESH;
+
 #ifdef WITH_OPENNL
 	if (qmd->flag & MOD_QUADREMESH_ALL_DIRTY) {
 		if (sys)
@@ -643,7 +646,7 @@ static DerivedMesh *applyModifier(ModifierData *md,
 		sys = initSystem(qmd, ob, dm);
 	}
 	
-	if (sys) {
+	if (sys && sys->has_solution) {
 		if (qmd->flag & MOD_QUADREMESH_REMESH) {
 			if (sys->cache_mesh)
 				sys->cache_mesh->release(sys->cache_mesh);
