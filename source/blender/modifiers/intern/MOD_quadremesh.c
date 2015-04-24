@@ -583,6 +583,7 @@ static void initData(ModifierData *md)
 	QuadRemeshModifierData *lmd = (QuadRemeshModifierData *)md;
 	lmd->anchor_grp_name[0] = '\0';
 	lmd->flag = 0;
+
 	lmd->cache_system = NULL;
 	lmd->max_line_dist = QR_MINDIST;
 	lmd->sampling_interval = QR_SAMPLING_RATE;
@@ -641,7 +642,7 @@ static DerivedMesh *applyModifier(ModifierData *md,
 #ifdef WITH_OPENNL
 	if (qmd->flag & MOD_QUADREMESH_ALL_DIRTY) {
 		if (sys)
-				deleteLaplacianSystem(sys);
+			deleteLaplacianSystem(sys);
 
 		sys = initSystem(qmd, ob, dm);
 	}
