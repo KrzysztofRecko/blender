@@ -48,10 +48,11 @@
 #include "BLI_linklist.h"
 #include "BKE_cdderivedmesh.h"
 #include "BLI_memarena.h"
+#include "BLI_rand.h"
 
 #define QR_SAMPLING_RATE 0.03f
 #define QR_MINDIST 0.04f
-#define QR_SEEDPROB 0.75f
+#define QR_SEEDPROB 0.2f
 #define QR_SEEDDIST 0.08f
 
 #define QR_NO_FACE UINT_MAX
@@ -159,6 +160,7 @@ typedef struct LaplacianSystem {
 	InputMesh input_mesh;
 	OutputMesh output_mesh;
 	GradientFlowSystem *gfsys[2];
+	RNG *rng;
 	
 	float *U_field;					/* Initial scalar field*/
 

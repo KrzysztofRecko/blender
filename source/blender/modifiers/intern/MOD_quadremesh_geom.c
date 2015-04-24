@@ -727,7 +727,7 @@ static int queryDirection(GradientFlowSystem *gfsys, float in_co[3], int in_f, f
 static bool checkPoint(GradientFlowSystem *gfsys, float in_oldco[3], float in_newco[3], int in_f, float dist, float maxdist)
 {
 	int d;
-	bool make_seed = BLI_frand() > gfsys->sys->qmd->seeding_probability;
+	bool make_seed = BLI_rng_get_float(gfsys->sys->rng) < gfsys->sys->qmd->seeding_probability;
 	float seg[3], dir[3];
 	InputMesh *im = &gfsys->sys->input_mesh;
 
@@ -1262,6 +1262,8 @@ DerivedMesh *makeResultMesh(LaplacianSystem *sys)
 
 	start_time = PIL_check_seconds_timer();
 
+	sys->rng = BLI_rng_new(100);
+
 	initOutputMesh(om, &sys->input_mesh);
 	sys->gfsys[0]->ringf = om->ringf[0];
 	sys->gfsys[1]->ringf = om->ringf[1];
@@ -1291,6 +1293,8 @@ DerivedMesh *makeResultMesh(LaplacianSystem *sys)
 	makePolys(om, ret->getPolyArray(ret), ret->getLoopArray(ret));
 
 	freeOutputMesh(om);
+	BLI_rng_free(sys->rng);
+
 	CDDM_recalc_tessellation(ret);
 	//CDDM_calc_edges_tessface(ret);
 	//ret->dirty |= DM_DIRTY_NORMALS;
