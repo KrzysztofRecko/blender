@@ -22,6 +22,16 @@
  *
  */
 
+/**
+ * Known issues:
+ *  - when triangles too small, stops tracing the line
+ *  - caching the u-field
+ *  - preserving feature edges
+ *  - bad topology near field extrema
+ *  - not closing gaps between line's ends
+ *  - semi automatic extrema placement
+ */
+
 /** \file blender/modifiers/intern/MOD_quadremesh_geom.h
  *  \ingroup modifiers
  */

@@ -661,10 +661,11 @@ static int queryDirection(GradientFlowSystem *gfsys, float in_co[3], int in_f, f
 		mul_v3_v3fl(c, im->no[in_f], len);
 		sub_v3_v3(dir, c);
 		if (normalize_v3(dir) < FLT_EPSILON) 
-			return 2;
+			break;
 		if (dot_v3v3(im->no[oldf], im->no[in_f]) < 0.0f) mul_v3_fl(dir, -1.0f);
 
-		if (nextPoint(newco, &e, im, in_f, oldco, dir)) return 2;
+		if (nextPoint(newco, &e, im, in_f, oldco, dir))
+			break;
 		oldf = in_f;
 
 		sub_v3_v3v3(c, newco, oldco);
@@ -719,6 +720,8 @@ static int queryDirection(GradientFlowSystem *gfsys, float in_co[3], int in_f, f
 		in_f = getOtherFaceAdjacentToEdge(im, in_f, e);
 		copy_v3_v3(oldco, newco);
 	}
+
+	return 2;
 }
 
 static bool checkPoint(GradientFlowSystem *gfsys, float in_oldco[3], float in_newco[3], int in_f, float dist, float maxdist)
@@ -1272,7 +1275,7 @@ DerivedMesh *makeResultMesh(LaplacianSystem *sys)
 	if (!om->num_verts)
 		return NULL;
 
-	ret = CDDM_new(om->num_verts, om->num_edges, 0,
+	ret = CDDM_new(om->num_verts, om->num_edges, 0,// 0, 0);
 				   om->num_edges * 2, 2 + om->num_edges - om->num_verts);
 
 	verts = ret->getVertArray(ret);
