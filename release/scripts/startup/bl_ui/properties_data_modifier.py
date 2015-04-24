@@ -1021,19 +1021,19 @@ class DATA_PT_modifiers(ModifierButtonsPanel, Panel):
 
         layout.separator()
 
-        row = layout.row()
-        row.enabled = bool(md.vertex_group)
-        row.operator("object.quadremesh_computeflow", text="Recompute Flow" if is_computeflow else "Compute Flow")        
+        #row = layout.row()
+        #row.enabled = bool(md.vertex_group)
+        #row.operator("object.quadremesh_computeflow", text="Recompute Flow" if is_computeflow else "Compute Flow")        
 
         layout.separator()
         #row = layout.row()
         layout.prop(md, "max_line_dist")
 
-        layout.separator()
+        #layout.separator()
 
-        row = layout.row()
-        row.enabled = bool(md.vertex_group)
-        row.operator("object.quadremesh_remesh", text="Remesh")        
+        #row = layout.row()
+        #row.enabled = bool(md.vertex_group)
+        #row.operator("object.quadremesh_remesh", text="Remesh")        
          
     @staticmethod
     def vertex_weight_mask(layout, ob, md):
