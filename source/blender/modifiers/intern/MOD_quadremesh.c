@@ -253,8 +253,8 @@ static void createFacesByEdge(InputMesh *im){
 		v1 = im->edges[e][0];
 		v2 = im->edges[e][1];
 
-		im->faces_edge[e][0] = -1;
-		im->faces_edge[e][1] = -1;
+		im->faces_edge[e][0] = QR_NO_FACE;
+		im->faces_edge[e][1] = QR_NO_FACE;
 
 		for (i = 0, j = 0; i < im->ringf_map[v1].count && j < 2; i++) {
 			vin = im->faces[im->ringf_map[v1].indices[i]];

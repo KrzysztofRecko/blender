@@ -654,7 +654,7 @@ static int queryDirection(GradientFlowSystem *gfsys, float in_co[3], int in_f, f
 	oldf = in_f;
 	actlen = 0.0f;
 
-	while (1) {
+	while (in_f != QR_NO_FACE) {
 		len = dot_v3v3(dir, im->no[in_f]);
 		mul_v3_v3fl(c, im->no[in_f], len);
 		sub_v3_v3(dir, c);
@@ -1009,7 +1009,7 @@ static void computeGFLine(GFLine *line)
 			
 			if (!addPointToLine(line, &p)) break;
 			p.f = getOtherFaceAdjacentToEdge(im, p.f, p.e);
-		} while (p.f != -1);
+		} while (p.f != QR_NO_FACE);
 
 		dir = -dir;
 	} while (changeLineDirection(line));

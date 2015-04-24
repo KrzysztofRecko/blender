@@ -44,6 +44,8 @@
 #define QR_SEEDPROB 0.75f
 #define QR_SEEDDIST 0.08f
 
+#define QR_NO_FACE UINT_MAX
+
 typedef int MEdgeID;
 typedef int QRVertID;
 
