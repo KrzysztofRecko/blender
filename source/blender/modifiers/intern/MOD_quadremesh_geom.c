@@ -39,6 +39,8 @@
 #include "BKE_particle.h"
 #include "BKE_deform.h"
 
+#include "PIL_time.h"
+
 #include "MOD_util.h"
 
 //#define QR_SHOWQUERIES
@@ -1250,9 +1252,12 @@ void freeOutputMesh(OutputMesh *om)
 DerivedMesh *makeResultMesh(LaplacianSystem *sys)
 {
 	int i;
+	double start_time;
 	MVert *verts;
 	OutputMesh *om = &sys->output_mesh;
 	DerivedMesh *ret;
+
+	start_time = PIL_check_seconds_timer();
 
 	initOutputMesh(om, &sys->input_mesh);
 	sys->gfsys[0]->ringf = om->ringf[0];
@@ -1286,6 +1291,8 @@ DerivedMesh *makeResultMesh(LaplacianSystem *sys)
 	CDDM_recalc_tessellation(ret);
 	//CDDM_calc_edges_tessface(ret);
 	//ret->dirty |= DM_DIRTY_NORMALS;
+
+	printf("Mesh generation time: %f ms", (PIL_check_seconds_timer() - start_time) * 1000.0f);
 
 	return ret;
 }
