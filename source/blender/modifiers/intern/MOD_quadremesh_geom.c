@@ -43,8 +43,8 @@
 
 #include "MOD_util.h"
 
-//#define QR_SHOWQUERIES
-#define QR_LINELIMIT 1000000
+#define QR_SHOWQUERIES
+#define QR_LINELIMIT 100
 
 
 #if 0 /* UNUSED ROUTINES */
@@ -202,6 +202,19 @@ static void getPerpendicularToNormal(float r[3], float in_a[3], float in_b[3], f
 	sub_v3_v3v3(r, in_b, in_a);
 	project_v3_v3v3(proj, r, in_no);
 	sub_v3_v3(r, proj);
+}
+
+static void getNormalAtEdge(float r_no[3], InputMesh *im, int in_e)
+{
+	if (im->faces_edge[in_e][0] == QR_NO_FACE)
+		copy_v3_v3(r_no, im->no[im->faces_edge[in_e][1]]);
+	else if (im->faces_edge[in_e][1] == QR_NO_FACE)
+		copy_v3_v3(r_no, im->no[im->faces_edge[in_e][0]]);
+	else {
+		add_v3_v3v3(r_no, im->no[im->faces_edge[in_e][0]],
+						  im->no[im->faces_edge[in_e][1]]);
+		mul_v3_fl(r_no, 0.5f);
+	}
 }
 
 /* QRVert STUFF */
@@ -570,12 +583,10 @@ static int getOtherFaceAdjacentToEdge(InputMesh *im, int in_f, int in_e)
 }
 
 /**
- * /return 0 - all good
- *         1 - new vertex very close to 1st vertex of result edge
- *         2 -           -||-           2nd vertex of result edge
- *         3 - other error (eg. input outside of triangle)
+ * /return true - all ok
+ *         false - error
  */
-static int nextPoint(float r_co[3], int *r_edge, InputMesh *im, int in_f, float in_co[3], float in_dir[3])
+static bool nextPoint(GFPoint *r_p, InputMesh *im, GFPoint *in_p, int in_f, float in_dir[3])
 {
 	int i, pick = -1, v = -1;
 	bool is_on_vertex = false;
@@ -585,10 +596,10 @@ static int nextPoint(float r_co[3], int *r_edge, InputMesh *im, int in_f, float 
 	/* check if point is inside triangle */
 	/* check if triangle is degenerate */
 
-	add_v3_v3v3(co2, in_dir, in_co); /* second point on direction */
+	add_v3_v3v3(co2, in_dir, in_p->co); /* second point on direction */
 
 	for (i = 0; i < 3; i++) {
-		sub_v3_v3v3(a[i], in_co, im->co[im->faces[in_f][i]]);
+		sub_v3_v3v3(a[i], in_p->co, im->co[im->faces[in_f][i]]);
 		if (dot_v3v3(a[i], a[i]) < FLT_EPSILON)
 			v = i;
 	}
@@ -611,18 +622,28 @@ static int nextPoint(float r_co[3], int *r_edge, InputMesh *im, int in_f, float 
 			pick = i;
 
 	if (pick == -1)
-		return 3;
+		return false;
 
-	*r_edge = getEdgeFromVerts(im, im->faces[in_f][pick], im->faces[in_f][(pick + 1) % 3]);
+	r_p->e = getEdgeFromVerts(im, im->faces[in_f][pick], im->faces[in_f][(pick + 1) % 3]);
 
-	isect_line_line_v3(im->co[im->faces[in_f][pick]], im->co[im->faces[in_f][(pick + 1) % 3]], in_co, co2, r_co, dummy);
+	isect_line_line_v3(im->co[im->faces[in_f][pick]],
+					   im->co[im->faces[in_f][(pick + 1) % 3]],
+					   in_p->co, co2, r_p->co, dummy);
 
-	if (len_squared_v3v3(r_co, im->co[im->edges[*r_edge][0]]) < FLT_EPSILON)
-		return 1;
-	if (len_squared_v3v3(r_co, im->co[im->edges[*r_edge][1]]) < FLT_EPSILON)
-		return 2;
+	if (len_squared_v3v3(r_p->co, im->co[im->edges[r_p->e][0]]) < FLT_EPSILON) {
+		r_p->type = eVert;
+		r_p->v = im->edges[r_p->e][0];
+		copy_v3_v3(r_p->co, im->co[r_p->v]);
+	}
+	else if (len_squared_v3v3(r_p->co, im->co[im->edges[r_p->e][1]]) < FLT_EPSILON) {
+		r_p->type = eVert;
+		r_p->v = im->edges[r_p->e][1];
+		copy_v3_v3(r_p->co, im->co[r_p->v]);
+	}
+	else
+		r_p->type = eEdge;
 
-	return 0;
+	return true;
 }
 
 static bool intersectSegmentWithOthersOnFace(GradientFlowSystem *gfsys, float in_a[3], float in_b[3], int in_f)
@@ -645,100 +666,115 @@ static bool intersectSegmentWithOthersOnFace(GradientFlowSystem *gfsys, float in
  * 1 - intersection not found
  * 2 - wrong direction for this face
  */
-static int queryDirection(GradientFlowSystem *gfsys, float in_co[3], int in_f, float in_dir[3], float dist, float maxdist, bool make_seed)
+static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, float in_dir[3], float dist, float maxdist, bool make_seed)
 {
 	int e, oldf;
-	float c[3], len, actlen, oldco[3], newco[3], newco2[3], dir[3];
+	float c[3], len, actlen, chkco[3], seedco[3], dir[3];
 	InputMesh *im = &gfsys->sys->input_mesh;
+	GFPoint newp, oldp;
 
 	copy_v3_v3(dir, in_dir);
-	copy_v3_v3(oldco, in_co);
+	memcpy(&oldp, in_p, sizeof(GFPoint));
 	oldf = in_f;
 	actlen = 0.0f;
 
-	while (in_f != QR_NO_FACE) {
+	while (in_f != QR_NO_FACE && oldp.type != eVert) {
 		len = dot_v3v3(dir, im->no[in_f]);
 		mul_v3_v3fl(c, im->no[in_f], len);
 		sub_v3_v3(dir, c);
+
 		if (normalize_v3(dir) < FLT_EPSILON) 
 			break;
-		if (dot_v3v3(im->no[oldf], im->no[in_f]) < 0.0f) mul_v3_fl(dir, -1.0f);
 
-		if (nextPoint(newco, &e, im, in_f, oldco, dir))
+		if (dot_v3v3(im->no[oldf], im->no[in_f]) < 0.0f)
+			mul_v3_fl(dir, -1.0f);
+
+		if (!nextPoint(&newp, im, &oldp, in_f, dir))
 			break;
 		oldf = in_f;
 
-		sub_v3_v3v3(c, newco, oldco);
+		sub_v3_v3v3(c, newp.co, oldp.co);
 		len = len_v3(c);
 		actlen += len;
 
-		copy_v3_v3(newco2, newco);
+		if (actlen > maxdist && make_seed) {
+			mul_v3_v3fl(seedco, c, (maxdist - actlen + len) / len);
+			add_v3_v3(seedco, oldp.co);
+
+			addSeedToQueue(gfsys->seeds, seedco, eFace, in_f, -maxdist);
+		}
+		else
+			copy_v3_v3(seedco, newp.co);
+
+		if (actlen > dist && actlen - len < dist) {
+			mul_v3_v3fl(chkco, c, (dist - actlen + len) / len);
+			add_v3_v3(chkco, oldp.co);
+		}
+		else
+			copy_v3_v3(chkco, newp.co);
+
+#ifdef QR_SHOWQUERIES
+		int vf1, vf2;
+		if (make_seed) {
+			vf1 = addVert(&gfsys->sys->output_mesh, oldp.co, NULL);
+			vf2 = addVert(&gfsys->sys->output_mesh, seedco, NULL);
+		}
+		else {
+			vf1 = addVert(&gfsys->sys->output_mesh, oldp.co, NULL);
+			vf2 = addVert(&gfsys->sys->output_mesh, chkco, NULL);
+		}
+		linkVerts(&gfsys->sys->output_mesh, vf1, vf2);
+#endif
 
 		if (actlen - len < dist) {
-			if (actlen > dist) {
-				mul_v3_v3fl(newco2, c, (dist - actlen + len) / len);
-				add_v3_v3(newco2, oldco);
-			}
-
-#ifdef QR_SHOWQUERIES
-			int vf1, vf2;
-			vf1 = addVertGFSystem(gfsys, oldco);
-			vf2 = addVertGFSystem(gfsys, newco2);
-			addEdgeGFSystem(gfsys, vf1, vf2, 0);
-#endif
-
-			if (intersectSegmentWithOthersOnFace(gfsys, oldco, newco2, in_f)) return 0;
+			if (intersectSegmentWithOthersOnFace(gfsys, oldp.co, chkco, in_f))
+				return 0;
 		}
 		
-		if (actlen > dist && !make_seed)
+		if ((actlen > dist && !make_seed) || actlen > maxdist)
 			return 1;
 
-#ifdef QR_SHOWQUERIES
-		if (actlen > dist && actlen < maxdist) {
-			int vf1, vf2;
-			vf1 = addVertGFSystem(gfsys, oldco);
-			vf2 = addVertGFSystem(gfsys, newco);
-			addEdgeGFSystem(gfsys, vf1, vf2, 0);
-		}
-#endif
+		if (newp.type == eVert)
+			break;
 
-		if (actlen > maxdist) {
-			mul_v3_v3fl(newco2, c, (maxdist - actlen + len) / len);
-			add_v3_v3(newco2, oldco);
-
-#ifdef QR_SHOWQUERIES
-			int vf1, vf2;
-			vf1 = addVertGFSystem(gfsys, oldco);
-			vf2 = addVertGFSystem(gfsys, newco2);
-			addEdgeGFSystem(gfsys, vf1, vf2, 0);
-#endif
-
-			addSeedToQueue(gfsys->seeds, newco2, eFace, in_f, -maxdist);
-			return 1;
-		}
-
-		in_f = getOtherFaceAdjacentToEdge(im, in_f, e);
-		copy_v3_v3(oldco, newco);
+		in_f = getOtherFaceAdjacentToEdge(im, in_f, newp.e);
+		memcpy(&oldp, &newp, sizeof(GFPoint));
 	}
 
 	return 2;
 }
 
-static bool checkPoint(GradientFlowSystem *gfsys, float in_oldco[3], float in_newco[3], int in_f, float dist, float maxdist)
+static bool checkPoint(GradientFlowSystem *gfsys, float in_oldco[3], GFPoint *in_p, float dist, float maxdist)
 {
-	int d;
 	bool make_seed = BLI_rng_get_float(gfsys->sys->rng) < gfsys->sys->qmd->seeding_probability;
-	float seg[3], dir[3];
+
+	int d, f;
+	float seg[3], dir[3], no[3];
 	InputMesh *im = &gfsys->sys->input_mesh;
 
-	sub_v3_v3v3(seg, in_oldco, in_newco);
-	if (dot_v3v3(seg, seg) < FLT_EPSILON) return true;
+	sub_v3_v3v3(seg, in_oldco, in_p->co);
 
-	cross_v3_v3v3(dir, im->no[in_f], seg);
+	if (dot_v3v3(seg, seg) < FLT_EPSILON)
+		return true;
+
+	if (in_p->type == eEdge) {
+		getNormalAtEdge(no, im, in_p->e);
+		f = im->faces_edge[in_p->e][0];
+		if (f == QR_NO_FACE)
+			f = im->faces_edge[in_p->e][1];
+		if (f == QR_NO_FACE)
+			return true;
+	}
+	else {
+		copy_v3_v3(no, im->no[in_p->f]);
+		f = in_p->f;
+	}
+
+	cross_v3_v3v3(dir, no, seg);
 	normalize_v3(dir);
 
 	for (d = 0; d < 2; d++) {
-		if (!queryDirection(gfsys, in_newco, in_f, dir, dist, maxdist, make_seed))
+		if (!queryDirection(gfsys, in_p, f, dir, dist, maxdist, make_seed))
 			return false;
 		mul_v3_fl(dir, -1.0f);
 	}
@@ -787,19 +823,10 @@ static void addGFPoint(InputMesh *im, OutputMesh *om, GFPoint *in_p)
 			newv = om->vonvs[in_p->v];
 	}
 	else if (in_p->type == eEdge) {
-		if (im->faces_edge[in_p->e][0] == -1)
-			copy_v3_v3(no, im->no[im->faces_edge[in_p->e][1]]);
-		else if (im->faces_edge[in_p->e][1] == -1)
-			copy_v3_v3(no, im->no[im->faces_edge[in_p->e][0]]);
-		else {
-			add_v3_v3v3(no, im->no[im->faces_edge[in_p->e][0]],
-						    im->no[im->faces_edge[in_p->e][1]]);
-			mul_v3_fl(no, 0.5f);
-		}
-
+		getNormalAtEdge(no, im, in_p->e);
 		newv = addVert(om, in_p->co, no);
 	}
-	else {
+	else { /* eFace */
 		copy_v3_v3(no, im->no[in_p->f]);
 		newv = addVert(om, in_p->co, no);
 	}
@@ -807,38 +834,27 @@ static void addGFPoint(InputMesh *im, OutputMesh *om, GFPoint *in_p)
 	in_p->id = newv;
 }
 
-static void addSegmentToLine(GFLine *line, GFPoint *in_p)
+static void addSegmentToLine(GFLine *line, GFSegment *in_s)
 {
 	int i;
 	OutputMesh *om = &line->gfsys->sys->output_mesh;
 	InputMesh *im = &line->gfsys->sys->input_mesh;
 
-	addGFPoint(im, om, in_p);
+	addGFPoint(im, om, &in_s->p);
 
-	if (in_p->type == eVert) {
-		for (i = 0; i < im->ringe_map[in_p->v].count; i++)
-			insertOnQREdge(om, &om->ringe[im->ringe_map[in_p->v].indices[i]], in_p->id);
-
-		if (line->end.type == eEdge)
-			linkOnQREdge(om, &om->ringe[line->end.e], line->end.id, in_p->id);
-
-		//addQREdge(gfsys, line->end, newv, in_p->f);
+	if (in_s->p.type == eVert) {
+		for (i = 0; i < im->ringe_map[in_s->p.v].count; i++)
+			insertOnQREdge(om, &om->ringe[im->ringe_map[in_s->p.v].indices[i]], in_s->p.id);
 	}
-	else if (in_p->type == eEdge) {
-		insertOnQREdge(om, &om->ringe[in_p->e], in_p->id);
+	else if (in_s->p.type == eEdge)
+		insertOnQREdge(om, &om->ringe[in_s->p.e], in_s->p.id);
 
-		if (line->end.type == eEdge && line->end.e == in_p->e) {
-			linkOnQREdge(om, &om->ringe[in_p->e], line->end.id, in_p->id);
-		}
-		else {
-			addQREdgeToList(om, &line->gfsys->ringf[in_p->f], line->end.id, in_p->id);
-		}
-	}
-	else {
-		addQREdgeToList(om, &line->gfsys->ringf[in_p->f], line->end.id, in_p->id);
-	}
+	if (in_s->type == eEdgeSegment)
+		linkOnQREdge(om, &om->ringe[in_s->e], line->end.id, in_s->p.id);
+	else
+		addQREdgeToList(om, &line->gfsys->ringf[in_s->f], line->end.id, in_s->p.id);
 
-	memcpy(&line->end, in_p, sizeof(GFPoint));
+	memcpy(&line->end, &in_s->p, sizeof(GFPoint));
 }
 
 static void flushGFLineQueue(GFLine *line)
@@ -851,12 +867,12 @@ static void flushGFLineQueue(GFLine *line)
 	line->num_q = 0;
 }
 
-static bool enqueuePoint(GFLine *line, GFPoint *in_p)
+static bool enqueueSegment(GFLine *line, GFSegment *in_s)
 {
 	if (line->num_q == QR_GFLINE_QSIZE)
 		return false;
 
-	memcpy(&line->q[line->num_q], in_p, sizeof(GFPoint));
+	memcpy(&line->q[line->num_q], in_s, sizeof(GFSegment));
 	line->num_q++;
 
 	return true;
@@ -868,9 +884,10 @@ static bool changeLineDirection(GFLine *line)
 
 	/* reset to original state */
 	memcpy(&line->end, &line->seed, sizeof(GFPoint));
-	memcpy(&line->lastchkp, &line->seed, sizeof(GFPoint));
+	line->lastchkp = &line->seed;
 	line->oldp = &line->seed;
 	line->lastchklen = line->qlen = 0.0f;
+	line->lastchks.type = eNoSegment;
 
 	return ++line->d != 2;
 }
@@ -878,16 +895,16 @@ static bool changeLineDirection(GFLine *line)
 static bool initGFLine(GradientFlowSystem *gfsys, GFLine *line, GFPoint *in_seed)
 {
 	const float maxdist = gfsys->sys->qmd->max_line_dist;
-	const float seeddist = maxdist * 2.0f;
+	const float seeddist = maxdist * QR_MAXDIST_TO_SEEDDIST;
 
 	int i;
 	float old[3];
 	OutputMesh *om = &gfsys->sys->output_mesh;
 	InputMesh *im = &gfsys->sys->input_mesh;
 
-	if (in_seed->type != eVert) {
+	if (in_seed->type == eFace) {
 		add_v3_v3v3(old, in_seed->co, gfsys->gf[in_seed->f]);
-		if (!checkPoint(gfsys, old, in_seed->co, in_seed->f, maxdist, seeddist))
+		if (!checkPoint(gfsys, old, in_seed, maxdist, seeddist))
 			return false;
 	}
 		
@@ -895,9 +912,10 @@ static bool initGFLine(GradientFlowSystem *gfsys, GFLine *line, GFPoint *in_seed
 
 	memcpy(&line->seed, in_seed, sizeof(GFPoint));
 	memcpy(&line->end, in_seed, sizeof(GFPoint));
-	memcpy(&line->lastchkp, in_seed, sizeof(GFPoint));
+	line->lastchkp = &line->seed;
 	line->oldp = &line->seed;
 	line->gfsys = gfsys;
+	line->lastchks.type = eNoSegment;
 
 	line->d = line->num_q = 0;
 	line->lastchklen = line->qlen = 0.0f;
@@ -910,111 +928,116 @@ static bool initGFLine(GradientFlowSystem *gfsys, GFLine *line, GFPoint *in_seed
 	return true;
 }
 
-static bool addPointToLine(GFLine *line, GFPoint *in_p)
+MINLINE void makeSegment(GFSegment *r, GFSegmentType s_type, int s_ef, GFPointType p_type, int p_vef)
+{
+	r->type = s_type;
+	r->e = s_ef;
+	r->p.type = p_type;
+	r->p.v = p_vef;
+}
+
+static bool nextLineSegment(GFLine *line, GFSegment *in_s)
 {
 	const float chklen = line->gfsys->sys->qmd->sampling_interval;
 	const float maxdist = line->gfsys->sys->qmd->max_line_dist;
-	const float seeddist = maxdist * 2.0f;
+	const float seeddist = maxdist * QR_MAXDIST_TO_SEEDDIST;
 
 	float seg[3];
 	float curlen;
-	GFPoint newchkp;
+	GFSegment newchks;
 
 	/* qco[0] - first point after last checked
 	 * qco[num_q - 1] - last added point */
 
-	sub_v3_v3v3(seg, in_p->co, line->oldp->co);
+	sub_v3_v3v3(seg, in_s->p.co, line->oldp->co);
 	curlen = len_v3(seg);
 
 	while (line->qlen + curlen > line->lastchklen + chklen) {
-		mul_v3_v3fl(newchkp.co, seg, (line->lastchklen + chklen - line->qlen) / curlen);
-		add_v3_v3(newchkp.co, line->oldp->co);
-		if (line->oldp->type == eEdge && line->oldp->e == in_p->e) {
-			newchkp.type = eEdge;
-			newchkp.e = in_p->e;
-		}
-		else
-			newchkp.type = eFace;
-		newchkp.f = in_p->f;
+		mul_v3_v3fl(newchks.p.co, seg, (line->lastchklen + chklen - line->qlen) / curlen);
+		add_v3_v3(newchks.p.co, line->oldp->co);
 
-		if (!checkPoint(line->gfsys, line->lastchkp.co, newchkp.co, newchkp.f, maxdist, seeddist)) {
-			addSegmentToLine(line, &line->lastchkp);
+		if (in_s->type == eEdgeSegment)
+			makeSegment(&newchks, eEdgeSegment, in_s->e, eEdge, in_s->e);
+		else
+			makeSegment(&newchks, eFaceSegment, in_s->f, eFace, in_s->f);
+
+		if (!checkPoint(line->gfsys, line->lastchkp->co, &newchks.p, maxdist, seeddist)) {
+			if (line->lastchks.type != eNoSegment)
+				addSegmentToLine(line, &line->lastchks);
 			line->num_q = 0;
 
 			return false;
 		}
 		
 		flushGFLineQueue(line);
-		memcpy(&line->lastchkp, &newchkp, sizeof(GFPoint));
+		memcpy(&line->lastchks, &newchks, sizeof(GFSegment));
+		line->lastchkp = &line->lastchks.p;
 		line->lastchklen += chklen;
 	}
 
-	if(!enqueuePoint(line, in_p))
+	if(!enqueueSegment(line, in_s))
 		return false;
 
 	line->qlen += curlen;
-	line->oldp = &line->q[line->num_q - 1];
+	line->oldp = &line->q[line->num_q - 1].p;
 
 	return true;
 }
 
 static void computeGFLine(GFLine *line)
 {
-	int i, r, newe;
+	int i, f;
 	float gf[3], dir = 1.0f;
 	LaplacianSystem *sys = line->gfsys->sys;
 	InputMesh *im = &sys->input_mesh;
-	GFPoint p;
+	GFSegment news;
 
 	do {
-		memcpy(&p, &line->seed, sizeof(GFPoint));
+		if (line->oldp->type == eFace)
+			f = line->oldp->f;
 
 		do {
-			if (p.type == eVert) {
-				for (i = 0; i < im->ringf_map[p.v].count; i++) {
-					p.f = im->ringf_map[p.v].indices[i];
+			if (line->oldp->type == eVert) {
+				for (i = 0; i < im->ringf_map[line->oldp->v].count; i++) {
+					f = im->ringf_map[line->oldp->v].indices[i];
 
-					mul_v3_v3fl(gf, line->gfsys->gf[p.f], dir);
-					if (!nextPoint(p.co, &p.e, im, p.f, line->oldp->co, gf)) {
-						p.type = eEdge;
+					mul_v3_v3fl(gf, line->gfsys->gf[f], dir);
+					if (!nextPoint(&news.p, im, line->oldp, f, gf))
+						continue;
+
+					if (news.p.type == eEdge) {
+						news.type = eFaceSegment;
+						news.f = f;
 						break;
 					}
 				}
-				if (p.type == eVert) break;
+				if (news.p.type != eEdge)
+					break;
 			}
 			else {
-				mul_v3_v3fl(gf, line->gfsys->gf[p.f], dir);
-				r = nextPoint(p.co, &newe, im, p.f, line->oldp->co, gf);
-
-				if (r == 1) {
-					p.type = eVert;
-					p.v = im->edges[newe][0];
-				}
-				else if (r == 2) {
-					p.type = eVert;
-					p.v = im->edges[newe][1];
-				}
-				else if (r == 3)
+				mul_v3_v3fl(gf, line->gfsys->gf[f], dir);
+				if (!nextPoint(&news.p, im, line->oldp, f, gf))
 					break;
-				else
-					p.type = eEdge;
 
-				if (newe == p.e) {
-					if (dir * sys->U_field[im->edges[p.e][0]] < dir * sys->U_field[im->edges[p.e][1]])
-						p.v = im->edges[p.e][0];
+				news.type = eFaceSegment;
+				news.f = f;
+				
+				if (news.p.type == eEdge && line->oldp->type == eEdge && news.p.e == line->oldp->e) {
+					if (dir * sys->U_field[im->edges[news.p.e][0]] < dir * sys->U_field[im->edges[news.p.e][1]])
+						makeSegment(&news, eEdgeSegment, news.p.e, eVert, im->edges[news.p.e][0]);
 					else
-						p.v = im->edges[p.e][1];
+						makeSegment(&news, eEdgeSegment, news.p.e, eVert, im->edges[news.p.e][1]);
 
-					copy_v3_v3(p.co, im->co[p.v]);
-					p.type = eVert;
+					copy_v3_v3(news.p.co, im->co[news.p.v]);
 				}
-
-				p.e = newe;
 			}
-			
-			if (!addPointToLine(line, &p)) break;
-			p.f = getOtherFaceAdjacentToEdge(im, p.f, p.e);
-		} while (p.f != QR_NO_FACE);
+
+			if (!nextLineSegment(line, &news))
+				break;
+
+			if (news.p.type == eEdge)
+				f = getOtherFaceAdjacentToEdge(im, f, news.p.e);
+		} while (f != QR_NO_FACE);
 
 		dir = -dir;
 	} while (changeLineDirection(line));
@@ -1175,12 +1198,13 @@ static void makeEdges(OutputMesh *om, MEdge *r_edges)
 
 static void makePolys(OutputMesh *om, MPoly *r_polys, MLoop *r_loops)
 {
-	int i, j, s, num_loops, num_polys;
+	int i, j, s, num_loops, num_polys, max_num_polys;
 	QRVertID v;
 	QRDiskLink *it, *lit;
 
 	num_loops = 0;
 	num_polys = 0;
+	max_num_polys = 2 + om->num_edges - om->num_verts;
 
 	for (i = 0; i < om->num_verts; i++) {
 		for (j = 0, it = om->verts[i].link;
@@ -1262,23 +1286,23 @@ DerivedMesh *makeResultMesh(LaplacianSystem *sys)
 
 	start_time = PIL_check_seconds_timer();
 
-	sys->rng = BLI_rng_new(100);
+	sys->rng = BLI_rng_new(PIL_check_seconds_timer_i());
 
 	initOutputMesh(om, &sys->input_mesh);
 	sys->gfsys[0]->ringf = om->ringf[0];
 	sys->gfsys[1]->ringf = om->ringf[1];
 
 	computeFlowLines(sys);
-	generateIntersectionsOnFaces(om, &sys->input_mesh);
-	deleteDegenerateVerts(om);
+	//generateIntersectionsOnFaces(om, &sys->input_mesh);
+	//deleteDegenerateVerts(om);
 	//hideEdgesOnFaces(om, &sys->input_mesh);
 	//makeNormals(om);
 
 	if (!om->num_verts)
 		return NULL;
 
-	ret = CDDM_new(om->num_verts, om->num_edges, 0,// 0, 0);
-				   om->num_edges * 2, 2 + om->num_edges - om->num_verts);
+	ret = CDDM_new(om->num_verts, om->num_edges, 0, 0, 0);
+				   //om->num_edges * 2, 2 + om->num_edges - om->num_verts);
 
 	verts = ret->getVertArray(ret);
 
@@ -1290,12 +1314,12 @@ DerivedMesh *makeResultMesh(LaplacianSystem *sys)
 	}
 
 	makeEdges(om, ret->getEdgeArray(ret));
-	makePolys(om, ret->getPolyArray(ret), ret->getLoopArray(ret));
+	//makePolys(om, ret->getPolyArray(ret), ret->getLoopArray(ret));
 
 	freeOutputMesh(om);
 	BLI_rng_free(sys->rng);
 
-	CDDM_recalc_tessellation(ret);
+	//CDDM_recalc_tessellation(ret);
 	//CDDM_calc_edges_tessface(ret);
 	//ret->dirty |= DM_DIRTY_NORMALS;
 

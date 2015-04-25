@@ -50,11 +50,12 @@
 #include "BLI_memarena.h"
 #include "BLI_rand.h"
 
-#define QR_SAMPLING_RATE 0.03f
+#define QR_SAMPLING_RATE 0.02f
 #define QR_MINDIST 0.04f
-#define QR_SEEDPROB 0.2f
+#define QR_SEEDPROB 0.1f
 #define QR_SEEDDIST 0.08f
 
+#define QR_MAXDIST_TO_SEEDDIST 2.0f
 #define QR_GFLINE_QSIZE 16
 #define QR_NO_FACE UINT_MAX
 
@@ -96,10 +97,26 @@ typedef enum {
 
 typedef struct GFPoint {
 	float co[3];
-	int f, v, e;
+	union {
+		int v, e, f;
+	};
 	QRVertID id;
 	GFPointType type;
 } GFPoint;
+
+typedef enum {
+	eEdgeSegment,
+	eFaceSegment,
+	eNoSegment
+} GFSegmentType;
+
+typedef struct GFSegment {
+	GFPoint p;
+	union {
+		int e, f;
+	};
+	GFSegmentType type;
+} GFSegment;
 
 /* GradientFlowSysten, one gfsys for every gradient field */
 typedef struct GradientFlowSystem {
@@ -114,15 +131,16 @@ typedef struct GradientFlowSystem {
 
 typedef struct GFLine {
 	GradientFlowSystem *gfsys;
-	GFPoint end, seed, lastchkp;
-	GFPoint *oldp;
+	GFPoint end, seed;
+	GFPoint *oldp, *lastchkp;
+	GFSegment lastchks;
 	int d;
 
 	float lastchklen;
 
 	float qlen;
 	int num_q;
-	GFPoint q[QR_GFLINE_QSIZE];
+	GFSegment q[QR_GFLINE_QSIZE];
 } GFLine;
 
 typedef struct InputMesh {
