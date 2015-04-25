@@ -55,6 +55,7 @@
 #define QR_SEEDPROB 0.2f
 #define QR_SEEDDIST 0.08f
 
+#define QR_GFLINE_QSIZE 16
 #define QR_NO_FACE UINT_MAX
 
 typedef int MEdgeID;
@@ -121,7 +122,7 @@ typedef struct GFLine {
 
 	float qlen;
 	int num_q;
-	GFPoint q[10];
+	GFPoint q[QR_GFLINE_QSIZE];
 } GFLine;
 
 typedef struct InputMesh {

@@ -853,7 +853,7 @@ static void flushGFLineQueue(GFLine *line)
 
 static bool enqueuePoint(GFLine *line, GFPoint *in_p)
 {
-	if (line->num_q == 10)
+	if (line->num_q == QR_GFLINE_QSIZE)
 		return false;
 
 	memcpy(&line->q[line->num_q], in_p, sizeof(GFPoint));
