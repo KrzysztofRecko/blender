@@ -75,10 +75,17 @@ typedef struct QRVert {
 	int num_links;
 } QRVert;
 
+typedef enum {
+	GFSYS1 = 1 << 0,
+	GFSYS2 = 1 << 1,
+	GFSYSNONE = 1 << 2
+} GFSysID;
+
 typedef struct QREdgeLink {
 	struct QREdgeLink *next;
 	QRVertID v;
 	QRDiskLink *elink;
+	GFSysID gfsysid;
 	float dist;
 } QREdgeLink;
 
@@ -119,9 +126,8 @@ typedef struct GFSegment {
 
 /* GradientFlowSysten, one gfsys for every gradient field */
 typedef struct GradientFlowSystem {
+	GFSysID id;
 	struct Heap *seeds;
-
-	LinkNode **ringf;
 	//float *h;
 	float(*gf)[3];				/* Gradient Field */
 
@@ -165,7 +171,7 @@ typedef struct OutputMesh {
 	QRVert *verts;
 	QRVertID *vonvs;
 	QREdge *ringe;                  /* QREdges per original edges */
-	LinkNode **ringf[2];               /* Lists of QREdge per original faces */
+	LinkNode **ringf;               /* Lists of QREdge per original faces */
 	
 	int num_verts, alloc_verts;
 	int num_edges;

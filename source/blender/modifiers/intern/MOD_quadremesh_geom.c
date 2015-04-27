@@ -43,8 +43,8 @@
 
 #include "MOD_util.h"
 
-#define QR_SHOWQUERIES
-#define QR_LINELIMIT 100
+//#define QR_SHOWQUERIES
+#define QR_LINELIMIT 100000
 
 
 #if 0 /* UNUSED ROUTINES */
@@ -442,6 +442,7 @@ static void appendOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_v, float in
 	newl->dist = in_dist;
 	newl->elink = NULL;
 	newl->next = NULL;
+	newl->gfsysid = 0;
 
 	if (in_e->v2 == NULL) {
 		in_e->v1 = in_e->v2 = newl;
@@ -460,6 +461,7 @@ static void prependOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_v, float i
 	newl->dist = in_dist;
 	newl->next = in_e->v1;
 	newl->elink = NULL;
+	newl->gfsysid = 0;
 
 	in_e->v1 = newl;
 	if (in_e->v2 == NULL)
@@ -473,6 +475,7 @@ static void insertAfterOnQREdge(OutputMesh *om, QREdge *in_e, QREdgeLink *in_l, 
 	newl->v = in_v;
 	newl->dist = in_dist;
 	newl->next = in_l->next;
+	newl->gfsysid = in_l->gfsysid;
 
 	if (in_l->elink) {
 		unlinkVerts(om, in_l->elink);
@@ -524,7 +527,7 @@ static void insertOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_vid)
 	in_e->num_links++;
 }
 
-static void linkOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_v1, QRVertID in_v2)
+static void linkOnQREdge(OutputMesh *om, GFSysID sys_id, QREdge *in_e, QRVertID in_v1, QRVertID in_v2)
 {
 	QREdgeLink *it;
 
@@ -534,19 +537,42 @@ static void linkOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_v1, QRVertID 
 			break;
 		}
 
-	for (; it && it->next && it->v != in_v2; it = it->next)
+	for (; it && it->next && it->v != in_v2; it = it->next) {
 		if (!it->elink)
 			it->elink = linkVerts(om, it->v, it->next->v);
+
+		it->gfsysid |= sys_id;
+	}
 }
 
-static QREdge *addQREdgeToList(OutputMesh *om, LinkNode **list, QRVertID in_v1, QRVertID in_v2)
+static QREdge *addQREdgeToFace(OutputMesh *om, InputMesh *im, GFSysID sys_id, int in_f, QRVertID in_v1, QRVertID in_v2)
 {
+	float isection[3];
+	QREdge *e;
 	QREdge *newe = BLI_memarena_calloc(om->memarena, sizeof(QREdge));
+	QRVertID newv;
+	LinkNode *it;
 
 	insertOnQREdge(om, newe, in_v1);
 	insertOnQREdge(om, newe, in_v2);
-	linkOnQREdge(om, newe, in_v1, in_v2);
-	BLI_linklist_prepend_arena(list, (void*)newe, om->memarena);
+	linkOnQREdge(om, sys_id, newe, in_v1, in_v2);
+	BLI_linklist_prepend_arena(&om->ringf[in_f], (void*)newe, om->memarena);
+
+	for (it = om->ringf[in_f]->next; it; it = it->next) {
+		e = (QREdge*)it->link;
+
+		if ((e->v1->gfsysid & sys_id) != 0)
+			continue;
+
+		if (isectLines(om->verts[e->v1->v].co, om->verts[e->v2->v].co,
+					   om->verts[in_v1].co, om->verts[in_v2].co,
+					   isection, NULL))
+		{
+			newv = addVert(om, isection, im->no[in_f]);
+			insertOnQREdge(om, e, newv);
+			insertOnQREdge(om, newe, newv);
+		}
+	}
 	
 	return newe;
 }
@@ -554,6 +580,27 @@ static QREdge *addQREdgeToList(OutputMesh *om, LinkNode **list, QRVertID in_v1, 
 static bool isectSegmentWithQREdge(OutputMesh *om, float in_a[3], float in_b[3], QREdge *in_e)
 {
 	return isectLines(in_a, in_b, om->verts[in_e->v1->v].co, om->verts[in_e->v2->v].co, NULL, NULL);
+}
+
+static bool isectPointWithQREdge(float in_co[3], GFSysID sys_id, QREdge *in_e)
+{
+	float vec[3], tmp;
+	QREdgeLink *it;
+
+	if (!in_e || in_e->num_links < 2)
+		return false;
+
+	sub_v3_v3v3(vec, in_co, in_e->orig);
+	tmp = dot_v3v3(vec, in_e->dir);
+
+	if (tmp <= in_e->v2->dist && tmp >= in_e->v1->dist) {
+		for (it = in_e->v1; it->next && it->next->dist < tmp; it = it->next);
+		
+		if (it->elink != NULL && (it->gfsysid & sys_id) != 0)
+			return true;
+	}
+
+	return false;
 }
 
 /* GENERAL PURPOSE FUNCTIONS FOR GETTING AROUND THE FACES */
@@ -579,6 +626,33 @@ static int getOtherFaceAdjacentToEdge(InputMesh *im, int in_f, int in_e)
 	}
 
 	return im->faces_edge[in_e][0];
+}
+
+static int getFaceFromTwoEdges(InputMesh *im, int in_e1, int in_e2)
+{
+	if (im->faces_edge[in_e1][0] == im->faces_edge[in_e2][0])
+		return im->faces_edge[in_e2][0];
+
+	return im->faces_edge[in_e2][1];
+}
+
+static int getEdgeOppositeToVertex(InputMesh *im, int in_v, int in_f)
+{
+	int i;
+
+	for (i = 0; i < 3; i++)
+		if (im->faces[in_f][i] == in_v)
+			break;
+
+	return getEdgeFromVerts(im, im->faces[in_f][(i + 1) % 3], im->faces[in_f][(i + 2) % 3]);
+}
+
+static void makePoint(GFPoint *r_p, GFPointType p_type, int p_vef, float p_co[3])
+{
+	r_p->type = p_type;
+	r_p->v = p_vef;
+	r_p->id = -1;
+	copy_v3_v3(r_p->co, p_co);
 }
 
 static void makeSegment(GFSegment *r, InputMesh *im, GFPoint *prev, int in_f)
@@ -674,7 +748,7 @@ static bool nextSegment(GFSegment *r_s, InputMesh *im, GFPoint *in_p, int in_f, 
 	if (len_squared_v3v3(result, im->co[im->edges[e][0]]) < FLT_EPSILON)
 		makePoint(&r_s->p, eVert, im->edges[e][0], im->co[im->edges[e][0]]);
 	else if (len_squared_v3v3(result, im->co[im->edges[e][1]]) < FLT_EPSILON)
-		makePoint(&r_s->p, eVert, im->edges[e][0], im->co[im->edges[e][0]]);
+		makePoint(&r_s->p, eVert, im->edges[e][1], im->co[im->edges[e][1]]);
 	else
 		makePoint(&r_s->p, eEdge, e, result);
 
@@ -682,15 +756,15 @@ static bool nextSegment(GFSegment *r_s, InputMesh *im, GFPoint *in_p, int in_f, 
 	return true;
 }
 
-static bool intersectSegmentWithOthersOnFace(GradientFlowSystem *gfsys, float in_a[3], float in_b[3], int in_f)
+static bool intersectSegmentWithOthersOnFace(OutputMesh *om, GFSysID sys_id, float in_a[3], float in_b[3], int in_f)
 {
 	QREdge *e;
 	LinkNode *iter;
 
-	for (iter = gfsys->ringf[in_f]; iter; iter = iter->next) {
+	for (iter = om->ringf[in_f]; iter; iter = iter->next) {
 		e = (QREdge*)iter->link;
 		
-		if (isectSegmentWithQREdge(&gfsys->sys->output_mesh, in_a, in_b, e))
+		if ((e->v1->gfsysid & sys_id) != 0 && isectSegmentWithQREdge(om, in_a, in_b, e))
 			return true;
 	}
 
@@ -707,6 +781,7 @@ static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, fl
 	int e, oldf;
 	float c[3], len, actlen, chkco[3], seedco[3], dir[3];
 	InputMesh *im = &gfsys->sys->input_mesh;
+	OutputMesh *om = &gfsys->sys->output_mesh;
 	GFPoint oldp;
 	GFSegment news;
 
@@ -764,8 +839,13 @@ static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, fl
 #endif
 
 		if (actlen - len < dist) {
-			if (intersectSegmentWithOthersOnFace(gfsys, oldp.co, chkco, in_f))
+			if (intersectSegmentWithOthersOnFace(om, gfsys->id, oldp.co, chkco, in_f))
 				return 0;
+
+			if (news.p.type == eEdge && actlen <= dist) {
+				if (isectPointWithQREdge(chkco, gfsys->id, &gfsys->sys->output_mesh.ringe[news.p.e]))
+					return 0;
+			}
 		}
 		
 		if ((actlen > dist && !make_seed) || actlen > maxdist)
@@ -887,9 +967,9 @@ static void addSegmentToLine(GFLine *line, GFSegment *in_s)
 		insertOnQREdge(om, &om->ringe[in_s->p.e], in_s->p.id);
 
 	if (in_s->type == eEdgeSegment)
-		linkOnQREdge(om, &om->ringe[in_s->e], line->end.id, in_s->p.id);
+		linkOnQREdge(om, line->gfsys->id, &om->ringe[in_s->e], line->end.id, in_s->p.id);
 	else
-		addQREdgeToList(om, &line->gfsys->ringf[in_s->f], line->end.id, in_s->p.id);
+		addQREdgeToFace(om, im, line->gfsys->id, in_s->f, line->end.id, in_s->p.id);
 
 	memcpy(&line->end, &in_s->p, sizeof(GFPoint));
 }
@@ -1048,11 +1128,11 @@ static void computeGFLine(GFLine *line)
 				if (!nextSegment(&news, im, line->oldp, f, gf))
 					break;
 				
-				if (news.type == eEdgeSegment) {
-					if (dir * sys->U_field[im->edges[news.e][0]] < dir * sys->U_field[im->edges[news.e][1]])
-						makePoint(&news.p, eVert, im->edges[news.e][0], im->co[im->edges[news.e][0]]);
+				if (news.p.type == eEdge && line->oldp->type == eEdge && line->oldp->e == news.p.e) {
+					if (dir * sys->U_field[im->edges[news.p.e][0]] < dir * sys->U_field[im->edges[news.p.e][1]])
+						makePoint(&news.p, eVert, im->edges[news.p.e][0], im->co[im->edges[news.p.e][0]]);
 					else
-						makePoint(&news.p, eVert, im->edges[news.e][1], im->co[im->edges[news.e][1]]);
+						makePoint(&news.p, eVert, im->edges[news.p.e][1], im->co[im->edges[news.p.e][1]]);
 
 					makeSegment(&news, im, line->oldp, f);
 				}
@@ -1118,35 +1198,7 @@ static void makeFeatureEdges(OutputMesh *om, InputMesh *im)
 			for (j = 0; j < im->ringe_map[p2.v].count; j++)
 				insertOnQREdge(om, &om->ringe[im->ringe_map[p2.v].indices[j]], p2.id);
 
-			linkOnQREdge(om, &om->ringe[i], p1.id, p2.id);
-		}
-	}
-}
-
-static void generateIntersectionsOnFaces(OutputMesh *om, InputMesh *im)
-{
-	int f;
-	float isection[3], lambda;
-	QREdge *e1, *e2;
-	LinkNode *iter1, *iter2;
-	QRVertID newv;
-
-	for (f = 0; f < im->num_faces; f++) {
-		for (iter1 = om->ringf[0][f]; iter1; iter1 = iter1->next) {
-			e1 = (QREdge*)iter1->link;
-
-			for (iter2 = om->ringf[1][f]; iter2; iter2 = iter2->next) {
-				e2 = (QREdge*)iter2->link;
-
-				if (isectLines(om->verts[e1->v1->v].co, om->verts[e1->v2->v].co,
-					           om->verts[e2->v1->v].co, om->verts[e2->v2->v].co,
-					           isection, &lambda))
-				{
-					newv = addVert(om, isection, im->no[f]);
-					insertOnQREdge(om, e1, newv);
-					insertOnQREdge(om, e2, newv);
-				}
-			}
+			linkOnQREdge(om, GFSYSNONE, &om->ringe[i], p1.id, p2.id);
 		}
 	}
 }
@@ -1210,16 +1262,7 @@ static void hideEdgesOnFaces(OutputMesh *om, InputMesh *im)
 	LinkNode *it;
 
 	for (f = 0; f < im->num_faces; f++) {
-		for (it = om->ringf[0][f]; it; it = it->next) {
-			e = (QREdge*)it->link;
-			for (itel = e->v1; itel; itel = itel->next)
-				if (itel->elink) {
-					itel->elink->e = 0;
-					itel->elink->brother->e = 0;
-				}
-		}
-
-		for (it = om->ringf[1][f]; it; it = it->next) {
+		for (it = om->ringf[f]; it; it = it->next) {
 			e = (QREdge*)it->link;
 			for (itel = e->v1; itel; itel = itel->next)
 				if (itel->elink) {
@@ -1316,8 +1359,7 @@ static void initOutputMesh(OutputMesh *om, InputMesh *im)
 	om->vonvs = MEM_mallocN(sizeof(QRVertID) * im->num_verts, __func__);
 	fill_vn_i(om->vonvs, im->num_verts, -1);
 	om->ringe = MEM_callocN(sizeof(QREdge) * im->num_edges, "GFListEdges");
-	om->ringf[0] = MEM_callocN(sizeof(LinkNode *) * im->num_faces, "GFListFaces");
-	om->ringf[1] = MEM_callocN(sizeof(LinkNode *) * im->num_faces, "GFListFaces");
+	om->ringf = MEM_callocN(sizeof(LinkNode *) * im->num_faces, "GFListFaces");
 }
 
 void freeOutputMesh(OutputMesh *om)
@@ -1326,8 +1368,7 @@ void freeOutputMesh(OutputMesh *om)
 	MEM_SAFE_FREE(om->verts);
 	MEM_SAFE_FREE(om->vonvs);
 	MEM_SAFE_FREE(om->ringe);
-	MEM_SAFE_FREE(om->ringf[0]);
-	MEM_SAFE_FREE(om->ringf[1]);
+	MEM_SAFE_FREE(om->ringf);
 	if (om->memarena) {
 		BLI_memarena_free(om->memarena);
 		om->memarena = NULL;
@@ -1347,20 +1388,20 @@ DerivedMesh *makeResultMesh(LaplacianSystem *sys)
 	sys->rng = BLI_rng_new(PIL_check_seconds_timer_i());
 
 	initOutputMesh(om, &sys->input_mesh);
-	sys->gfsys[0]->ringf = om->ringf[0];
-	sys->gfsys[1]->ringf = om->ringf[1];
+	sys->gfsys[0]->id = GFSYS1;
+	sys->gfsys[1]->id = GFSYS2;
 
 	makeFeatureEdges(om, &sys->input_mesh);
 	computeFlowLines(sys);
-	//deleteDegenerateVerts(om);
+	deleteDegenerateVerts(om);
 	//hideEdgesOnFaces(om, &sys->input_mesh);
 	//makeNormals(om);
 
 	if (!om->num_verts)
 		return NULL;
 
-	ret = CDDM_new(om->num_verts, om->num_edges, 0, 0, 0);
-				   //om->num_edges * 2, 2 + om->num_edges - om->num_verts);
+	ret = CDDM_new(om->num_verts, om->num_edges, 0, //0, 0);
+				   om->num_edges * 2, 2 + om->num_edges - om->num_verts);
 
 	verts = ret->getVertArray(ret);
 
@@ -1372,16 +1413,16 @@ DerivedMesh *makeResultMesh(LaplacianSystem *sys)
 	}
 
 	makeEdges(om, ret->getEdgeArray(ret));
-	//makePolys(om, ret->getPolyArray(ret), ret->getLoopArray(ret));
+	makePolys(om, ret->getPolyArray(ret), ret->getLoopArray(ret));
 
 	freeOutputMesh(om);
 	BLI_rng_free(sys->rng);
 
-	//CDDM_recalc_tessellation(ret);
+	CDDM_recalc_tessellation(ret);
 	//CDDM_calc_edges_tessface(ret);
 	//ret->dirty |= DM_DIRTY_NORMALS;
 
-	printf("Mesh generation time: %f ms", (PIL_check_seconds_timer() - start_time) * 1000.0f);
+	printf("Mesh generation time: %f ms\n", (PIL_check_seconds_timer() - start_time) * 1000.0f);
 
 	return ret;
 }
