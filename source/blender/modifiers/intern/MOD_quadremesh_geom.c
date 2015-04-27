@@ -1065,6 +1065,38 @@ static void computeFlowLines(LaplacianSystem *sys) {
 
 /* MESH GENERATION */
 
+static void makeFeatureEdges(OutputMesh *om, InputMesh *im)
+{
+	int i, j, f1, f2;
+	float angle;
+	GFPoint p1, p2;
+
+	for (i = 0; i < im->num_edges; i++) {
+		f1 = im->faces_edge[i][0];
+		f2 = im->faces_edge[i][1];
+		angle = angle_normalized_v3v3(im->no[f1], im->no[f2]);
+		if (angle >= M_PI_2 * 0.7f) {
+			p1.type = eVert;
+			p1.v = im->edges[i][0];
+			copy_v3_v3(p1.co, im->co[im->edges[i][0]]);
+			addGFPoint(im, om, &p1);
+
+			for (j = 0; j < im->ringe_map[p1.v].count; j++)
+				insertOnQREdge(om, &om->ringe[im->ringe_map[p1.v].indices[j]], p1.id);
+
+			p2.type = eVert;
+			p2.v = im->edges[i][1];
+			copy_v3_v3(p2.co, im->co[im->edges[i][1]]);
+			addGFPoint(im, om, &p2);
+
+			for (j = 0; j < im->ringe_map[p2.v].count; j++)
+				insertOnQREdge(om, &om->ringe[im->ringe_map[p2.v].indices[j]], p2.id);
+
+			linkOnQREdge(om, &om->ringe[i], p1.id, p2.id);
+		}
+	}
+}
+
 static void generateIntersectionsOnFaces(OutputMesh *om, InputMesh *im)
 {
 	int f;
@@ -1292,8 +1324,8 @@ DerivedMesh *makeResultMesh(LaplacianSystem *sys)
 	sys->gfsys[0]->ringf = om->ringf[0];
 	sys->gfsys[1]->ringf = om->ringf[1];
 
+	makeFeatureEdges(om, &sys->input_mesh);
 	computeFlowLines(sys);
-	//generateIntersectionsOnFaces(om, &sys->input_mesh);
 	//deleteDegenerateVerts(om);
 	//hideEdgesOnFaces(om, &sys->input_mesh);
 	//makeNormals(om);
