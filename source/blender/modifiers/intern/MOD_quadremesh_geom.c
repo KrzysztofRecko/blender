@@ -517,24 +517,38 @@ static QREdge *addQREdgeToFace(OutputMesh *om, InputMesh *im, GFSysID sys_id, in
 	return newe;
 }
 
-static bool isectSegmentWithQREdge(OutputMesh *om, float in_a[3], float in_b[3], QREdge *in_e)
+static bool isectSegmentWithOthersOnFace(OutputMesh *om, GFSysID sys_id, float in_a[3], float in_b[3], int in_f)
 {
-	return isect_seg_seg_unsafe_v3(NULL, in_a, in_b, om->verts[in_e->v1->v].co, om->verts[in_e->v2->v].co);
+	QREdge *e;
+	LinkNode *iter;
+
+	for (iter = om->ringf[in_f]; iter; iter = iter->next) {
+		e = (QREdge*)iter->link;
+		
+		if ((e->v1->gfsysid & sys_id) == 0)
+			continue;
+
+		if (isect_seg_seg_unsafe_v3(NULL, in_a, in_b, om->verts[e->v1->v].co, om->verts[e->v2->v].co))
+			return true;
+	}
+
+	return false;
 }
 
-static bool isectPointWithQREdge(float in_co[3], GFSysID sys_id, QREdge *in_e)
+static bool isectPointWithQREdge(OutputMesh *om, GFSysID sys_id, float in_co[3], int in_e)
 {
 	float vec[3], tmp;
+	QREdge *e = &om->ringe[in_e];
 	QREdgeLink *it;
 
-	if (!in_e || in_e->num_links < 2)
+	if (!e || e->num_links < 2)
 		return false;
 
-	sub_v3_v3v3(vec, in_co, in_e->orig);
-	tmp = dot_v3v3(vec, in_e->dir);
+	sub_v3_v3v3(vec, in_co, e->orig);
+	tmp = dot_v3v3(vec, e->dir);
 
-	if (tmp <= in_e->v2->dist && tmp >= in_e->v1->dist) {
-		for (it = in_e->v1; it->next && it->next->dist < tmp; it = it->next);
+	if (tmp <= e->v2->dist && tmp >= e->v1->dist) {
+		for (it = e->v1; it->next && it->next->dist < tmp; it = it->next);
 		
 		if (it->elink != NULL && (it->gfsysid & sys_id) != 0)
 			return true;
@@ -696,21 +710,6 @@ static bool nextSegment(GFSegment *r_s, InputMesh *im, GFPoint *in_p, int in_f, 
 	return true;
 }
 
-static bool intersectSegmentWithOthersOnFace(OutputMesh *om, GFSysID sys_id, float in_a[3], float in_b[3], int in_f)
-{
-	QREdge *e;
-	LinkNode *iter;
-
-	for (iter = om->ringf[in_f]; iter; iter = iter->next) {
-		e = (QREdge*)iter->link;
-		
-		if ((e->v1->gfsysid & sys_id) != 0 && isectSegmentWithQREdge(om, in_a, in_b, e))
-			return true;
-	}
-
-	return false;
-}
-
 /**
  * 0 - intersection found
  * 1 - intersection not found
@@ -779,11 +778,11 @@ static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, fl
 #endif
 
 		if (actlen - len < dist) {
-			if (intersectSegmentWithOthersOnFace(om, gfsys->id, oldp.co, chkco, in_f))
+			if (isectSegmentWithOthersOnFace(om, gfsys->id, oldp.co, chkco, in_f))
 				return 0;
 
 			if (news.p.type == eEdge && actlen <= dist) {
-				if (isectPointWithQREdge(chkco, gfsys->id, &gfsys->sys->output_mesh.ringe[news.p.e]))
+				if (isectPointWithQREdge(om, gfsys->id, chkco, news.p.e))
 					return 0;
 			}
 		}
