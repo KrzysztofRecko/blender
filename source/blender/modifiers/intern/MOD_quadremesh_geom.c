@@ -717,7 +717,7 @@ static bool nextPointOnFace(GFPoint *r_p, InputMesh *im, GFPoint *in_p, int in_f
 static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, float in_dir[3], float dist, float maxdist, bool make_seed)
 {
 	int oldf;
-	float c[3], len, actlen, chkco[3], seedco[3], dir[3];
+	float c[3], len, actlen, prevlen, chkco[3], seedco[3], dir[3];
 	InputMesh *im = &gfsys->sys->input_mesh;
 	OutputMesh *om = &gfsys->sys->output_mesh;
 	GFPoint oldp, newp;
@@ -725,7 +725,7 @@ static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, fl
 	copy_v3_v3(dir, in_dir);
 	memcpy(&oldp, in_p, sizeof(GFPoint));
 	oldf = in_f;
-	actlen = 0.0f;
+	actlen = prevlen = 0.0f;
 
 	while (in_f != QR_NO_FACE && oldp.type != eVert) {
 		project_plane_v3_v3v3(dir, dir, im->no[in_f]);
@@ -742,21 +742,18 @@ static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, fl
 
 		sub_v3_v3v3(c, newp.co, oldp.co);
 		len = len_v3(c);
-		actlen += len;
+		actlen = prevlen + len;
 
 		if (actlen > maxdist && make_seed) {
-			mul_v3_v3fl(seedco, c, (maxdist - actlen + len) / len);
-			add_v3_v3(seedco, oldp.co);
+			madd_v3_v3v3fl(seedco, oldp.co, c, (maxdist - prevlen) / len);
 
 			addSeedToQueue(gfsys->seeds, seedco, eFace, in_f, -maxdist);
 		}
 		else
 			copy_v3_v3(seedco, newp.co);
 
-		if (actlen > dist && actlen - len < dist) {
-			mul_v3_v3fl(chkco, c, (dist - actlen + len) / len);
-			add_v3_v3(chkco, oldp.co);
-		}
+		if (actlen > dist && prevlen < dist)
+			madd_v3_v3v3fl(chkco, oldp.co, c, (dist - prevlen) / len);
 		else
 			copy_v3_v3(chkco, newp.co);
 
@@ -773,7 +770,7 @@ static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, fl
 		linkVerts(&gfsys->sys->output_mesh, vf1, vf2);
 #endif
 
-		if (actlen - len < dist) {
+		if (prevlen < dist) {
 			if (isectSegmentWithOthersOnFace(om, gfsys->id, oldp.co, chkco, in_f))
 				return 0;
 
@@ -791,6 +788,7 @@ static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, fl
 
 		in_f = getOtherFaceAdjacentToEdge(im, in_f, newp.e);
 		memcpy(&oldp, &newp, sizeof(GFPoint));
+		prevlen = actlen;
 	}
 
 	return 2;
