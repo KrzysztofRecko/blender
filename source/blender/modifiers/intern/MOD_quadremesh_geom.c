@@ -108,62 +108,6 @@ void estimateNumberGFVerticesEdges(int ve[2], LaplacianSystem *sys, float h)
 	ve[0] = totalv;
 	ve[1] = totale;
 }
-#endif // UNUSED ROUTINES
-
-/* MATH STUFF */
-
-static bool isectLines(const float v1[3], const float v2[3],
-                       const float v3[3], const float v4[3],
-                       float vi[3], float *r_lambda)
-{
-	float a[3], b[3], c[3], ab[3], cb[3], ca[3];//, dir1[3], dir2[3];
-	float d, div;
-
-	sub_v3_v3v3(c, v3, v1);
-	sub_v3_v3v3(a, v2, v1);
-	sub_v3_v3v3(b, v4, v3);
-
-	//normalize_v3_v3(dir1, a);
-	//normalize_v3_v3(dir2, b);
-	//d = dot_v3v3(dir1, dir2);
-	//if (d == 1.0f || d == -1.0f) {
-	//	/* colinear */
-	//	return false;
-	//}
-
-	cross_v3_v3v3(ab, a, b);
-	d = dot_v3v3(c, ab);
-	div = dot_v3v3(ab, ab);
-
-	/* test zero length line */
-	if (UNLIKELY(div == 0.0f)) {
-		return false;
-	}
-	/* test if the two lines are coplanar */
-	else if (d > -0.000001f && d < 0.000001f) {
-		float f1, f2;
-		cross_v3_v3v3(cb, c, b);
-		cross_v3_v3v3(ca, c, a);
-
-		f1 = dot_v3v3(cb, ab) / div;
-		f2 = dot_v3v3(ca, ab) / div;
-
-		if (f1 >= 0.0f && f1 <= 1.0f &&
-		    f2 >= 0.0f && f2 <= 1.0f)
-		{
-			if (vi) {
-				mul_v3_fl(a, f1);
-				add_v3_v3v3(vi, v1, a);
-			}
-
-			if (r_lambda) *r_lambda = f1;
-
-			return true; /* intersection found */
-		}
-	}
-	
-	return false;
-}
 
 static bool isPointOnSegment(float in_v[3], float in_l1[3], float in_l2[3])
 {
@@ -172,6 +116,9 @@ static bool isPointOnSegment(float in_v[3], float in_l1[3], float in_l2[3])
 	sub_v3_v3v3(b, in_l2, in_v);
 	return dot_v3v3(a, b) >= 0.0f;
 }
+#endif // UNUSED ROUTINES
+
+/* MATH STUFF */
 
 float absoluteAngleAxis(const float v1[3], const float v2[3], const float axis[3])
 {
@@ -390,6 +337,7 @@ static int *findFeaturesOnMesh(InputMesh *im, int size[2])
 		if (angle >= M_PI_2) {
 			listverts[im->edges[i][0]] = 1;
 			listverts[im->edges[i][1]] = 1;
+			break;
 		}
 	}
 
@@ -564,9 +512,9 @@ static QREdge *addQREdgeToFace(OutputMesh *om, InputMesh *im, GFSysID sys_id, in
 		if ((e->v1->gfsysid & sys_id) != 0)
 			continue;
 
-		if (isectLines(om->verts[e->v1->v].co, om->verts[e->v2->v].co,
-					   om->verts[in_v1].co, om->verts[in_v2].co,
-					   isection, NULL))
+		if (isect_seg_seg_unsafe_v3(isection,
+			                        om->verts[e->v1->v].co, om->verts[e->v2->v].co,
+					                om->verts[in_v1].co, om->verts[in_v2].co))
 		{
 			newv = addVert(om, isection, im->no[in_f]);
 			insertOnQREdge(om, e, newv);
@@ -579,7 +527,7 @@ static QREdge *addQREdgeToFace(OutputMesh *om, InputMesh *im, GFSysID sys_id, in
 
 static bool isectSegmentWithQREdge(OutputMesh *om, float in_a[3], float in_b[3], QREdge *in_e)
 {
-	return isectLines(in_a, in_b, om->verts[in_e->v1->v].co, om->verts[in_e->v2->v].co, NULL, NULL);
+	return isect_seg_seg_unsafe_v3(NULL, in_a, in_b, om->verts[in_e->v1->v].co, om->verts[in_e->v2->v].co);
 }
 
 static bool isectPointWithQREdge(float in_co[3], GFSysID sys_id, QREdge *in_e)
@@ -1149,6 +1097,8 @@ static void computeGFLine(GFLine *line)
 	} while (changeLineDirection(line));
 }
 
+/* MESH GENERATION */
+
 static void computeFlowLines(LaplacianSystem *sys) {
 	GFPoint *seed;
 	GFLine line;
@@ -1168,8 +1118,6 @@ static void computeFlowLines(LaplacianSystem *sys) {
 		}
 	}
 }
-
-/* MESH GENERATION */
 
 static void makeFeatureEdges(OutputMesh *om, InputMesh *im)
 {

@@ -1760,6 +1760,49 @@ int isect_line_line_v3(
 	return isect_line_line_epsilon_v3(v1, v2, v3, v4, i1, i2, epsilon);
 }
 
+bool isect_seg_seg_unsafe_v3(float r[3],
+                             const float v1[3], const float v2[3],
+                             const float v3[3], const float v4[3])
+{
+	float a[3], b[3], c[3], ab[3], cb[3], ca[3];
+	float d, div;
+
+	sub_v3_v3v3(c, v3, v1);
+	sub_v3_v3v3(a, v2, v1);
+	sub_v3_v3v3(b, v4, v3);
+
+	cross_v3_v3v3(ab, a, b);
+	d = dot_v3v3(c, ab);
+	div = dot_v3v3(ab, ab);
+
+	/* test zero length line */
+	if (UNLIKELY(div == 0.0f)) {
+		return false;
+	}
+	/* test if the two lines are coplanar */
+	else if (d > -0.000001f && d < 0.000001f) {
+		float f1, f2;
+		cross_v3_v3v3(cb, c, b);
+		cross_v3_v3v3(ca, c, a);
+
+		f1 = dot_v3v3(cb, ab) / div;
+		f2 = dot_v3v3(ca, ab) / div;
+
+		if (f1 >= 0.0f && f1 <= 1.0f &&
+		    f2 >= 0.0f && f2 <= 1.0f)
+		{
+			if (r) {
+				mul_v3_fl(a, f1);
+				add_v3_v3v3(r, v1, a);
+			}
+
+			return true; /* intersection found */
+		}
+	}
+	
+	return false;
+}
+
 /** Intersection point strictly between the two lines
  * \return false when no intersection is found
  */

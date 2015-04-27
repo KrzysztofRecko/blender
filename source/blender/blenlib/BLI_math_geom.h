@@ -153,6 +153,9 @@ int isect_line_line_v3(
         const float v1[3], const float v2[3],
         const float v3[3], const float v4[3],
         float i1[3], float i2[3]);
+bool isect_seg_seg_unsafe_v3(float r[3],
+                             const float v1[3], const float v2[3],
+                             const float v3[3], const float v4[3]);
 bool isect_line_line_strict_v3(const float v1[3], const float v2[3],
                                const float v3[3], const float v4[3],
                                float vi[3], float *r_lambda);
