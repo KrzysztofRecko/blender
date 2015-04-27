@@ -142,15 +142,6 @@ float absoluteAngleAxis(const float v1[3], const float v2[3], const float axis[3
 	return angle;
 }
 
-static void getPerpendicularToNormal(float r[3], float in_a[3], float in_b[3], float in_no[3])
-{
-	float proj[3];
-
-	sub_v3_v3v3(r, in_b, in_a);
-	project_v3_v3v3(proj, r, in_no);
-	sub_v3_v3(r, proj);
-}
-
 static void getNormalAtEdge(float r_no[3], InputMesh *im, int in_e)
 {
 	if (im->faces_edge[in_e][0] == QR_NO_FACE)
@@ -194,7 +185,8 @@ static QRDiskLink *insertLink(OutputMesh *om, QRVertID in_a, QRVertID in_b)
 	l->v = in_b;
 	l->poly_on_right = false;
 
-	getPerpendicularToNormal(vec, om->verts[in_a].co, om->verts[in_b].co, om->verts[in_a].no);
+	sub_v3_v3v3(vec, om->verts[in_b].co, om->verts[in_a].co);
+	project_plane_v3_v3v3(vec, vec, om->verts[in_a].no);
 	normalize_v3(vec);
 
 	if (om->verts[in_a].num_links == 0) {
