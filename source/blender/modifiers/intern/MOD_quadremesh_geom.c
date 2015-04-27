@@ -655,7 +655,7 @@ static void makeSegment(GFSegment *r, InputMesh *im, GFPoint *prev, int in_f)
  * /return true - all ok
  *         false - error
  */
-static bool nextSegment(GFSegment *r_s, InputMesh *im, GFPoint *in_p, int in_f, float in_dir[3])
+static bool nextPointOnFace(GFPoint *r_p, InputMesh *im, GFPoint *in_p, int in_f, float in_dir[3])
 {
 	int i, pick = -1, v = -1, e;
 	bool is_on_vertex = false;
@@ -700,13 +700,12 @@ static bool nextSegment(GFSegment *r_s, InputMesh *im, GFPoint *in_p, int in_f, 
 					   in_p->co, co2, result, dummy);
 
 	if (len_squared_v3v3(result, im->co[im->edges[e][0]]) < FLT_EPSILON)
-		makePoint(&r_s->p, eVert, im->edges[e][0], im->co[im->edges[e][0]]);
+		makePoint(r_p, eVert, im->edges[e][0], im->co[im->edges[e][0]]);
 	else if (len_squared_v3v3(result, im->co[im->edges[e][1]]) < FLT_EPSILON)
-		makePoint(&r_s->p, eVert, im->edges[e][1], im->co[im->edges[e][1]]);
+		makePoint(r_p, eVert, im->edges[e][1], im->co[im->edges[e][1]]);
 	else
-		makePoint(&r_s->p, eEdge, e, result);
+		makePoint(r_p, eEdge, e, result);
 
-	makeSegment(r_s, im, in_p, in_f);
 	return true;
 }
 
@@ -717,12 +716,11 @@ static bool nextSegment(GFSegment *r_s, InputMesh *im, GFPoint *in_p, int in_f, 
  */
 static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, float in_dir[3], float dist, float maxdist, bool make_seed)
 {
-	int e, oldf;
+	int oldf;
 	float c[3], len, actlen, chkco[3], seedco[3], dir[3];
 	InputMesh *im = &gfsys->sys->input_mesh;
 	OutputMesh *om = &gfsys->sys->output_mesh;
-	GFPoint oldp;
-	GFSegment news;
+	GFPoint oldp, newp;
 
 	copy_v3_v3(dir, in_dir);
 	memcpy(&oldp, in_p, sizeof(GFPoint));
@@ -730,9 +728,7 @@ static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, fl
 	actlen = 0.0f;
 
 	while (in_f != QR_NO_FACE && oldp.type != eVert) {
-		len = dot_v3v3(dir, im->no[in_f]);
-		mul_v3_v3fl(c, im->no[in_f], len);
-		sub_v3_v3(dir, c);
+		project_plane_v3_v3v3(dir, dir, im->no[in_f]);
 
 		if (normalize_v3(dir) < FLT_EPSILON) 
 			break;
@@ -740,11 +736,11 @@ static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, fl
 		if (dot_v3v3(im->no[oldf], im->no[in_f]) < 0.0f)
 			mul_v3_fl(dir, -1.0f);
 
-		if (!nextSegment(&news, im, &oldp, in_f, dir))
+		if (!nextPointOnFace(&newp, im, &oldp, in_f, dir))
 			break;
 		oldf = in_f;
 
-		sub_v3_v3v3(c, news.p.co, oldp.co);
+		sub_v3_v3v3(c, newp.co, oldp.co);
 		len = len_v3(c);
 		actlen += len;
 
@@ -755,14 +751,14 @@ static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, fl
 			addSeedToQueue(gfsys->seeds, seedco, eFace, in_f, -maxdist);
 		}
 		else
-			copy_v3_v3(seedco, news.p.co);
+			copy_v3_v3(seedco, newp.co);
 
 		if (actlen > dist && actlen - len < dist) {
 			mul_v3_v3fl(chkco, c, (dist - actlen + len) / len);
 			add_v3_v3(chkco, oldp.co);
 		}
 		else
-			copy_v3_v3(chkco, news.p.co);
+			copy_v3_v3(chkco, newp.co);
 
 #ifdef QR_SHOWQUERIES
 		int vf1, vf2;
@@ -781,8 +777,8 @@ static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, fl
 			if (isectSegmentWithOthersOnFace(om, gfsys->id, oldp.co, chkco, in_f))
 				return 0;
 
-			if (news.p.type == eEdge && actlen <= dist) {
-				if (isectPointWithQREdge(om, gfsys->id, chkco, news.p.e))
+			if (newp.type == eEdge && actlen <= dist) {
+				if (isectPointWithQREdge(om, gfsys->id, chkco, newp.e))
 					return 0;
 			}
 		}
@@ -790,11 +786,11 @@ static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, fl
 		if ((actlen > dist && !make_seed) || actlen > maxdist)
 			return 1;
 
-		if (news.p.type == eVert)
+		if (newp.type == eVert)
 			break;
 
-		in_f = getOtherFaceAdjacentToEdge(im, in_f, news.p.e);
-		memcpy(&oldp, &news.p, sizeof(GFPoint));
+		in_f = getOtherFaceAdjacentToEdge(im, in_f, newp.e);
+		memcpy(&oldp, &newp, sizeof(GFPoint));
 	}
 
 	return 2;
@@ -1053,7 +1049,7 @@ static void computeGFLine(GFLine *line)
 					f = im->ringf_map[line->oldp->v].indices[i];
 
 					mul_v3_v3fl(gf, line->gfsys->gf[f], dir);
-					if (!nextSegment(&news, im, line->oldp, f, gf))
+					if (!nextPointOnFace(&news.p, im, line->oldp, f, gf))
 						continue;
 
 					if (news.p.type == eEdge)
@@ -1064,7 +1060,7 @@ static void computeGFLine(GFLine *line)
 			}
 			else {
 				mul_v3_v3fl(gf, line->gfsys->gf[f], dir);
-				if (!nextSegment(&news, im, line->oldp, f, gf))
+				if (!nextPointOnFace(&news.p, im, line->oldp, f, gf))
 					break;
 				
 				if (news.p.type == eEdge && line->oldp->type == eEdge && line->oldp->e == news.p.e) {
@@ -1072,11 +1068,10 @@ static void computeGFLine(GFLine *line)
 						makePoint(&news.p, eVert, im->edges[news.p.e][0], im->co[im->edges[news.p.e][0]]);
 					else
 						makePoint(&news.p, eVert, im->edges[news.p.e][1], im->co[im->edges[news.p.e][1]]);
-
-					makeSegment(&news, im, line->oldp, f);
 				}
 			}
 
+			makeSegment(&news, im, line->oldp, f);
 			if (!nextLineSegment(line, &news))
 				break;
 				
