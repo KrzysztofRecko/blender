@@ -651,6 +651,9 @@ static DerivedMesh *applyModifier(ModifierData *md,
 
 		sys = initSystem(qmd, ob, dm);
 	}
+
+	if (sys && !sys->has_solution)
+		modifier_setError(md, "No soultion found given these constraints");
 	
 	if (sys && sys->has_solution) {
 		if (qmd->flag & MOD_QUADREMESH_REMESH) {
