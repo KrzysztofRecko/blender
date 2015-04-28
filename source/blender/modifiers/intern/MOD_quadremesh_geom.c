@@ -44,7 +44,8 @@
 #include "MOD_util.h"
 
 //#define QR_SHOWQUERIES
-#define QR_LINELIMIT 100000
+//#define QR_MAKEPOLYS
+#define QR_LINELIMIT 1000
 
 
 #if 0 /* UNUSED ROUTINES */
@@ -1309,7 +1310,7 @@ void freeOutputMesh(OutputMesh *om)
 
 DerivedMesh *makeResultMesh(LaplacianSystem *sys)
 {
-	int i;
+	int i, num_loops, num_polys;
 	double start_time;
 	MVert *verts;
 	OutputMesh *om = &sys->output_mesh;
@@ -1325,15 +1326,26 @@ DerivedMesh *makeResultMesh(LaplacianSystem *sys)
 
 	makeFeatureEdges(om, &sys->input_mesh);
 	computeFlowLines(sys);
-	deleteDegenerateVerts(om);
 	//hideEdgesOnFaces(om, &sys->input_mesh);
 	//makeNormals(om);
 
-	if (!om->num_verts)
-		return NULL;
+	if (!om->num_verts) {
+		freeOutputMesh(om);
+		BLI_rng_free(sys->rng);
 
-	ret = CDDM_new(om->num_verts, om->num_edges, 0, //0, 0);
-				   om->num_edges * 2, 2 + om->num_edges - om->num_verts);
+		return NULL;
+	}
+
+#ifdef QR_MAKEPOLYS
+	deleteDegenerateVerts(om);
+
+	num_loops = om->num_edges * 2;
+	num_polys = 2 + om->num_edges - om->num_verts;
+#else
+	num_loops = num_polys = 0;
+#endif
+
+	ret = CDDM_new(om->num_verts, om->num_edges, 0, num_loops, num_polys);
 
 	verts = ret->getVertArray(ret);
 
@@ -1345,14 +1357,16 @@ DerivedMesh *makeResultMesh(LaplacianSystem *sys)
 	}
 
 	makeEdges(om, ret->getEdgeArray(ret));
-	makePolys(om, ret->getPolyArray(ret), ret->getLoopArray(ret));
 
-	freeOutputMesh(om);
-	BLI_rng_free(sys->rng);
+#ifdef QR_MAKEPOLYS
+	makePolys(om, ret->getPolyArray(ret), ret->getLoopArray(ret));
 
 	CDDM_recalc_tessellation(ret);
 	//CDDM_calc_edges_tessface(ret);
-	//ret->dirty |= DM_DIRTY_NORMALS;
+#endif
+
+	freeOutputMesh(om);
+	BLI_rng_free(sys->rng);
 
 	printf("Mesh generation time: %f ms\n", (PIL_check_seconds_timer() - start_time) * 1000.0f);
 
