@@ -183,6 +183,9 @@ static void deleteLaplacianSystem(LaplacianSystem *sys)
 	if (sys->context) {
 		nlDeleteContext(sys->context);
 	}
+	if (sys->cache_mesh) {
+		sys->cache_mesh->release(sys->cache_mesh);
+	}
 	
 	MEM_SAFE_FREE(sys);
 }
@@ -639,16 +642,13 @@ static DerivedMesh *applyModifier(ModifierData *md,
 {
 	DerivedMesh *result = dm;
 	QuadRemeshModifierData *qmd = (QuadRemeshModifierData *)md;
-	LaplacianSystem *sys = qmd->cache_system;
+	LaplacianSystem *sys = NULL;
 
 	qmd->flag |= MOD_QUADREMESH_ALL_DIRTY;
 	qmd->flag |= MOD_QUADREMESH_REMESH;
 
 #ifdef WITH_OPENNL
 	if (qmd->flag & MOD_QUADREMESH_ALL_DIRTY) {
-		if (sys)
-			deleteLaplacianSystem(sys);
-
 		sys = initSystem(qmd, ob, dm);
 	}
 
@@ -669,7 +669,9 @@ static DerivedMesh *applyModifier(ModifierData *md,
 			result = CDDM_copy(sys->cache_mesh);
 	}
 
-	qmd->cache_system = sys;
+	if (sys)
+		deleteLaplacianSystem(sys);
+	//qmd->cache_system = sys;
 #endif /* WITH_OPENNL */
 
 	return result;
