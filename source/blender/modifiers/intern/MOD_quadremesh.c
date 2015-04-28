@@ -604,6 +604,11 @@ static bool isDisabled(ModifierData *md, int UNUSED(useRenderParams))
 {
 	QuadRemeshModifierData *lmd = (QuadRemeshModifierData *)md;
 	LaplacianSystem *sys = lmd->cache_system;
+
+	if (!lmd->anchor_grp_name[0])
+		return true;
+
+	return false;
 }
 
 static CustomDataMask requiredDataMask(Object *UNUSED(ob), ModifierData *md)

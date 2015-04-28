@@ -44,8 +44,8 @@
 #include "MOD_util.h"
 
 //#define QR_SHOWQUERIES
-//#define QR_MAKEPOLYS
-#define QR_LINELIMIT 1000
+#define QR_MAKEPOLYS
+#define QR_LINELIMIT 100000
 
 
 #if 0 /* UNUSED ROUTINES */
@@ -715,7 +715,8 @@ static bool nextPointOnFace(GFPoint *r_p, InputMesh *im, GFPoint *in_p, int in_f
  * 1 - intersection not found
  * 2 - wrong direction for this face
  */
-static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, float in_dir[3], float dist, float maxdist, bool make_seed)
+static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, float in_dir[3],
+						  float dist, float maxdist, bool make_seed)
 {
 	int oldf;
 	float c[3], len, actlen, prevlen, chkco[3], seedco[3], dir[3];
@@ -805,7 +806,7 @@ static bool checkPoint(GradientFlowSystem *gfsys, float in_oldco[3], GFPoint *in
 
 	sub_v3_v3v3(seg, in_oldco, in_p->co);
 
-	if (dot_v3v3(seg, seg) < FLT_EPSILON)
+	if (len_squared_v3(seg) < FLT_EPSILON)
 		return true;
 
 	if (in_p->type == eEdge) {
