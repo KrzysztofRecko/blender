@@ -176,7 +176,7 @@ static void getNormalAtEdge(float r_no[3], InputMesh *im, int in_e)
 	}
 }
 
-/* QRVert STUFF */
+/* QRDISKLINK STUFF */
 
 static QRDiskLink *getLink(OutputMesh *om, QRVertID in_v1, QRVertID in_v2)
 {
@@ -395,15 +395,22 @@ static void getInitialSeeds(GradientFlowSystem *gfsys)
 
 /* QREdge ROUTINES */
 
-static void appendOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_v, float in_dist)
+static QREdgeLink *newQREdgeLink(MemArena *ma, QRVertID in_v, float in_dist)
 {
-	QREdgeLink *newl = BLI_memarena_alloc(om->memarena, sizeof(QREdgeLink));
+	QREdgeLink *newl = BLI_memarena_alloc(ma, sizeof(QREdgeLink));
 
 	newl->v = in_v;
 	newl->dist = in_dist;
 	newl->elink = NULL;
 	newl->next = NULL;
 	newl->gfsysid = 0;
+
+	return newl;
+}
+
+static void appendOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_v, float in_dist)
+{
+	QREdgeLink *newl = newQREdgeLink(om->memarena, in_v, in_dist);
 
 	if (in_e->v2 == NULL) {
 		in_e->v1 = in_e->v2 = newl;
@@ -416,25 +423,19 @@ static void appendOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_v, float in
 
 static void prependOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_v, float in_dist)
 {
-	QREdgeLink *newl = BLI_memarena_alloc(om->memarena, sizeof(QREdgeLink));
+	QREdgeLink *newl = newQREdgeLink(om->memarena, in_v, in_dist);
 
-	newl->v = in_v;
-	newl->dist = in_dist;
 	newl->next = in_e->v1;
-	newl->elink = NULL;
-	newl->gfsysid = 0;
-
 	in_e->v1 = newl;
+
 	if (in_e->v2 == NULL)
 		in_e->v2 = newl;
 }
 
 static void insertAfterOnQREdge(OutputMesh *om, QREdge *in_e, QREdgeLink *in_l, QRVertID in_v, float in_dist)
 {
-	QREdgeLink *newl = BLI_memarena_alloc(om->memarena, sizeof(QREdgeLink));
+	QREdgeLink *newl = newQREdgeLink(om->memarena, in_v, in_dist);
 
-	newl->v = in_v;
-	newl->dist = in_dist;
 	newl->next = in_l->next;
 	newl->gfsysid = in_l->gfsysid;
 
@@ -443,7 +444,6 @@ static void insertAfterOnQREdge(OutputMesh *om, QREdge *in_e, QREdgeLink *in_l, 
 		in_l->elink = linkVerts(om, in_l->v, in_v);
 		newl->elink = linkVerts(om, in_v, in_l->next->v);
 	}
-	else newl->elink = NULL;
 
 	in_l->next = newl;
 }
