@@ -1114,7 +1114,11 @@ static void makeFeatureEdges(OutputMesh *om, InputMesh *im)
 	for (i = 0; i < im->num_edges; i++) {
 		f1 = im->faces_edge[i][0];
 		f2 = im->faces_edge[i][1];
-		angle = angle_normalized_v3v3(im->no[f1], im->no[f2]);
+		if (f1 == QR_NO_FACE || f2 == QR_NO_FACE)
+			angle = M_PI * 2.0f;
+		else
+			angle = angle_normalized_v3v3(im->no[f1], im->no[f2]);
+
 		if (angle >= M_PI_2 * 0.7f) {
 			p1.type = eVert;
 			p1.v = im->edges[i][0];
