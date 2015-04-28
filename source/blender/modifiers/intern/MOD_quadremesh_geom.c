@@ -117,6 +117,26 @@ static bool isPointOnSegment(float in_v[3], float in_l1[3], float in_l2[3])
 	sub_v3_v3v3(b, in_l2, in_v);
 	return dot_v3v3(a, b) >= 0.0f;
 }
+
+
+static int getFaceFromTwoEdges(InputMesh *im, int in_e1, int in_e2)
+{
+	if (im->faces_edge[in_e1][0] == im->faces_edge[in_e2][0])
+		return im->faces_edge[in_e2][0];
+
+	return im->faces_edge[in_e2][1];
+}
+
+static int getEdgeOppositeToVertex(InputMesh *im, int in_v, int in_f)
+{
+	int i;
+
+	for (i = 0; i < 3; i++)
+		if (im->faces[in_f][i] == in_v)
+			break;
+
+	return getEdgeFromVerts(im, im->faces[in_f][(i + 1) % 3], im->faces[in_f][(i + 2) % 3]);
+}
 #endif // UNUSED ROUTINES
 
 /* MATH STUFF */
@@ -583,25 +603,6 @@ static int getOtherFaceAdjacentToEdge(InputMesh *im, int in_f, int in_e)
 	return im->faces_edge[in_e][0];
 }
 
-static int getFaceFromTwoEdges(InputMesh *im, int in_e1, int in_e2)
-{
-	if (im->faces_edge[in_e1][0] == im->faces_edge[in_e2][0])
-		return im->faces_edge[in_e2][0];
-
-	return im->faces_edge[in_e2][1];
-}
-
-static int getEdgeOppositeToVertex(InputMesh *im, int in_v, int in_f)
-{
-	int i;
-
-	for (i = 0; i < 3; i++)
-		if (im->faces[in_f][i] == in_v)
-			break;
-
-	return getEdgeFromVerts(im, im->faces[in_f][(i + 1) % 3], im->faces[in_f][(i + 2) % 3]);
-}
-
 static void makePoint(GFPoint *r_p, GFPointType p_type, int p_vef, float p_co[3])
 {
 	r_p->type = p_type;
@@ -740,7 +741,6 @@ static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, fl
 
 		if (!nextPointOnFace(&newp, im, &oldp, in_f, dir))
 			break;
-		oldf = in_f;
 
 		sub_v3_v3v3(c, newp.co, oldp.co);
 		len = len_v3(c);
@@ -788,6 +788,7 @@ static int queryDirection(GradientFlowSystem *gfsys, GFPoint *in_p, int in_f, fl
 		if (newp.type == eVert)
 			break;
 
+		oldf = in_f;
 		in_f = getOtherFaceAdjacentToEdge(im, in_f, newp.e);
 		memcpy(&oldp, &newp, sizeof(GFPoint));
 		prevlen = actlen;
@@ -811,11 +812,10 @@ static bool checkPoint(GradientFlowSystem *gfsys, float in_oldco[3], GFPoint *in
 
 	if (in_p->type == eEdge) {
 		getNormalAtEdge(no, im, in_p->e);
-		f = im->faces_edge[in_p->e][0];
-		if (f == QR_NO_FACE)
-			f = im->faces_edge[in_p->e][1];
-		if (f == QR_NO_FACE)
-			return true;
+
+		if ((f = im->faces_edge[in_p->e][0]) == QR_NO_FACE)	
+			if ((f = im->faces_edge[in_p->e][1]) == QR_NO_FACE)
+				return true;
 	}
 	else {
 		copy_v3_v3(no, im->no[in_p->f]);

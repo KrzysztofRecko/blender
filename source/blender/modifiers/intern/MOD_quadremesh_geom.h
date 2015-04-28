@@ -28,6 +28,7 @@
  *  - bad topology near field extrema
  *  - not closing gaps between line's ends
  *  - semi automatic extrema placement
+ *  - mesh anisotropy (related to p.2)
  */
 
 /** \file blender/modifiers/intern/MOD_quadremesh_geom.h
