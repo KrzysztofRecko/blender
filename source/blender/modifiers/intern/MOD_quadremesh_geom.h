@@ -49,9 +49,9 @@
 #include "BLI_memarena.h"
 #include "BLI_rand.h"
 
-#define QR_SAMPLING_RATE 0.08f
+#define QR_SAMPLING_RATE 0.04f
 #define QR_MINDIST 0.04f
-#define QR_SEEDPROB 0.3f
+#define QR_SEEDPROB 0.2f
 #define QR_SEEDDIST 0.08f
 
 #define QR_MAXDIST_TO_SEEDDIST 2.0f

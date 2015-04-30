@@ -482,6 +482,7 @@ static void insertOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_vid)
 		else {
 			for (it = in_e->v1; it->next && it->next->dist < tmp; it = it->next);
 			if (in_vid == it->v || in_vid == it->next->v) return;
+			//if (IS_EQF(it->dist, tmp) || IS_EQF(it->next->dist, tmp)) return;
 			insertAfterOnQREdge(om, in_e, it, in_vid, tmp);
 		}
 	}
@@ -984,7 +985,7 @@ static bool nextLineSegment(GFLine *line, GFSegment *in_s)
 {
 	const float chklen = line->gfsys->sys->qmd->sampling_interval;
 	const float maxdist = line->gfsys->sys->qmd->max_line_dist;
-	const float seeddist = maxdist * QR_MAXDIST_TO_SEEDDIST;
+	const float seeddist = maxdist * QR_MAXDIST_TO_SEEDDIST;//(1.0f + BLI_rng_get_float(line->gfsys->sys->rng) * (QR_MAXDIST_TO_SEEDDIST - 1.0f));
 
 	float seg[3], co[3];
 	float curlen;
@@ -1143,24 +1144,52 @@ static void makeFeatureEdges(OutputMesh *om, InputMesh *im)
 
 static void deleteDegenerateVerts(OutputMesh *om)
 {
-	int i, m, n;
+	int i, j, n;
 	QRVertID a, b, *vertmap;
 	QRVert *newverts;
 	QRDiskLink *it;
+	QRDiskLink *al, *bl;
+
+	for (j = 0; j < 3; j++)
+		for (i = 0; i < om->num_verts; i++) {
+			if (om->verts[i].num_links == 1)
+				unlinkVerts(om, om->verts[i].link);
+		}
 
 	for (i = 0; i < om->num_verts; i++) {
-		m = om->verts[i].num_links;
-
-		if (m == 1)
-			unlinkVerts(om, om->verts[i].link);
-		else if (m == 2) {
+		if (om->verts[i].num_links == 2) {
 			a = om->verts[i].link->v;
+			al = om->verts[i].link->brother;
 			b = om->verts[i].link->next->v;
-			unlinkVerts(om, om->verts[i].link);
-			unlinkVerts(om, om->verts[i].link);
-			linkVerts(om, a, b);
+			bl = om->verts[i].link->next->brother;
+
+			if (a != b) {
+				deleteLink(om, &om->verts[i], om->verts[i].link);
+				deleteLink(om, &om->verts[i], om->verts[i].link);
+
+				al->v = b;
+				al->brother = bl;
+				bl->v = a;
+				bl->brother = al;
+			
+				om->num_edges--;
+			}
+			else {
+				deleteLink(om, &om->verts[i], om->verts[i].link);
+				deleteLink(om, &om->verts[i], om->verts[i].link);
+				deleteLink(om, &om->verts[a], al);
+				deleteLink(om, &om->verts[b], bl);
+
+				om->num_edges -= 2;
+			}
 		}
 	}
+
+	for (j = 0; j < 2; j++)
+		for (i = 0; i < om->num_verts; i++) {
+			if (om->verts[i].num_links == 1)
+				unlinkVerts(om, om->verts[i].link);
+		}
 
 	vertmap = MEM_mallocN(sizeof(QRVertID) * om->num_verts, __func__);
 
@@ -1269,9 +1298,14 @@ static void makePolys(OutputMesh *om, MPoly *r_polys, MLoop *r_loops)
 			r_polys[num_polys].totloop = num_loops - s;
 			r_polys[num_polys].mat_nr = 0;
 			r_polys[num_polys].flag = 0;
-			num_polys++;
+			if (++num_polys == max_num_polys) {
+				printf("Num polys: %d / %d  ", num_polys, max_num_polys);
+				return;
+			}
 		}
 	}
+
+	printf("Num polys: %d / %d  ", num_polys, max_num_polys);
 }
 
 #if 0
