@@ -56,7 +56,7 @@
 
 #define QR_MAXDIST_TO_SEEDDIST 2.0f
 #define QR_GFLINE_QSIZE 32
-#define QR_NO_FACE UINT_MAX
+#define QR_NO_FACE 0xffffffff
 
 typedef int MEdgeID;
 typedef int QRVertID;

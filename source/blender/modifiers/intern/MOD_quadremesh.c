@@ -146,7 +146,7 @@ static void computeSampleDistanceFunctions(LaplacianSystem *sys, float user_h, f
 
 #ifdef WITH_OPENNL
 
-void freeGradientFlowSystem(GradientFlowSystem *gfsys) 
+static void freeGradientFlowSystem(GradientFlowSystem *gfsys) 
 {
 	BLI_heap_free(gfsys->seeds, MEM_freeN);
 	MEM_SAFE_FREE(gfsys->gf);
@@ -250,7 +250,8 @@ static void createEdgeRingMap(InputMesh *im)
 }
 
 static void createFacesByEdge(InputMesh *im){
-	int e, i, j, v1, v2, *vin;
+	int e, i, j, v1, v2;
+	unsigned int *vin;
 
 	im->faces_edge = MEM_mallocN(sizeof(int[2]) * im->num_edges, "QuadRemeshFacesEdge");
 
@@ -420,7 +421,7 @@ static void computeGradientFields(LaplacianSystem * sys)
 	}
 }
 
-GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys)
+static GradientFlowSystem *newGradientFlowSystem(LaplacianSystem *sys)
 {
 	GradientFlowSystem *gfsys = MEM_callocN(sizeof(GradientFlowSystem), "GradientFlowSystem");
 	
@@ -435,9 +436,14 @@ static LaplacianSystem *initSystem(QuadRemeshModifierData *qmd, Object *ob, Deri
 	int i, defgrp_index;
 	float wpaint;
 	MDeformVert *dvert = NULL;
-	MDeformVert *dv = NULL, *d;
+	MDeformVert *dv = NULL;
+	MDeformWeight *d;
 	LaplacianSystem *sys;
 	InputMesh *im;
+
+	MVert *arrayvect;
+	MEdge *arrayedge;
+	MFace *tessface;
 
 	if (strlen(qmd->anchor_grp_name) <= 1)
 		return NULL;
@@ -451,14 +457,14 @@ static LaplacianSystem *initSystem(QuadRemeshModifierData *qmd, Object *ob, Deri
 	/* Get vertices */
 	im->num_verts = dm->getNumVerts(dm);
 	im->co = MEM_mallocN(sizeof(float[3]) * im->num_verts, "QuadRemeshCoordinates");
-	MVert *arrayvect = dm->getVertArray(dm);
+	arrayvect = dm->getVertArray(dm);
 	for (i = 0; i < dm->getNumVerts(dm); i++) {
 		copy_v3_v3(im->co[i], arrayvect[i].co);
 	}
 
 	/* Get edges */
 	im->edges = MEM_mallocN(sizeof(int[2]) * dm->getNumEdges(dm) * 2, "QuadRemeshEdges");
-	MEdge *arrayedge = dm->getEdgeArray(dm);
+	arrayedge = dm->getEdgeArray(dm);
 	for (im->num_edges = 0, i = 0; i < dm->getNumEdges(dm); i++) {
 		im->edges[im->num_edges][0] = arrayedge[i].v1;
 		im->edges[im->num_edges][1] = arrayedge[i].v2;
@@ -466,7 +472,7 @@ static LaplacianSystem *initSystem(QuadRemeshModifierData *qmd, Object *ob, Deri
 	}
 
 	/* Get faces */
-	MFace *tessface = dm->getTessFaceArray(dm);
+	tessface = dm->getTessFaceArray(dm);
 	im->faces = MEM_mallocN(sizeof(int[3]) * dm->getNumTessFaces(dm) * 2, "QuadRemeshFaces");
 	for (im->num_faces = 0, i = 0; i < dm->getNumTessFaces(dm); i++) {
 		im->faces[im->num_faces][0] = tessface[i].v1;
@@ -506,7 +512,7 @@ static LaplacianSystem *initSystem(QuadRemeshModifierData *qmd, Object *ob, Deri
 		d = defvert_find_index(dv, defgrp_index);
 		wpaint = defvert_find_weight(dv, defgrp_index);
 
-		if (d && wpaint < 0.19 || wpaint > 0.89) {
+		if (d && (wpaint < 0.19 || wpaint > 0.89)) {
 			im->constraints[i] = 1;
 			im->weights[i] = -1.0f + wpaint * 2.0f;
 			im->num_features++;
@@ -596,7 +602,7 @@ static void initData(ModifierData *md)
 
 static void copyData(ModifierData *md, ModifierData *target)
 {
-	QuadRemeshModifierData *qmd = (QuadRemeshModifierData *)md;
+	//QuadRemeshModifierData *qmd = (QuadRemeshModifierData *)md;
 	QuadRemeshModifierData *tqmd = (QuadRemeshModifierData *)target;
 	modifier_copyData_generic(md, target);
 	tqmd->cache_system = NULL;
@@ -606,7 +612,7 @@ static void copyData(ModifierData *md, ModifierData *target)
 static bool isDisabled(ModifierData *md, int UNUSED(useRenderParams))
 {
 	QuadRemeshModifierData *lmd = (QuadRemeshModifierData *)md;
-	LaplacianSystem *sys = lmd->cache_system;
+	//LaplacianSystem *sys = lmd->cache_system;
 
 	if (!lmd->anchor_grp_name[0])
 		return true;
