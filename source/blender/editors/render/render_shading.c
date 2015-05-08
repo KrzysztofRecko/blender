@@ -203,7 +203,7 @@ static int material_slot_assign_exec(bContext *C, wmOperator *UNUSED(op))
 			if (nurbs) {
 				for (nu = nurbs->first; nu; nu = nu->next)
 					if (isNurbsel(nu))
-						nu->mat_nr = nu->charidx = ob->actcol - 1;
+						nu->mat_nr = ob->actcol - 1;
 			}
 		}
 		else if (ob->type == OB_FONT) {
@@ -422,6 +422,7 @@ static int material_slot_move_exec(bContext *C, wmOperator *op)
 
 	MEM_freeN(slot_remap);
 
+	DAG_id_tag_update(&ob->id, OB_RECALC_DATA);
 	WM_event_add_notifier(C, NC_OBJECT | ND_DRAW | ND_DATA, ob);
 
 	return OPERATOR_FINISHED;
