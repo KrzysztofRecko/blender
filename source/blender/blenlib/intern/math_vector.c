@@ -499,6 +499,23 @@ float angle_signed_on_axis_v3v3v3_v3(const float v1[3], const float v2[3], const
 	return angle;
 }
 
+float angle_signed_on_axis_normalized_fast_v3v3v3(const float v1[3], const float v2[3], const float axis[3])
+{
+	float tproj[3];
+	float angle, dot;
+
+	dot = dot_v3v3(v1, v2);
+	CLAMP(dot, -1.0f, 1.0f);
+	angle = acosf(dot);
+
+	cross_v3_v3v3(tproj, v2, v1);
+	if (dot_v3v3(tproj, axis) < 0.0f) {
+		angle = ((float)(M_PI * 2.0f)) - angle;
+	}
+
+	return angle;
+}
+
 void angle_tri_v3(float angles[3], const float v1[3], const float v2[3], const float v3[3])
 {
 	float ed1[3], ed2[3], ed3[3];
