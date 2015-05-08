@@ -292,53 +292,37 @@ static void makeFeatureEdges(OutputMesh *om, InputMesh *im)
 
 static void deleteDegenerateVerts(OutputMesh *om)
 {
-	int i, j, n;
-	QRVertID a, b, *vertmap;
+	int i, n;
+	bool *donevert, doverts = true;
+	QRVertID *vertmap;
 	QRVert *newverts;
 	QRDiskLink *it;
-	QRDiskLink *al, *bl;
 
-	for (j = 0; j < 3; j++)
+	donevert = MEM_callocN(sizeof(QRVertID) * om->num_verts, __func__);
+
+	while (doverts) {
+		doverts = false;
 		for (i = 0; i < om->num_verts; i++) {
-			if (om->verts[i].num_links == 1)
+			if (donevert[i])
+				continue;
+
+			donevert[i] = true;
+
+			if (om->verts[i].num_links == 1) {
+				doverts = true;
+				donevert[om->verts[i].link->v] = false;
 				unlinkVerts(om, om->verts[i].link);
-		}
-
-	for (i = 0; i < om->num_verts; i++) {
-		if (om->verts[i].num_links == 2) {
-			a = om->verts[i].link->v;
-			al = om->verts[i].link->brother;
-			b = om->verts[i].link->next->v;
-			bl = om->verts[i].link->next->brother;
-
-			if (a != b) {
-				deleteLink(om, &om->verts[i], om->verts[i].link);
-				deleteLink(om, &om->verts[i], om->verts[i].link);
-
-				al->v = b;
-				al->brother = bl;
-				bl->v = a;
-				bl->brother = al;
-			
-				om->num_edges--;
 			}
-			else {
-				deleteLink(om, &om->verts[i], om->verts[i].link);
-				deleteLink(om, &om->verts[i], om->verts[i].link);
-				deleteLink(om, &om->verts[a], al);
-				deleteLink(om, &om->verts[b], bl);
-
-				om->num_edges -= 2;
+			else if (om->verts[i].num_links == 2) {
+				doverts = true;
+				donevert[om->verts[i].link->v] = false;
+				donevert[om->verts[i].link->next->v] = false;
+				dissolveVert(om, i);
 			}
 		}
 	}
 
-	for (j = 0; j < 2; j++)
-		for (i = 0; i < om->num_verts; i++) {
-			if (om->verts[i].num_links == 1)
-				unlinkVerts(om, om->verts[i].link);
-		}
-
+	MEM_SAFE_FREE(donevert);
 	vertmap = MEM_mallocN(sizeof(QRVertID) * om->num_verts, __func__);
 
 	for (i = 0, n = 0; i < om->num_verts; i++) {

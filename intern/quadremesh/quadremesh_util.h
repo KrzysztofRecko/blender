@@ -159,6 +159,7 @@ void getNormalAtEdge(float r_no[3], InputMesh *im, int in_e);
 QRDiskLink *linkVerts(OutputMesh *om, QRVertID in_v1, QRVertID in_v2);
 void deleteLink(OutputMesh *om, QRVert *ll, QRDiskLink *l);
 void unlinkVerts(OutputMesh *om, QRDiskLink *l);
+void dissolveVert(OutputMesh *om, QRVertID in_v);
 
 void insertOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_vid);
 void linkOnQREdge(OutputMesh *om, GFSysID sys_id, QREdge *in_e, QRVertID in_v1, QRVertID in_v2);

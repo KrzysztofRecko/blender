@@ -138,3 +138,42 @@ void unlinkVerts(OutputMesh *om, QRDiskLink *l)
 
 	om->num_edges--;
 }
+
+void dissolveVert(OutputMesh *om, QRVertID in_v)
+{
+	QRVertID a, b;
+	QRDiskLink *al, *bl;
+
+	a = om->verts[in_v].link->v;
+	al = om->verts[in_v].link->brother;
+	b = om->verts[in_v].link->next->v;
+	bl = om->verts[in_v].link->next->brother;
+
+	if (a != b) {
+		deleteLink(om, &om->verts[in_v], om->verts[in_v].link);
+		deleteLink(om, &om->verts[in_v], om->verts[in_v].link);
+
+		if (getLink(om, a, b)) {
+			deleteLink(om, &om->verts[a], al);
+			deleteLink(om, &om->verts[b], bl);
+
+			om->num_edges -= 2;
+		}
+		else {
+			al->v = b;
+			al->brother = bl;
+			bl->v = a;
+			bl->brother = al;
+			
+			om->num_edges--;
+		}
+	}
+	else {
+		deleteLink(om, &om->verts[in_v], om->verts[in_v].link);
+		deleteLink(om, &om->verts[in_v], om->verts[in_v].link);
+		deleteLink(om, &om->verts[a], al);
+		deleteLink(om, &om->verts[b], bl);
+
+		om->num_edges -= 2;
+	}
+}
