@@ -79,7 +79,6 @@ set(SRC
 	intern/MOD_particleinstance.c
 	intern/MOD_particlesystem.c
 	intern/MOD_quadremesh.c
-	intern/MOD_quadremesh_geom.c
 	intern/MOD_remesh.c
 	intern/MOD_screw.c
 	intern/MOD_shapekey.c
@@ -108,7 +107,6 @@ set(SRC
 	intern/MOD_boolean_util.h
 	intern/MOD_fluidsim_util.h
 	intern/MOD_meshcache_util.h
-	intern/MOD_quadremesh_geom.h
 	intern/MOD_util.h
 	intern/MOD_weightvg_util.h
 )
@@ -150,6 +148,13 @@ if(WITH_OPENNL)
 	add_definitions(-DWITH_OPENNL)
 	list(APPEND INC_SYS
 		../../../intern/opennl/extern
+	)
+endif()
+
+if(WITH_MOD_QUADREMESH)
+	add_definitions(-DWITH_MOD_QUADREMESH)
+	list(APPEND INC
+		../../../intern/quadremesh
 	)
 endif()
 

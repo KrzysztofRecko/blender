@@ -654,6 +654,10 @@ macro(SETUP_BLENDER_SORTED_LIBS)
 	if(WITH_BULLET AND NOT WITH_SYSTEM_BULLET)
 		list_insert_after(BLENDER_SORTED_LIBS "ge_logic_ngnetwork" "extern_bullet")
 	endif()
+	
+	if(WITH_MOD_QUADREMESH)
+		list(APPEND BLENDER_SORTED_LIBS bf_intern_quadremesh)
+	endif()
 
 	foreach(SORTLIB ${BLENDER_SORTED_LIBS})
 		set(REMLIB ${SORTLIB})

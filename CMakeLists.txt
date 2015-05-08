@@ -274,6 +274,7 @@ option(WITH_MOD_REMESH          "Enable Remesh Modifier" ON)
 # option(WITH_MOD_CLOTH_ELTOPO    "Enable Experimental cloth solver" OFF)  # this is now only available in a branch
 # mark_as_advanced(WITH_MOD_CLOTH_ELTOPO)
 option(WITH_MOD_OCEANSIM        "Enable Ocean Modifier" OFF)
+option(WITH_MOD_QUADREMESH      "Enable Quad Remesh Modifier" ON)
 
 # Image format support
 option(WITH_OPENIMAGEIO         "Enable OpenImageIO Support (http://www.openimageio.org)" ON)
@@ -2883,6 +2884,7 @@ if(FIRST_RUN)
 	info_cfg_option(WITH_MOD_REMESH)
 	info_cfg_option(WITH_MOD_FLUID)
 	info_cfg_option(WITH_MOD_OCEANSIM)
+	info_cfg_option(WITH_MOD_QUADREMESH)
 
 	info_cfg_text("OpenGL:")
 	info_cfg_option(WITH_GLEW_ES)

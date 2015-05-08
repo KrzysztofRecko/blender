@@ -15,51 +15,29 @@
  * along with this program; if not, write to the Free Software  Foundation,
  * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
- * Author: Alexander Pinzon Fernandez
- * All rights reserved.
+ * Contributor(s): Alexander Pinzon Fernandez
+ *                 Krzysztof Recko
  *
  * ***** END GPL LICENSE BLOCK *****
  *
  */
 
-/**
- * Known issues:
- *  - caching the u-field
- *  - bad topology near field extrema
- *  - not closing gaps between line's ends
- *  - semi automatic extrema placement
- *  - mesh anisotropy (related to p.2)
- */
+#ifndef __QUADREMESH_UTIL_H__
+#define __QUADREMESH_UTIL_H__
 
-/** \file blender/modifiers/intern/MOD_quadremesh_geom.h
- *  \ingroup modifiers
- */
-
-#ifndef __MOD_QUADREMESH_GEOM_H__
-#define __MOD_QUADREMESH_GEOM_H__
-
-#ifdef WITH_OPENNL
-
-#include "ONL_opennl.h"
-
-#include "BKE_mesh_mapping.h"
-#include "BLI_heap.h"
-#include "BLI_linklist.h"
-#include "BKE_cdderivedmesh.h"
-#include "BLI_memarena.h"
-#include "BLI_rand.h"
-
-#define QR_SAMPLING_RATE 0.04f
-#define QR_MINDIST 0.04f
 #define QR_SEEDPROB 0.2f
-#define QR_SEEDDIST 0.08f
-
+#define QR_SAMPLING_RATE 0.04f
 #define QR_MAXDIST_TO_SEEDDIST 2.0f
-#define QR_GFLINE_QSIZE 32
 #define QR_NO_FACE 0xffffffff
 
 typedef int MEdgeID;
 typedef int QRVertID;
+
+typedef enum {
+	GFSYS1 = 1 << 0,
+	GFSYS2 = 1 << 1,
+	GFSYSNONE = 1 << 2
+} GFSysID;
 
 typedef struct QRDiskLink {
 	struct QRDiskLink *next, *prev, *brother;
@@ -69,24 +47,14 @@ typedef struct QRDiskLink {
 	bool poly_on_right;
 } QRDiskLink;
 
-typedef struct QRVert {
-	QRDiskLink *link;
-	float co[3], no[3], vec[3];
-	int num_links;
-} QRVert;
-
-typedef enum {
-	GFSYS1 = 1 << 0,
-	GFSYS2 = 1 << 1,
-	GFSYSNONE = 1 << 2
-} GFSysID;
-
 typedef struct QREdgeLink {
-	struct QREdgeLink *next;
 	QRVertID v;
-	QRDiskLink *elink;
-	GFSysID gfsysid;
 	float dist;
+
+	struct QREdgeLink *next;
+	struct QRDiskLink *elink;
+
+	GFSysID gfsysid;
 } QREdgeLink;
 
 typedef struct QREdge {
@@ -94,6 +62,12 @@ typedef struct QREdge {
 	float dir[3], orig[3];
 	int num_links;
 } QREdge;
+
+typedef struct QRVert {
+	struct QRDiskLink *link;
+	float co[3], no[3], vec[3];
+	int num_links;
+} QRVert;
 
 typedef enum {
 	eVert,
@@ -131,24 +105,12 @@ typedef struct GradientFlowSystem {
 	//float *h;
 	float(*gf)[3];				/* Gradient Field */
 
-	struct LaplacianSystem *sys;
+	struct QuadRemeshSystem *sys;
 } GradientFlowSystem;
 
-typedef struct GFLine {
-	GradientFlowSystem *gfsys;
-	GFPoint end, seed;
-	GFPoint *oldp, *lastchkp;
-	GFSegment lastchks;
-	int d;
-
-	float lastchklen;
-
-	float qlen;
-	int num_q;
-	GFSegment q[QR_GFLINE_QSIZE];
-} GFLine;
-
 typedef struct InputMesh {
+	bool is_alloc;
+
 	int num_verts, num_edges, num_faces, num_features;
 	float(*co)[3];					/* Original vertex coordinates */
 	float(*no)[3];					/* Original face normal */
@@ -159,41 +121,66 @@ typedef struct InputMesh {
 
 	int *ringf_indices;				/* Indices of faces per vertex */
 	int *ringe_indices;				/* Indices of edges per vertex */
-	MeshElemMap *ringf_map;			/* Map of faces per vertex */
-	MeshElemMap *ringe_map;			/* Map of edges per vertex */
+	struct MeshElemMap *ringf_map;  /* Map of faces per vertex */
+	struct MeshElemMap *ringe_map;	/* Map of edges per vertex */
 
 	int *constraints;				/* Feature points constraints*/
 	float *weights;					/* Feature points weights*/
 } InputMesh;
 
 typedef struct OutputMesh {
-	MemArena *memarena;
+	struct MemArena *memarena;
 	QRVert *verts;
 	QRVertID *vonvs;
-	QREdge *ringe;                  /* QREdges per original edges */
-	LinkNode **ringf;               /* Lists of QREdge per original faces */
+	struct QREdge *ringe;                  /* QREdges per original edges */
+	struct LinkNode **ringf;        /* Lists of QREdge per original faces */
 	
 	int num_verts, alloc_verts;
 	int num_edges;
 } OutputMesh;
 
-typedef struct LaplacianSystem {
-	bool has_solution;
-
+typedef struct QuadRemeshSystem {
 	struct QuadRemeshModifierData *qmd;
+
 	InputMesh input_mesh;
-	OutputMesh output_mesh;
-	GradientFlowSystem *gfsys[2];
-	RNG *rng;
 	
+	bool has_solution, is_alloc;
+	GradientFlowSystem *gfsys[2];
 	float *U_field;					/* Initial scalar field*/
 
-	NLContext *context;				/* System for solve general implicit rotations */
-	DerivedMesh *cache_mesh;
-} LaplacianSystem;
+	OutputMesh output_mesh;
+	struct RNG *rng;
 
-void freeOutputMesh(OutputMesh *om);
-DerivedMesh *makeResultMesh(LaplacianSystem *sys);
+	struct DerivedMesh *cache_mesh;
+} QuadRemeshSystem;
 
-#endif /*openNl*/
-#endif /*__MOD_QUADREMESH_GEOM_H__*/
+void getNormalAtEdge(float r_no[3], InputMesh *im, int in_e);
+
+QRDiskLink *linkVerts(OutputMesh *om, QRVertID in_v1, QRVertID in_v2);
+void deleteLink(OutputMesh *om, QRVert *ll, QRDiskLink *l);
+void unlinkVerts(OutputMesh *om, QRDiskLink *l);
+
+void insertOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_vid);
+void linkOnQREdge(OutputMesh *om, GFSysID sys_id, QREdge *in_e, QRVertID in_v1, QRVertID in_v2);
+QREdge *addQREdgeToFace(OutputMesh *om, InputMesh *im, GFSysID sys_id, int in_f, QRVertID in_v1, QRVertID in_v2);
+
+QRVertID addVert(OutputMesh *om, float in_co[3], float in_no[3]);
+void addGFPoint(InputMesh *im, OutputMesh *om, GFPoint *in_p);
+
+void addSeedToQueue(struct Heap *aheap, float in_co[3], GFPointType in_type, int in_val, float weight);
+GFPoint *getTopSeedFromQueue(struct Heap *aheap);
+
+bool isectSegmentWithOthersOnFace(OutputMesh *om, GFSysID sys_id, float in_a[3], float in_b[3], int in_f);
+bool isectPointWithQREdge(OutputMesh *om, GFSysID sys_id, float in_co[3], int in_e);
+
+void getInitialSeeds(GradientFlowSystem *gfsys);
+void computeFlowLines(QuadRemeshSystem *sys);
+
+void freeInputMesh(InputMesh *im);
+void getInput(QuadRemeshSystem *sys, struct Object *ob, struct DerivedMesh *dm);
+void getHarmonicGradients(QuadRemeshSystem *sys);
+
+GradientFlowSystem *newGradientFlowSystem(QuadRemeshSystem *sys);
+void freeGradientFlowSystem(GradientFlowSystem *gfsys);
+
+#endif
