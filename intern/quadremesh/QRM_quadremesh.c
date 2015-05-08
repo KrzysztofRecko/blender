@@ -461,7 +461,7 @@ static void initOutputMesh(OutputMesh *om, InputMesh *im)
 
 	om->memarena = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Output Mesh");
 	om->vonvs = MEM_mallocN(sizeof(QRVertID) * im->num_verts, __func__);
-	fill_vn_i(om->vonvs, im->num_verts, -1);
+	copy_vn_i(om->vonvs, im->num_verts, -1);
 	om->ringe = MEM_callocN(sizeof(QREdge) * im->num_edges, "GFListEdges");
 	om->ringf = MEM_callocN(sizeof(LinkNode *) * im->num_faces, "GFListFaces");
 }
