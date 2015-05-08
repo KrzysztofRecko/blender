@@ -1448,16 +1448,22 @@ enum {
 typedef struct QuadRemeshModifierData {
 	ModifierData modifier;
 	char anchor_grp_name[64];  /* MAX_VGROUP_NAME */
-	short flag, pad[3];
-	float sampling_interval, max_line_dist, seeding_probability, seeding_dist;
-	void *cache_system;  /* runtime only */
 
+	short flag;
+	char auto_updates;
+	char pad[5];
+
+	float max_line_dist;
+	int rng_seed;
+
+	void *cache_system;  /* runtime only */
 } QuadRemeshModifierData;
 
 /* QuadRemesh modifier flags */
 enum {
 	MOD_QUADREMESH_REMESH = (1 << 1),
-	MOD_QUADREMESH_ALL_DIRTY = (1 << 2),
+	MOD_QUADREMESH_INPUT_DIRTY = (1 << 2),
+	MOD_QUADREMESH_FIELD_DIRTY = (1 << 3),
 };
 
 typedef struct DataTransferModifierData {

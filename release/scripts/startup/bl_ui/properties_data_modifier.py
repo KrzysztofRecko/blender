@@ -679,6 +679,32 @@ class DATA_PT_modifiers(ModifierButtonsPanel, Panel):
     def PARTICLE_SYSTEM(self, layout, ob, md):
         layout.label(text="Settings can be found inside the Particle context")
 
+    def QUADREMESH(self, layout, ob, md):
+        row = layout.row()
+        row.label(text="Features Vertex Group:")
+
+        row = layout.row()
+        row.prop_search(md, "vertex_group", ob, "vertex_groups", text="")
+        
+        layout.separator()
+        row = layout.row()
+        layout.prop(md, "max_line_dist")
+
+        row = layout.row()
+        layout.prop(md, "seed")
+        
+        layout.separator()
+        row = layout.row()
+        layout.prop(md, "is_autoupdate")
+
+        row = layout.row()
+        row.enabled = not bool(md.is_autoupdate)
+        row.operator("object.quadremesh_computeflow", text="Update all")
+
+        row = layout.row()
+        row.enabled = not bool(md.is_autoupdate)
+        row.operator("object.quadremesh_remesh", text="Update remesh")
+
     def SCREW(self, layout, ob, md):
         split = layout.split()
 
@@ -1009,32 +1035,6 @@ class DATA_PT_modifiers(ModifierButtonsPanel, Panel):
         row.active = md.use_remove_disconnected
         row.prop(md, "threshold")
 
-    def QUADREMESH(self, layout, ob, md):
-        is_computeflow = md.is_computeflow
-        is_remesh = md.is_remesh
-
-        row = layout.row()
-        row.label(text="Features Vertex Group:")
-
-        row = layout.row()
-        row.prop_search(md, "vertex_group", ob, "vertex_groups", text="")
-
-        layout.separator()
-
-        #row = layout.row()
-        #row.enabled = bool(md.vertex_group)
-        #row.operator("object.quadremesh_computeflow", text="Recompute Flow" if is_computeflow else "Compute Flow")        
-
-        layout.separator()
-        #row = layout.row()
-        layout.prop(md, "max_line_dist")
-
-        #layout.separator()
-
-        #row = layout.row()
-        #row.enabled = bool(md.vertex_group)
-        #row.operator("object.quadremesh_remesh", text="Remesh")        
-         
     @staticmethod
     def vertex_weight_mask(layout, ob, md):
         layout.label(text="Influence/Mask Options:")

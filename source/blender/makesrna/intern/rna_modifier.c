@@ -749,16 +749,10 @@ static int rna_LaplacianDeformModifier_is_bind_get(PointerRNA *ptr)
 	return ((lmd->flag & MOD_LAPLACIANDEFORM_BIND) && (lmd->cache_system != NULL));
 }
 
-static int rna_QuadRemeshModifier_is_computeflow_get(PointerRNA *ptr)
+static int rna_QuadRemeshModifier_is_autoupdate_get(PointerRNA *ptr)
 {
 	QuadRemeshModifierData *qmd = (QuadRemeshModifierData *)ptr->data;
-	return (qmd->flag & MOD_QUADREMESH_ALL_DIRTY);
-}
-
-static int rna_QuadRemeshModifier_is_remesh_get(PointerRNA *ptr)
-{
-	QuadRemeshModifierData *qmd = (QuadRemeshModifierData *)ptr->data;
-	return (qmd->flag & MOD_QUADREMESH_REMESH);
+	return qmd->auto_updates;
 }
 
 /* NOTE: Curve and array modifiers requires curve path to be evaluated,
@@ -4274,19 +4268,18 @@ static void rna_def_modifier_quadremesh(BlenderRNA *brna)
 	RNA_def_property_float_sdna(prop, NULL, "max_line_dist");
 	RNA_def_property_range(prop, 0.001f, 10.0f);
 	RNA_def_property_ui_range(prop, 0.001f, 10.0f, 0.1, 1);
-	RNA_def_property_ui_text(prop, "Remeshing Line Density", "Line Density");
+	RNA_def_property_ui_text(prop, "Line Spacing", "Remeshing Line Spacing");
 	RNA_def_property_update(prop, 0, "rna_Modifier_update");
 
-	prop = RNA_def_property(srna, "is_computeflow", PROP_BOOLEAN, PROP_NONE);
-	RNA_def_property_boolean_funcs(prop, "rna_QuadRemeshModifier_is_computeflow_get", NULL);
-	RNA_def_property_ui_text(prop, "Compute Flow", "Compute Gradient flow");
-	RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+	prop = RNA_def_property(srna, "seed", PROP_INT, PROP_NONE);
+	RNA_def_property_int_sdna(prop, NULL, "rng_seed");
+	RNA_def_property_range(prop, 0.0f, 1000.0f);
+	RNA_def_property_ui_text(prop, "Seed", "Seed used for remeshing");
+	RNA_def_property_update(prop, 0, "rna_Modifier_update");
 
-	prop = RNA_def_property(srna, "is_remesh", PROP_BOOLEAN, PROP_NONE);
-	RNA_def_property_boolean_funcs(prop, "rna_QuadRemeshModifier_is_remesh_get", NULL);
-	RNA_def_property_ui_text(prop, "Remesh", "Apply the quatrilateral remeshing");
-	RNA_def_property_clear_flag(prop, PROP_EDITABLE);
-
+	prop = RNA_def_property(srna, "is_autoupdate", PROP_BOOLEAN, PROP_NONE);
+	RNA_def_property_boolean_sdna(prop, NULL, "auto_updates", 0);
+	RNA_def_property_ui_text(prop, "Automatic update", "Update all data automatically");
 	RNA_def_property_update(prop, 0, "rna_Modifier_update");
 }
 
