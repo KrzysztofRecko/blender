@@ -499,7 +499,7 @@ float angle_signed_on_axis_v3v3v3_v3(const float v1[3], const float v2[3], const
 	return angle;
 }
 
-float angle_signed_on_axis_normalized_fast_v3v3v3(const float v1[3], const float v2[3], const float axis[3])
+float angle_signed_on_axis_normalized_fast_v3v3_v3(const float v1[3], const float v2[3], const float axis[3])
 {
 	float tproj[3];
 	float angle, dot;

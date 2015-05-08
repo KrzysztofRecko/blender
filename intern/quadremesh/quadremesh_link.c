@@ -69,7 +69,7 @@ static QRDiskLink *insertLink(OutputMesh *om, QRVertID in_a, QRVertID in_b)
 		l->ang = 0.0f;
 	}
 	else {
-		l->ang = angle_signed_on_axis_normalized_fast_v3v3v3(om->verts[in_a].vec, vec, om->verts[in_a].no);
+		l->ang = angle_signed_on_axis_normalized_fast_v3v3_v3(om->verts[in_a].vec, vec, om->verts[in_a].no);
 
 		if (l->ang <= om->verts[in_a].link->ang) {
 			it = om->verts[in_a].link->prev;
