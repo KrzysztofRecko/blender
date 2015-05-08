@@ -45,7 +45,7 @@
 #include "quadremesh_util.h"
 
 #define QR_MAKEPOLYS
-
+#define QR_SHOWORIENTATIONS
 
 #if 0 /* UNUSED ROUTINES */
 static void createVertRingMap(LaplacianSystem *sys)
@@ -479,6 +479,40 @@ static void freeOutputMesh(OutputMesh *om)
 	}
 }
 
+static DerivedMesh *makeOrientationsMesh(QuadRemeshSystem *sys)
+{
+	int i;
+	float mid[3], gra1[3], gra2[3];
+	DerivedMesh *ret;
+	InputMesh *im = &sys->input_mesh;
+	MVert *verts;
+	MEdge *edges;
+	
+	ret = CDDM_new(im->num_faces * 3, im->num_faces * 2, 0, 0, 0);
+
+	verts = ret->getVertArray(ret);
+	edges = ret->getEdgeArray(ret);
+
+	for (i = 0; i < im->num_faces; i++) {
+		mid_v3_v3v3v3(mid, im->co[im->faces[i][0]], im->co[im->faces[i][1]], im->co[im->faces[i][2]]);
+		madd_v3_v3v3fl(gra1, mid, sys->gfsys[0]->gf[i], 0.04f);
+		madd_v3_v3v3fl(gra2, mid, sys->gfsys[1]->gf[i], 0.04f);
+
+		copy_v3_v3(verts[i * 3].co, mid);
+		copy_v3_v3(verts[i * 3 + 1].co, gra1);
+		copy_v3_v3(verts[i * 3 + 2].co, gra2);
+
+		edges[i * 2].v1 = i * 3;
+		edges[i * 2].v2 = i * 3 + 1;
+		edges[i * 2].flag = ME_EDGEDRAW;
+		edges[i * 2 + 1].v1 = i * 3;
+		edges[i * 2 + 1].v2 = i * 3 + 2;
+		edges[i * 2 + 1].flag = ME_EDGEDRAW;
+	}
+
+	return ret;
+}
+
 static DerivedMesh *remesh(QuadRemeshSystem *sys)
 {
 	int i, num_loops, num_polys;
@@ -595,9 +629,13 @@ DerivedMesh *makeResultMesh(QuadRemeshSystem *sys, Object *ob, DerivedMesh *in)
 
 	sys->qmd->flag = 0;
 
+#ifndef QR_SHOWORIENTATIONS
 	if (sys->cache_mesh) {
 		return CDDM_copy(sys->cache_mesh);
 	}
+#else
+	return makeOrientationsMesh(sys);
+#endif
 
 	return NULL;
 }
