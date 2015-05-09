@@ -48,8 +48,8 @@ static void initData(ModifierData *md)
 
 	lmd->cache_system = NULL;
 	lmd->max_line_dist = QR_MINDIST;
-	lmd->rng_seed = 1;
-	lmd->auto_updates = 1;
+	lmd->rng_seed = QR_SEED;
+	lmd->auto_updates = QR_AUTOUPDATES;
 }
 
 static void copyData(ModifierData *md, ModifierData *target)

@@ -38,13 +38,15 @@
 
 /* Default values for the modifier */
 #define QR_MINDIST 0.04f
+#define QR_SEED 1
+#define QR_AUTOUPDATES 1
 
 typedef struct QuadRemeshSystem QuadRemeshSystem;
 
-void initQuadRemeshSystem(QuadRemeshModifierData *qmd);
-struct DerivedMesh *makeResultMesh(QuadRemeshSystem *sys, Object *ob, DerivedMesh *dm);
+void initQuadRemeshSystem(struct QuadRemeshModifierData *qmd);
+struct DerivedMesh *makeResultMesh(QuadRemeshSystem *sys, struct Object *ob, struct DerivedMesh *dm);
 void freeQuadRemeshSystem(QuadRemeshSystem *sys);
 
-void getUField(QuadRemeshSystem *sys, MDeformVert *dvert, int defgrp_index);
+void getUField(QuadRemeshSystem *sys, struct MDeformVert *dvert, int defgrp_index);
 
 #endif /*__MOD_QUADREMESH_H__*/
