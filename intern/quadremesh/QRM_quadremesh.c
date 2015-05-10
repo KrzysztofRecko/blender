@@ -48,35 +48,6 @@
 #define QR_SHOWORIENTATIONS
 
 #if 0 /* UNUSED ROUTINES */
-static void createVertRingMap(LaplacianSystem *sys)
-{
-	int i, totalr = 0;
-	int *index_iter;
-
-	sys->ringv_map = MEM_callocN(sizeof(MeshElemMap) * sys->total_verts, "DeformNeighborsMap");
-
-	for (i = 0; i < sys->total_edges; i++) {
-		sys->ringv_map[sys->edges[i][0]].count++;
-		sys->ringv_map[sys->edges[i][1]].count++;
-		totalr += 2;
-	}
-
-	sys->ringv_indices = MEM_callocN(sizeof(int) * totalr, "DeformNeighborsIndex");
-	index_iter = sys->ringv_indices;
-	for (i = 0; i < sys->total_verts; i++) {
-		sys->ringv_map[i].indices = index_iter;
-		index_iter += sys->ringv_map[i].count;
-		sys->ringv_map[i].count = 0;
-	}
-
-	for (i = 0; i < sys->total_edges; i++) {
-		MeshElemMap *map1 = &sys->ringv_map[sys->edges[i][0]];
-		MeshElemMap *map2 = &sys->ringv_map[sys->edges[i][1]];
-		map1->indices[map1->count++] = sys->edges[i][1];
-		map2->indices[map2->count++] = sys->edges[i][0];
-	}
-}
-
 /**
 * Random point, P, uniformly from within triangle ABC, method given by
 * Robert Osada, Thomas Funkhouser, Bernard Chazelle, and David Dobkin. 2002. Shape distributions. ACM Trans. Graph. 21,

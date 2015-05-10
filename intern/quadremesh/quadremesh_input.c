@@ -95,6 +95,35 @@ static void createEdgeRingMap(InputMesh *im)
 	}
 }
 
+static void createVertRingMap(InputMesh *im)
+{
+	int i, totalr = 0;
+	int *index_iter;
+
+	im->ringv_map = MEM_callocN(sizeof(MeshElemMap) * im->num_verts, "DeformNeighborsMap");
+
+	for (i = 0; i < im->num_edges; i++) {
+		im->ringv_map[im->edges[i][0]].count++;
+		im->ringv_map[im->edges[i][1]].count++;
+		totalr += 2;
+	}
+
+	im->ringv_indices = MEM_callocN(sizeof(int) * totalr, "DeformNeighborsIndex");
+	index_iter = im->ringv_indices;
+	for (i = 0; i < im->num_verts; i++) {
+		im->ringv_map[i].indices = index_iter;
+		index_iter += im->ringv_map[i].count;
+		im->ringv_map[i].count = 0;
+	}
+
+	for (i = 0; i < im->num_edges; i++) {
+		MeshElemMap *map1 = &im->ringv_map[im->edges[i][0]];
+		MeshElemMap *map2 = &im->ringv_map[im->edges[i][1]];
+		map1->indices[map1->count++] = im->edges[i][1];
+		map2->indices[map2->count++] = im->edges[i][0];
+	}
+}
+
 static void createFacesByEdge(InputMesh *im){
 	int e, i, j, v1, v2;
 	unsigned int *vin;
@@ -130,8 +159,10 @@ void freeInputMesh(InputMesh *im)
 
 	MEM_SAFE_FREE(im->ringf_indices);
 	MEM_SAFE_FREE(im->ringe_indices);
+	MEM_SAFE_FREE(im->ringv_indices);
 	MEM_SAFE_FREE(im->ringf_map);
 	MEM_SAFE_FREE(im->ringe_map);
+	MEM_SAFE_FREE(im->ringv_map);
 
 	im->is_alloc = false;
 }
@@ -243,6 +274,7 @@ void getInput(QuadRemeshSystem *sys, Object *ob, DerivedMesh *dm)
 
 	createFaceRingMap(&sys->input_mesh);
 	createEdgeRingMap(&sys->input_mesh);
+	createVertRingMap(&sys->input_mesh);
 	createFacesByEdge(&sys->input_mesh);
 
 	sys->input_mesh.is_alloc = true;
