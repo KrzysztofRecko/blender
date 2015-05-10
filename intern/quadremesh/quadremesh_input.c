@@ -124,6 +124,7 @@ void freeInputMesh(InputMesh *im)
 	MEM_SAFE_FREE(im->faces_edge);
 	MEM_SAFE_FREE(im->co);
 	MEM_SAFE_FREE(im->no);
+	MEM_SAFE_FREE(im->vno);
 	MEM_SAFE_FREE(im->constraints);
 	MEM_SAFE_FREE(im->weights);
 
@@ -182,12 +183,25 @@ static void getInputMeshData(InputMesh *im, DerivedMesh *dm)
 		}
 	}
 
-	/* Compute face normals*/
+	/* Compute face and vertex normals */
 	im->no = MEM_callocN(sizeof(float[3]) * im->num_faces, "QuadRemeshNormals");
 	for (i = 0; i < im->num_faces; i++) {
 		normal_tri_v3(im->no[i], im->co[im->faces[i][0]],
 					             im->co[im->faces[i][1]],
 					             im->co[im->faces[i][2]]);
+	}
+
+	im->vno = MEM_callocN(sizeof(float[3]) * im->num_verts, "QuadRemeshNormals");
+	for (i = 0; i < im->num_verts; i++) {
+		zero_v3(im->vno[i]);
+	}
+	for (i = 0; i < im->num_faces; i++) {
+		add_v3_v3(im->vno[im->faces[i][0]], im->no[i]);
+		add_v3_v3(im->vno[im->faces[i][1]], im->no[i]);
+		add_v3_v3(im->vno[im->faces[i][2]], im->no[i]);
+	}
+	for (i = 0; i < im->num_verts; i++) {
+		normalize_v3(im->vno[i]);
 	}
 }
 
