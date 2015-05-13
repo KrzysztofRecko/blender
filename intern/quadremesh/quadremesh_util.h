@@ -98,16 +98,6 @@ typedef struct GFSegment {
 	GFSegmentType type;
 } GFSegment;
 
-/* GradientFlowSysten, one gfsys for every gradient field */
-typedef struct GradientFlowSystem {
-	GFSysID id;
-	struct Heap *seeds;
-	//float *h;
-	float(*gf)[3];				/* Gradient Field */
-
-	struct QuadRemeshSystem *sys;
-} GradientFlowSystem;
-
 typedef struct InputMesh {
 	bool is_alloc;
 
@@ -148,8 +138,9 @@ typedef struct QuadRemeshSystem {
 	InputMesh input_mesh;
 	
 	bool has_solution, is_alloc;
-	GradientFlowSystem *gfsys[2];
-	float *U_field;					/* Initial scalar field*/
+	float(*cf)[4][3];               /* Cross field on mesh faces */
+	int *singularities;
+	float *U_field;					/* Initial scalar field */
 
 	OutputMesh output_mesh;
 	struct RNG *rng;

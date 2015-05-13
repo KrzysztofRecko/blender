@@ -230,13 +230,6 @@ bool isectPointWithQREdge(OutputMesh *om, GFSysID sys_id, float in_co[3], int in
 	return false;
 }
 
-void freeGradientFlowSystem(GradientFlowSystem *gfsys)
-{
-	BLI_heap_free(gfsys->seeds, MEM_freeN);
-	MEM_SAFE_FREE(gfsys->gf);
-	MEM_SAFE_FREE(gfsys);
-}
-
 void freeQuadRemeshSystem(QuadRemeshSystem *sys)
 {
 	if (sys->input_mesh.is_alloc) {
@@ -245,8 +238,8 @@ void freeQuadRemeshSystem(QuadRemeshSystem *sys)
 
 	if (sys->is_alloc) {
 		MEM_SAFE_FREE(sys->U_field);
-		freeGradientFlowSystem(sys->gfsys[0]);
-		freeGradientFlowSystem(sys->gfsys[1]);
+		MEM_SAFE_FREE(sys->cf);
+		MEM_SAFE_FREE(sys->singularities);
 	}
 
 	if (sys->cache_mesh) {
@@ -254,16 +247,6 @@ void freeQuadRemeshSystem(QuadRemeshSystem *sys)
 	}
 	
 	MEM_SAFE_FREE(sys);
-}
-
-GradientFlowSystem *newGradientFlowSystem(QuadRemeshSystem *sys)
-{
-	GradientFlowSystem *gfsys = MEM_callocN(sizeof(GradientFlowSystem), "GradientFlowSystem");
-	
-	gfsys->sys = sys;
-	gfsys->seeds = BLI_heap_new();
-	
-	return gfsys;
 }
 
 void initQuadRemeshSystem(QuadRemeshModifierData *qmd)

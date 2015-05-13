@@ -452,34 +452,56 @@ static void freeOutputMesh(OutputMesh *om)
 
 static DerivedMesh *makeOrientationsMesh(QuadRemeshSystem *sys)
 {
-	int i;
+	int i, j;
 	float mid[3], gra1[3], gra2[3];
 	DerivedMesh *ret;
 	InputMesh *im = &sys->input_mesh;
 	MVert *verts;
 	MEdge *edges;
-	
-	ret = CDDM_new(im->num_faces * 3, im->num_faces * 2, 0, 0, 0);
+#if 0
+	ret = CDDM_new(im->num_verts * 5, im->num_verts * 4, 0, 0, 0);
+
+	verts = ret->getVertArray(ret);
+	edges = ret->getEdgeArray(ret);
+
+	for (i = 0; i < im->num_verts; i++) {
+		copy_v3_v3(mid, im->co[i]);
+		copy_v3_v3(verts[i * 5].co, mid);
+
+		for (j = 0; j < 4; j++) {
+			madd_v3_v3v3fl(gra1, mid, sys->gfsys[0]->gf[i], 0.1f);
+			copy_v3_v3(verts[i * 5 + j + 1].co, gra1);
+			cross_v3_v3v3(gra2, sys->gfsys[0]->gf[i], sys->input_mesh.vno[i]);
+			copy_v3_v3(sys->gfsys[0]->gf[i], gra2);
+
+			edges[i * 4 + j].v1 = i * 5;
+			edges[i * 4 + j].v2 = i * 5 + j + 1;
+			edges[i * 4 + j].flag = ME_EDGEDRAW;
+		}
+	}
+#else
+	ret = CDDM_new(im->num_faces * 4, im->num_faces * 2, 0, 0, 0);
 
 	verts = ret->getVertArray(ret);
 	edges = ret->getEdgeArray(ret);
 
 	for (i = 0; i < im->num_faces; i++) {
 		mid_v3_v3v3v3(mid, im->co[im->faces[i][0]], im->co[im->faces[i][1]], im->co[im->faces[i][2]]);
-		madd_v3_v3v3fl(gra1, mid, sys->gfsys[0]->gf[i], 0.04f);
-		madd_v3_v3v3fl(gra2, mid, sys->gfsys[1]->gf[i], 0.04f);
 
-		copy_v3_v3(verts[i * 3].co, mid);
-		copy_v3_v3(verts[i * 3 + 1].co, gra1);
-		copy_v3_v3(verts[i * 3 + 2].co, gra2);
+		for (j = 0; j < 4; j++) {
+			madd_v3_v3v3fl(gra1, mid, sys->cf[i][j], 0.08f);
+			copy_v3_v3(verts[i * 4 + j].co, gra1);
+		}
 
-		edges[i * 2].v1 = i * 3;
-		edges[i * 2].v2 = i * 3 + 1;
+		edges[i * 2].v1 = i * 4;
+		edges[i * 2].v2 = i * 4 + 2;
 		edges[i * 2].flag = ME_EDGEDRAW;
-		edges[i * 2 + 1].v1 = i * 3;
-		edges[i * 2 + 1].v2 = i * 3 + 2;
+
+		edges[i * 2 + 1].v1 = i * 4 + 1;
+		edges[i * 2 + 1].v2 = i * 4 + 3;
 		edges[i * 2 + 1].flag = ME_EDGEDRAW;
 	}
+#endif
 
 	return ret;
 }
@@ -497,8 +519,6 @@ static DerivedMesh *remesh(QuadRemeshSystem *sys)
 	sys->rng = BLI_rng_new(sys->qmd->rng_seed);
 
 	initOutputMesh(om, &sys->input_mesh);
-	sys->gfsys[0]->id = GFSYS1;
-	sys->gfsys[1]->id = GFSYS2;
 
 	makeFeatureEdges(om, &sys->input_mesh);
 	computeFlowLines(sys);
@@ -573,8 +593,7 @@ DerivedMesh *makeResultMesh(QuadRemeshSystem *sys, Object *ob, DerivedMesh *in)
 	if (sys->qmd->flag & MOD_QUADREMESH_FIELD_DIRTY) {
 		if (sys->is_alloc) {
 			MEM_SAFE_FREE(sys->U_field);
-			freeGradientFlowSystem(sys->gfsys[0]);
-			freeGradientFlowSystem(sys->gfsys[1]);
+			MEM_SAFE_FREE(sys->cf);
 
 			sys->is_alloc = false;
 		}

@@ -134,9 +134,6 @@ static void computeGradientFields(QuadRemeshSystem * sys)
 	float val, a[3][3], u[3], inv_a[3][3], gf1[3], g[3], w[3];
 	InputMesh *im = &sys->input_mesh;
 
-	sys->gfsys[0]->gf = MEM_mallocN(sizeof(float[3]) * im->num_faces, "QuadRemeshGradientField1");
-	sys->gfsys[1]->gf = MEM_mallocN(sizeof(float[3]) * im->num_faces, "QuadRemeshGradientField2");
-
 	for (fi = 0; fi < im->num_faces; fi++) {
 		const unsigned int *vidf = im->faces[fi];
 		i = vidf[0];
@@ -160,11 +157,16 @@ static void computeGradientFields(QuadRemeshSystem * sys)
 		val = dot_v3v3(g, im->no[fi]);
 		mul_v3_v3fl(u, im->no[fi], val);
 		sub_v3_v3v3(w, g, u);
-		normalize_v3_v3(sys->gfsys[0]->gf[fi], w);
+		normalize_v3_v3(sys->cf[fi][0], w);
 
-		cross_v3_v3v3(g, im->no[fi], sys->gfsys[0]->gf[fi]);
-		normalize_v3_v3(sys->gfsys[1]->gf[fi], g);
-		//cross_v3_v3v3(sys->gf2[fi], im->no[fi], sys->gf1[fi]);
+		cross_v3_v3v3(g, im->no[fi], sys->cf[fi][0]);
+		copy_v3_v3(sys->cf[fi][1], g);
+		
+		cross_v3_v3v3(g, im->no[fi], sys->cf[fi][1]);
+		copy_v3_v3(sys->cf[fi][2], g);
+
+		cross_v3_v3v3(g, im->no[fi], sys->cf[fi][2]);
+		copy_v3_v3(sys->cf[fi][3], g);
 	}
 }
 
@@ -186,8 +188,8 @@ void getHarmonicGradients(QuadRemeshSystem *sys)
 			sys->U_field[i] = nlGetVariable(0, i);
 		}
 
-		sys->gfsys[0] = newGradientFlowSystem(sys);
-		sys->gfsys[1] = newGradientFlowSystem(sys);
+		sys->cf = MEM_mallocN(sizeof(float[4][3]) * im->num_faces, "QuadRemeshGradientField1");
+
 		computeGradientFields(sys);
 
 		sys->is_alloc = true;
