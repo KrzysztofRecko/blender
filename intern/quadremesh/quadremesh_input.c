@@ -154,6 +154,7 @@ void freeInputMesh(InputMesh *im)
 	MEM_SAFE_FREE(im->co);
 	MEM_SAFE_FREE(im->no);
 	MEM_SAFE_FREE(im->vno);
+	MEM_SAFE_FREE(im->ev);
 	MEM_SAFE_FREE(im->constraints);
 	MEM_SAFE_FREE(im->weights);
 
@@ -191,6 +192,13 @@ static void getInputMeshData(InputMesh *im, DerivedMesh *dm)
 		im->edges[im->num_edges][0] = arrayedge[i].v1;
 		im->edges[im->num_edges][1] = arrayedge[i].v2;
 		im->num_edges++;
+	}
+
+	/* Edge vectors */
+	im->ev = MEM_mallocN(sizeof(float[3]) * im->num_edges, "QuadRemeshEdgeVectors");
+	for (i = 0; i < im->num_edges; i++) {
+		sub_v3_v3v3(im->ev[i], im->co[im->edges[i][1]], im->co[im->edges[i][0]]);
+		normalize_v3(im->ev[i]);
 	}
 
 	/* Get faces */

@@ -105,6 +105,7 @@ typedef struct InputMesh {
 	float(*co)[3];					/* Original vertex coordinates */
 	float(*no)[3];					/* Original face normal */
 	float(*vno)[3];
+	float(*ev)[3]; /* Normalized edge vectors */
 
 	unsigned int(*faces)[3];		/* Copy of MFace (tessface) v1-v3, v2-v4 */
 	unsigned int(*edges)[2];		/* Copy of edges v1-v2 */
