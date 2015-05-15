@@ -28,7 +28,7 @@ set(INC
 )
 
 set(INC_SYS
-
+	${EIGEN3_INCLUDE_DIRS}
 )
 
 set(SRC
@@ -39,6 +39,7 @@ set(SRC
 	quadremesh_edge.c
 	quadremesh_input.c
 	quadremesh_harmonic.c
+	quadremesh_curvature.cpp
 	
 	QRM_quadremesh.h
 	quadremesh_util.h

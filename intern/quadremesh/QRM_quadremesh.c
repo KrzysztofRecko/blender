@@ -599,6 +599,7 @@ DerivedMesh *makeResultMesh(QuadRemeshSystem *sys, Object *ob, DerivedMesh *in)
 		}
 
 		getHarmonicGradients(sys);
+		//getPrincipalCurvatures(sys);
 
 		if (!sys->has_solution) {
 			modifier_setError((ModifierData*)sys->qmd, "No soultion found given these constraints");

@@ -178,5 +178,6 @@ void getHarmonicGradients(QuadRemeshSystem *sys);
 
 GradientFlowSystem *newGradientFlowSystem(QuadRemeshSystem *sys);
 void freeGradientFlowSystem(GradientFlowSystem *gfsys);
+void getPrincipalCurvatures(QuadRemeshSystem *sys);
 
 #endif
