@@ -25,6 +25,8 @@
 #ifndef __QUADREMESH_UTIL_H__
 #define __QUADREMESH_UTIL_H__
 
+#include "quadremesh_input.h"
+
 #define QR_SEEDPROB 0.2f
 #define QR_SAMPLING_RATE 0.04f
 #define QR_MAXDIST_TO_SEEDDIST 2.0f

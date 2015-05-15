@@ -41,19 +41,6 @@ extern "C" {
 
 using namespace Eigen;
 
-static int getVertexOppositeToEdge(InputMesh *im, int in_e, int in_f)
-{
-	int i;
-	for (i = 0; i < 3; i++) {
-		if (im->faces[in_f][i] != im->edges[in_e][0] &&
-			im->faces[in_f][i] != im->edges[in_e][1])
-		{
-			return im->faces[in_f][i];
-		}
-	}
-	return 0;
-}
-
 static void alignAtEdge(QuadRemeshSystem *sys, int in_e)
 {
 	int f1, f2;

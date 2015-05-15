@@ -36,19 +36,6 @@
 
 #include "quadremesh_util.h"
 
-void getNormalAtEdge(float r_no[3], InputMesh *im, int in_e)
-{
-	if (im->faces_edge[in_e][0] == QR_NO_FACE)
-		copy_v3_v3(r_no, im->no[im->faces_edge[in_e][1]]);
-	else if (im->faces_edge[in_e][1] == QR_NO_FACE)
-		copy_v3_v3(r_no, im->no[im->faces_edge[in_e][0]]);
-	else {
-		add_v3_v3v3(r_no, im->no[im->faces_edge[in_e][0]],
-						  im->no[im->faces_edge[in_e][1]]);
-		mul_v3_fl(r_no, 0.5f);
-	}
-}
-
 /* ADDING STUFF TO OUTPUT MESH */
 
 QRVertID addVert(OutputMesh *om, float in_co[3], float in_no[3])

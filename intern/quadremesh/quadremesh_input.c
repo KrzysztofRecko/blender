@@ -34,6 +34,7 @@
 
 #include "MOD_util.h"
 
+#include "quadremesh_input.h"
 #include "quadremesh_util.h"
 
 static void createFaceRingMap(InputMesh *im)
@@ -286,4 +287,55 @@ void getInput(QuadRemeshSystem *sys, Object *ob, DerivedMesh *dm)
 	createFacesByEdge(&sys->input_mesh);
 
 	sys->input_mesh.is_alloc = true;
+}
+
+void getNormalAtEdge(float r_no[3], InputMesh *im, int in_e)
+{
+	if (im->faces_edge[in_e][0] == QR_NO_FACE)
+		copy_v3_v3(r_no, im->no[im->faces_edge[in_e][1]]);
+	else if (im->faces_edge[in_e][1] == QR_NO_FACE)
+		copy_v3_v3(r_no, im->no[im->faces_edge[in_e][0]]);
+	else {
+		add_v3_v3v3(r_no, im->no[im->faces_edge[in_e][0]],
+						  im->no[im->faces_edge[in_e][1]]);
+		mul_v3_fl(r_no, 0.5f);
+	}
+}
+
+int getEdgeFromVerts(InputMesh *im, int v1, int v2)
+{
+	int *eidn, nume, i;
+
+	nume = im->ringe_map[v1].count;
+	eidn = im->ringe_map[v1].indices;
+
+	for (i = 0; i < nume; i++) {
+		if (im->edges[eidn[i]][0] == v2 || im->edges[eidn[i]][1] == v2){
+			return eidn[i];
+		}
+	}
+
+	return -1;
+}
+
+int getOtherFaceAdjacentToEdge(InputMesh *im, int in_f, int in_e)
+{
+	if (im->faces_edge[in_e][0] == in_f) {
+		return im->faces_edge[in_e][1];
+	}
+
+	return im->faces_edge[in_e][0];
+}
+
+int getVertexOppositeToEdge(InputMesh *im, int in_e, int in_f)
+{
+	int i;
+	for (i = 0; i < 3; i++) {
+		if (im->faces[in_f][i] != im->edges[in_e][0] &&
+			im->faces[in_f][i] != im->edges[in_e][1])
+		{
+			return im->faces[in_f][i];
+		}
+	}
+	return 0;
 }

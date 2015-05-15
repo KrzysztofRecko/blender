@@ -54,31 +54,6 @@ typedef struct GFLine {
 } GFLine;
 
 
-static int getEdgeFromVerts(InputMesh *im, int v1, int v2)
-{
-	int *eidn, nume, i;
-
-	nume = im->ringe_map[v1].count;
-	eidn = im->ringe_map[v1].indices;
-
-	for (i = 0; i < nume; i++) {
-		if (im->edges[eidn[i]][0] == v2 || im->edges[eidn[i]][1] == v2){
-			return eidn[i];
-		}
-	}
-
-	return -1;
-}
-
-static int getOtherFaceAdjacentToEdge(InputMesh *im, int in_f, int in_e)
-{
-	if (im->faces_edge[in_e][0] == in_f) {
-		return im->faces_edge[in_e][1];
-	}
-
-	return im->faces_edge[in_e][0];
-}
-
 static void makePoint(GFPoint *r_p, GFPointType p_type, int p_vef, float p_co[3])
 {
 	r_p->type = p_type;
