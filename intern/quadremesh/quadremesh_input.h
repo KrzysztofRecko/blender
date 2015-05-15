@@ -56,7 +56,7 @@ typedef struct InputMesh {
 void getInput(QuadRemeshSystem *sys, Object *ob, DerivedMesh *dm);
 void freeInputMesh(InputMesh *im);
 
-void getNormalAtEdge(float r_no[3], InputMesh *im, int in_e);
+void getNormalAt(float r_no[3], InputMesh *im, int in_vef, GFPointType in_type);
 int getEdgeFromVerts(InputMesh *im, int v1, int v2);
 int getOtherFaceAdjacentToEdge(InputMesh *im, int in_f, int in_e);
 int getVertexOppositeToEdge(InputMesh *im, int in_e, int in_f);

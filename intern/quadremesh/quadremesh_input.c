@@ -289,16 +289,38 @@ void getInput(QuadRemeshSystem *sys, Object *ob, DerivedMesh *dm)
 	sys->input_mesh.is_alloc = true;
 }
 
-void getNormalAtEdge(float r_no[3], InputMesh *im, int in_e)
+void getNormalAt(float r_no[3], InputMesh *im, int in_vef, GFPointType in_type)
 {
-	if (im->faces_edge[in_e][0] == QR_NO_FACE)
-		copy_v3_v3(r_no, im->no[im->faces_edge[in_e][1]]);
-	else if (im->faces_edge[in_e][1] == QR_NO_FACE)
-		copy_v3_v3(r_no, im->no[im->faces_edge[in_e][0]]);
-	else {
-		add_v3_v3v3(r_no, im->no[im->faces_edge[in_e][0]],
-						  im->no[im->faces_edge[in_e][1]]);
-		mul_v3_fl(r_no, 0.5f);
+	int i;
+
+	if (in_type == eVert) {
+		BLI_assert(in_vef <= im->num_verts);
+
+		zero_v3(r_no);
+		for (i = 0; i < im->ringf_map[in_vef].count; i++)
+			add_v3_v3(r_no, im->no[im->ringf_map[in_vef].indices[i]]);
+
+		mul_v3_fl(r_no, 1.0f / (float)im->ringf_map[in_vef].count);
+	}
+	else if (in_type == eEdge) {
+		BLI_assert(in_vef <= im->num_edges);
+		BLI_assert(!(im->faces_edge[in_vef][0] == QR_NO_FACE &&
+				     im->faces_edge[in_vef][1] == QR_NO_FACE));
+
+		if (im->faces_edge[in_vef][0] == QR_NO_FACE)
+			copy_v3_v3(r_no, im->no[im->faces_edge[in_vef][1]]);
+		else if (im->faces_edge[in_vef][1] == QR_NO_FACE)
+			copy_v3_v3(r_no, im->no[im->faces_edge[in_vef][0]]);
+		else {
+			add_v3_v3v3(r_no, im->no[im->faces_edge[in_vef][0]],
+							  im->no[im->faces_edge[in_vef][1]]);
+			mul_v3_fl(r_no, 0.5f);
+		}
+	}
+	else { /* eFace */
+		BLI_assert(in_vef <= im->num_faces);
+
+		copy_v3_v3(r_no, im->no[in_vef]);
 	}
 }
 
