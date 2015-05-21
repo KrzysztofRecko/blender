@@ -44,6 +44,8 @@ set(SRC
 	QRM_quadremesh.h
 	quadremesh_util.h
 	quadremesh_input.h
+	quadremesh_system.h
+	quadremesh_line.h
 )
 
 blender_add_lib(bf_intern_quadremesh "${SRC}" "${INC}" "${INC_SYS}")
