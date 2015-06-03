@@ -615,12 +615,22 @@ void WM_window_open_temp(bContext *C, rcti *position, int type)
 /* operator callback */
 int wm_window_duplicate_exec(bContext *C, wmOperator *UNUSED(op))
 {
-	wm_window_copy(C, CTX_wm_window(C));
+	wmWindowManager *wm = CTX_wm_manager(C);
+	wmWindow *win_src = CTX_wm_window(C);
+	wmWindow *win_dst;
+
+	win_dst = wm_window_copy(C, win_src);
+
 	WM_check(C);
-	
-	WM_event_add_notifier(C, NC_WINDOW | NA_ADDED, NULL);
-	
-	return OPERATOR_FINISHED;
+
+	if (win_dst->ghostwin) {
+		WM_event_add_notifier(C, NC_WINDOW | NA_ADDED, NULL);
+		return OPERATOR_FINISHED;
+	}
+	else {
+		wm_window_close(C, wm, win_dst);
+		return OPERATOR_CANCELLED;
+	}
 }
 
 
@@ -1107,10 +1117,10 @@ static int ghost_event_proc(GHOST_EventHandle evt, GHOST_TUserDataPtr C_void_ptr
 }
 
 
-/* This timer system only gives maximum 1 timer event per redraw cycle,
+/**
+ * This timer system only gives maximum 1 timer event per redraw cycle,
  * to prevent queues to get overloaded.
- * Timer handlers should check for delta to decide if they just
- * update, or follow real time.
+ * Timer handlers should check for delta to decide if they just update, or follow real time.
  * Timer handlers can also set duration to match frames passed
  */
 static int wm_window_timer(const bContext *C)

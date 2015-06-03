@@ -1346,7 +1346,7 @@ static int image_replace_exec(bContext *C, wmOperator *op)
 	/* XXX unpackImage frees image buffers */
 	ED_preview_kill_jobs(CTX_wm_manager(C), CTX_data_main(C));
 	
-	BKE_icon_changed(BKE_icon_getid(&sima->image->id));
+	BKE_icon_changed(BKE_icon_id_ensure(&sima->image->id));
 	BKE_image_signal(sima->image, &sima->iuser, IMA_SIGNAL_RELOAD);
 	WM_event_add_notifier(C, NC_IMAGE | NA_EDITED, sima->image);
 
@@ -1537,6 +1537,8 @@ static void save_image_post(wmOperator *op, ImBuf *ibuf, Image *ima, int ok, int
 {
 	if (ok) {
 		if (!save_copy) {
+			ColorManagedColorspaceSettings old_colorspace_settings;
+
 			if (do_newpath) {
 				BLI_strncpy(ibuf->name, filepath, sizeof(ibuf->name));
 				BLI_strncpy(ima->name, filepath, sizeof(ima->name));
@@ -1570,8 +1572,14 @@ static void save_image_post(wmOperator *op, ImBuf *ibuf, Image *ima, int ok, int
 				BLI_path_rel(ima->name, relbase); /* only after saving */
 			}
 
+			BKE_color_managed_colorspace_settings_copy(&old_colorspace_settings,
+			                                           &ima->colorspace_settings);
 			IMB_colormanagment_colorspace_from_ibuf_ftype(&ima->colorspace_settings, ibuf);
-
+			if (!BKE_color_managed_colorspace_settings_equals(&old_colorspace_settings,
+			                                                  &ima->colorspace_settings))
+			{
+				BKE_image_signal(ima, NULL, IMA_SIGNAL_COLORMANAGE);
+			}
 		}
 	}
 	else {

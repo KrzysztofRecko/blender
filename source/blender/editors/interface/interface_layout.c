@@ -2147,7 +2147,11 @@ static void ui_litem_layout_column(uiLayout *litem)
 static RadialDirection ui_get_radialbut_vec(float vec[2], short itemnum)
 {
 	RadialDirection dir;
-	BLI_assert(itemnum < 8);
+
+	if (itemnum >= 8) {
+		itemnum %= 8;
+		printf("Warning: Pie menus with more than 8 items are currently unsupported\n");
+	}
 
 	dir = ui_radial_dir_order[itemnum];
 	ui_but_pie_dir(dir, vec);
@@ -2725,7 +2729,8 @@ uiLayout *uiLayoutBox(uiLayout *layout)
 	return (uiLayout *)ui_layout_box(layout, UI_BTYPE_ROUNDBOX);
 }
 
-/* Check all buttons defined in this layout, and set any button flagged as UI_BUT_LIST_ITEM as active/selected.
+/**
+ * Check all buttons defined in this layout, and set any button flagged as UI_BUT_LIST_ITEM as active/selected.
  * Needed to handle correctly text colors of active (selected) list item.
  */
 void ui_layout_list_set_labels_active(uiLayout *layout)

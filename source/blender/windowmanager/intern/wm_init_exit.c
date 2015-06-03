@@ -58,6 +58,7 @@
 #include "BKE_screen.h"
 #include "BKE_DerivedMesh.h"
 #include "BKE_global.h"
+#include "BKE_icons.h"
 #include "BKE_library.h"
 #include "BKE_main.h"
 #include "BKE_mball_tessellate.h"
@@ -172,6 +173,25 @@ void WM_init(bContext *C, int argc, const char **argv)
 	
 	BLF_lang_set(NULL);
 
+	if (!G.background) {
+		GPU_init();
+
+		GPU_set_mipmap(!(U.gameflags & USER_DISABLE_MIPMAP));
+		GPU_set_linear_mipmap(true);
+		GPU_set_anisotropic(U.anisotropic_filter);
+		GPU_set_gpu_mipmapping(U.use_gpu_mipmap);
+
+		UI_init();
+	}
+	else {
+		/* Note: Currently only inits icons, which we now want in background mode too
+		 * (scripts could use those in background processing...).
+		 * In case we do more later, we may need to pass a 'background' flag.
+		 * Called from 'UI_init' above */
+		BKE_icons_init(1);
+	}
+
+
 	ED_spacemacros_init();
 
 	/* note: there is a bug where python needs initializing before loading the
@@ -197,17 +217,6 @@ void WM_init(bContext *C, int argc, const char **argv)
 
 	wm_init_reports(C); /* reports cant be initialized before the wm */
 
-	if (!G.background) {
-		GPU_init();
-
-		GPU_set_mipmap(!(U.gameflags & USER_DISABLE_MIPMAP));
-		GPU_set_linear_mipmap(true);
-		GPU_set_anisotropic(U.anisotropic_filter);
-		GPU_set_gpu_mipmapping(U.use_gpu_mipmap);
-
-		UI_init();
-	}
-	
 	clear_matcopybuf();
 	ED_render_clear_mtex_copybuf();
 

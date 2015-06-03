@@ -187,10 +187,10 @@ static uiBlock *id_search_menu(bContext *C, ARegion *ar, void *arg_litem)
 	/* preview thumbnails */
 	if (template.prv_rows > 0 && template.prv_cols > 0) {
 		int w = 4 * U.widget_unit * template.prv_cols;
-		int h = 4 * U.widget_unit * template.prv_rows + U.widget_unit;
+		int h = 5 * U.widget_unit * template.prv_rows;
 		
 		/* fake button, it holds space for search items */
-		uiDefBut(block, UI_BTYPE_LABEL, 0, "", 10, 15, w, h, NULL, 0, 0, 0, 0, NULL);
+		uiDefBut(block, UI_BTYPE_LABEL, 0, "", 10, 26, w, h, NULL, 0, 0, 0, 0, NULL);
 		
 		but = uiDefSearchBut(block, search, 0, ICON_VIEWZOOM, sizeof(search), 10, 0, w, UI_UNIT_Y,
 		                     template.prv_rows, template.prv_cols, "");
@@ -362,7 +362,8 @@ static const char *template_id_browse_tip(StructRNA *type)
 	return N_("Browse ID data to be linked");
 }
 
-/* Return a type-based i18n context, needed e.g. by "New" button.
+/**
+ * \return a type-based i18n context, needed e.g. by "New" button.
  * In most languages, this adjective takes different form based on gender of type name...
  */
 #ifdef WITH_INTERNATIONAL
@@ -430,8 +431,8 @@ static void template_ID(
 
 		but = uiDefBlockButN(block, id_search_menu, MEM_dupallocN(template), "", 0, 0, UI_UNIT_X * 6, UI_UNIT_Y * 6,
 		                     TIP_(template_id_browse_tip(type)));
-		but->icon = id ? ui_id_icon_get(C, id, true) : RNA_struct_ui_icon(type);
-		UI_but_flag_enable(but, UI_HAS_ICON | UI_BUT_ICON_PREVIEW);
+		ui_def_but_icon(but, id ? ui_id_icon_get(C, id, true) : RNA_struct_ui_icon(type),
+		                UI_HAS_ICON | UI_BUT_ICON_PREVIEW);
 
 		if ((idfrom && idfrom->lib) || !editable)
 			UI_but_flag_enable(but, UI_BUT_DISABLED);
@@ -441,10 +442,9 @@ static void template_ID(
 	else if (flag & UI_ID_BROWSE) {
 		but = uiDefBlockButN(block, id_search_menu, MEM_dupallocN(template), "", 0, 0, UI_UNIT_X * 1.6, UI_UNIT_Y,
 		                     TIP_(template_id_browse_tip(type)));
-		but->icon = RNA_struct_ui_icon(type);
+		ui_def_but_icon(but, RNA_struct_ui_icon(type), UI_HAS_ICON);
 		/* default dragging of icon for id browse buttons */
 		UI_but_drag_set_id(but, id);
-		UI_but_flag_enable(but, UI_HAS_ICON);
 		UI_but_drawflag_enable(but, UI_BUT_ICON_LEFT);
 
 		if ((idfrom && idfrom->lib) || !editable)
@@ -688,7 +688,8 @@ void uiTemplateIDPreview(
 
 /************************ ID Chooser Template ***************************/
 
-/* This is for selecting the type of ID-block to use, and then from the relevant type choosing the block to use 
+/**
+ * This is for selecting the type of ID-block to use, and then from the relevant type choosing the block to use
  *
  * - propname: property identifier for property that ID-pointer gets stored to
  * - proptypename: property identifier for property used to determine the type of ID-pointer that can be used
@@ -748,7 +749,8 @@ void uiTemplateAnyID(
 
 /* ---------- */
 
-/* This is creating/editing RNA-Paths 
+/**
+ * This is creating/editing RNA-Paths
  *
  * - ptr: struct which holds the path property
  * - propname: property identifier for property that path gets stored to
@@ -1075,7 +1077,8 @@ static void do_constraint_panels(bContext *C, void *ob_pt, int event)
 		case B_CONSTRAINT_CHANGETARGET:
 		{
 			Main *bmain = CTX_data_main(C);
-			if (ob->pose) ob->pose->flag |= POSE_RECALC;  /* checks & sorts pose channels */
+			if (ob->pose)
+				BKE_pose_tag_recalc(bmain, ob->pose); /* checks & sorts pose channels */
 			DAG_relations_tag_update(bmain);
 			break;
 		}
@@ -1636,11 +1639,16 @@ void uiTemplateColorRamp(uiLayout *layout, PointerRNA *ptr, const char *propname
 
 
 /********************* Icon viewer Template ************************/
+typedef struct IconViewMenuArgs {
+	PointerRNA ptr;
+	PropertyRNA *prop;
+	int show_labels;
+} IconViewMenuArgs;
 
 /* ID Search browse menu, open */
 static uiBlock *ui_icon_view_menu_cb(bContext *C, ARegion *ar, void *arg_litem)
 {
-	static RNAUpdateCb cb;
+	static IconViewMenuArgs args;
 	uiBlock *block;
 	uiBut *but;
 	int icon, value;
@@ -1649,26 +1657,35 @@ static uiBlock *ui_icon_view_menu_cb(bContext *C, ARegion *ar, void *arg_litem)
 	bool free;
 
 	/* arg_litem is malloced, can be freed by parent button */
-	cb = *((RNAUpdateCb *)arg_litem);
+	args = *((IconViewMenuArgs *) arg_litem);
 
 	block = UI_block_begin(C, ar, "_popup", UI_EMBOSS_PULLDOWN);
 	UI_block_flag_enable(block, UI_BLOCK_LOOP);
-	
-	
-	RNA_property_enum_items(C, &cb.ptr, cb.prop, &item, NULL, &free);
-	
+
+	RNA_property_enum_items(C, &args.ptr, args.prop, &item, NULL, &free);
+
 	for (a = 0; item[a].identifier; a++) {
 		int x, y;
-		
-		/* XXX hardcoded size to 5 x unit */
-		x = (a % 8) * UI_UNIT_X * 5;
-		y = (a / 8) * UI_UNIT_X * 5;
-		
+		/* XXX hardcoded size to 5 units */
+		const int w = UI_UNIT_X * 5;
+		const int h = args.show_labels ? 6 * UI_UNIT_Y : UI_UNIT_Y * 5;
+
+		x = (a % 8) * w;
+		y = (a / 8) * h;
+
 		icon = item[a].icon;
 		value = item[a].value;
-		but = uiDefIconButR_prop(block, UI_BTYPE_ROW, 0, icon, x, y, UI_UNIT_X * 5, UI_UNIT_Y * 5,
-		                         &cb.ptr, cb.prop, -1, 0, value, -1, -1, NULL);
-		UI_but_flag_enable(but, UI_HAS_ICON | UI_BUT_ICON_PREVIEW);
+		if (args.show_labels) {
+			but = uiDefIconTextButR_prop(
+			        block, UI_BTYPE_ROW, 0, icon, item[a].name, x, y, w, h,
+			        &args.ptr, args.prop, -1, 0, value, -1, -1, NULL);
+		}
+		else {
+			but = uiDefIconButR_prop(
+			        block, UI_BTYPE_ROW, 0, icon, x, y, w, h,
+			        &args.ptr, args.prop, -1, 0, value, -1, -1, NULL);
+		}
+		ui_def_but_icon(but, icon, UI_HAS_ICON | UI_BUT_ICON_PREVIEW);
 	}
 
 	UI_block_bounds_set_normal(block, 0.3f * U.widget_unit);
@@ -1681,10 +1698,10 @@ static uiBlock *ui_icon_view_menu_cb(bContext *C, ARegion *ar, void *arg_litem)
 	return block;
 }
 
-void uiTemplateIconView(uiLayout *layout, PointerRNA *ptr, const char *propname)
+void uiTemplateIconView(uiLayout *layout, PointerRNA *ptr, const char *propname, int show_labels)
 {
 	PropertyRNA *prop = RNA_struct_find_property(ptr, propname);
-	RNAUpdateCb *cb;
+	IconViewMenuArgs *cb_args;
 	EnumPropertyItem *items;
 	uiBlock *block;
 	uiBut *but;
@@ -1702,14 +1719,14 @@ void uiTemplateIconView(uiLayout *layout, PointerRNA *ptr, const char *propname)
 	value = RNA_property_enum_get(ptr, prop);
 	RNA_enum_icon_from_value(items, value, &icon);
 
-	cb = MEM_callocN(sizeof(RNAUpdateCb), "RNAUpdateCb");
-	cb->ptr = *ptr;
-	cb->prop = prop;
+	cb_args = MEM_callocN(sizeof(IconViewMenuArgs), __func__);
+	cb_args->ptr = *ptr;
+	cb_args->prop = prop;
+	cb_args->show_labels = show_labels;
 
-	but = uiDefBlockButN(block, ui_icon_view_menu_cb, cb, "", 0, 0, UI_UNIT_X * 6, UI_UNIT_Y * 6, "");
+	but = uiDefBlockButN(block, ui_icon_view_menu_cb, cb_args, "", 0, 0, UI_UNIT_X * 6, UI_UNIT_Y * 6, "");
 
-	but->icon = icon;
-	UI_but_flag_enable(but, UI_HAS_ICON | UI_BUT_ICON_PREVIEW);
+	ui_def_but_icon(but, icon, UI_HAS_ICON | UI_BUT_ICON_PREVIEW);
 
 	if (free_items) {
 		MEM_freeN(items);
@@ -2464,10 +2481,10 @@ static void handle_layer_buttons(bContext *C, void *arg1, void *arg2)
 	/* see view3d_header.c */
 }
 
-/* TODO:
- * - for now, grouping of layers is determined by dividing up the length of
- *   the array of layer bitflags */
-
+/**
+ * \todo for now, grouping of layers is determined by dividing up the length of
+ * the array of layer bitflags
+ */
 void uiTemplateLayers(
         uiLayout *layout, PointerRNA *ptr, const char *propname,
         PointerRNA *used_ptr, const char *used_propname, int active_layer)
@@ -2608,10 +2625,11 @@ void uiTemplateGameStates(
 
 
 /************************* List Template **************************/
-static void uilist_draw_item_default(struct uiList *ui_list, struct bContext *UNUSED(C), struct uiLayout *layout,
-                                     struct PointerRNA *UNUSED(dataptr), struct PointerRNA *itemptr, int icon,
-                                     struct PointerRNA *UNUSED(active_dataptr), const char *UNUSED(active_propname),
-                                     int UNUSED(index), int UNUSED(flt_flag))
+static void uilist_draw_item_default(
+        struct uiList *ui_list, struct bContext *UNUSED(C), struct uiLayout *layout,
+        struct PointerRNA *UNUSED(dataptr), struct PointerRNA *itemptr, int icon,
+        struct PointerRNA *UNUSED(active_dataptr), const char *UNUSED(active_propname),
+        int UNUSED(index), int UNUSED(flt_flag))
 {
 	PropertyRNA *nameprop = RNA_struct_name_property(itemptr->type);
 
@@ -3215,7 +3233,7 @@ void uiTemplateList(
 
 			/* add scrollbar */
 			if (len > layoutdata.visual_items) {
-				col = uiLayoutColumn(row, false);
+				/* col = */ uiLayoutColumn(row, false);
 				uiDefButI(block, UI_BTYPE_SCROLL, 0, "", 0, 0, UI_UNIT_X * 0.75, UI_UNIT_Y * dyn_data->visual_height,
 				          &ui_list->list_scroll, 0, dyn_data->height - dyn_data->visual_height,
 				          dyn_data->visual_height, 0, "");
