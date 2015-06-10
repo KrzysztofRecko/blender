@@ -38,6 +38,8 @@
 #include "BKE_deform.h"
 
 #include "MOD_util.h"
+
+#ifdef WITH_MOD_QUADREMESH
 #include "QRM_quadremesh.h"
 
 static void initData(ModifierData *md)
@@ -147,6 +149,35 @@ ModifierTypeInfo modifierType_QuadRemesh = {
 	/* requiredDataMask */  requiredDataMask,
 	/* freeData */          freeData,
 	/* isDisabled */        isDisabled,
+	/* updateDepgraph */    NULL,
+	/* dependsOnTime */     NULL,
+	/* dependsOnNormals */	NULL,
+	/* foreachObjectLink */ NULL,
+	/* foreachIDLink */     NULL,
+	/* foreachTexLink */    NULL,
+};
+
+#endif
+
+ModifierTypeInfo modifierType_QuadRemesh = {
+	/* name */              "QuadRemesh",
+	/* structName */        "QuadRemeshModifierData",
+	/* structSize */        sizeof(QuadRemeshModifierData),
+	/* type */              eModifierTypeType_Nonconstructive,
+	/* flags */             eModifierTypeFlag_AcceptsMesh |
+							eModifierTypeFlag_AcceptsCVs,
+
+	/* copyData */          NULL,
+	/* deformVerts */       NULL,
+	/* deformMatrices */    NULL,
+	/* deformVertsEM */     NULL,
+	/* deformMatricesEM */  NULL,
+	/* applyModifier */     NULL,
+	/* applyModifierEM */   NULL,
+	/* initData */          NULL,
+	/* requiredDataMask */  NULL,
+	/* freeData */          NULL,
+	/* isDisabled */        NULL,
 	/* updateDepgraph */    NULL,
 	/* dependsOnTime */     NULL,
 	/* dependsOnNormals */	NULL,
