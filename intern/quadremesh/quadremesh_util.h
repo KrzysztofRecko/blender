@@ -25,8 +25,6 @@
 #ifndef __QUADREMESH_UTIL_H__
 #define __QUADREMESH_UTIL_H__
 
-#include "quadremesh_input.h"
-
 #define QR_SEEDPROB 0.2f
 #define QR_SAMPLING_RATE 0.04f
 #define QR_MAXDIST_TO_SEEDDIST 2.0f
@@ -100,86 +98,9 @@ typedef struct GFSegment {
 	GFSegmentType type;
 } GFSegment;
 
-typedef struct InputMesh {
-	bool is_alloc;
 
-	int num_verts, num_edges, num_faces, num_features;
-	float(*co)[3];					/* Original vertex coordinates */
-	float(*no)[3];					/* Original face normal */
-	float(*vno)[3];
-	float(*ev)[3]; /* Normalized edge vectors */
-
-	unsigned int(*faces)[3];		/* Copy of MFace (tessface) v1-v3, v2-v4 */
-	unsigned int(*edges)[2];		/* Copy of edges v1-v2 */
-	unsigned int(*faces_edge)[2];	/* Faces by edges  */
-
-	int *ringf_indices;				/* Indices of faces per vertex */
-	int *ringe_indices;				/* Indices of edges per vertex */
-	int *ringv_indices;				/* Indices of verts per vertex */
-	struct MeshElemMap *ringf_map;  /* Map of faces per vertex */
-	struct MeshElemMap *ringe_map;	/* Map of edges per vertex */
-	struct MeshElemMap *ringv_map;	/* Map of verts per vertex */
-
-	int *constraints;				/* Feature points constraints*/
-	float *weights;					/* Feature points weights*/
-} InputMesh;
-
-typedef struct OutputMesh {
-	struct MemArena *memarena;
-	QRVert *verts;
-	QRVertID *vonvs;
-	struct QREdge *ringe;                  /* QREdges per original edges */
-	struct LinkNode **ringf;        /* Lists of QREdge per original faces */
-	
-	int num_verts, alloc_verts;
-	int num_edges;
-} OutputMesh;
-
-typedef struct QuadRemeshSystem {
-	struct QuadRemeshModifierData *qmd;
-
-	InputMesh input_mesh;
-	
-	bool has_solution, is_alloc;
-	float(*cf)[4][3];               /* Cross field on mesh faces */
-	int *singularities;
-	float *U_field;					/* Initial scalar field */
-
-	OutputMesh output_mesh;
-	struct RNG *rng;
-
-	struct DerivedMesh *cache_mesh;
-} QuadRemeshSystem;
-
-void getNormalAtEdge(float r_no[3], InputMesh *im, int in_e);
-
-QRDiskLink *linkVerts(OutputMesh *om, QRVertID in_v1, QRVertID in_v2);
-void deleteLink(OutputMesh *om, QRVert *ll, QRDiskLink *l);
-void unlinkVerts(OutputMesh *om, QRDiskLink *l);
-void dissolveVert(OutputMesh *om, QRVertID in_v);
-
-void insertOnQREdge(OutputMesh *om, QREdge *in_e, QRVertID in_vid);
-void linkOnQREdge(OutputMesh *om, GFSysID sys_id, QREdge *in_e, QRVertID in_v1, QRVertID in_v2);
-QREdge *addQREdgeToFace(OutputMesh *om, InputMesh *im, GFSysID sys_id, int in_f, QRVertID in_v1, QRVertID in_v2);
-
-QRVertID addVert(OutputMesh *om, float in_co[3], float in_no[3]);
-void addGFPoint(InputMesh *im, OutputMesh *om, GFPoint *in_p);
 
 void addSeedToQueue(struct Heap *aheap, float in_co[3], GFPointType in_type, int in_val, float weight);
 GFPoint *getTopSeedFromQueue(struct Heap *aheap);
-
-bool isectSegmentWithOthersOnFace(OutputMesh *om, GFSysID sys_id, float in_a[3], float in_b[3], int in_f);
-bool isectPointWithQREdge(OutputMesh *om, GFSysID sys_id, float in_co[3], int in_e);
-
-void getInitialSeeds(GradientFlowSystem *gfsys);
-void computeFlowLines(QuadRemeshSystem *sys);
-
-void freeInputMesh(InputMesh *im);
-void getInput(QuadRemeshSystem *sys, struct Object *ob, struct DerivedMesh *dm);
-void getHarmonicGradients(QuadRemeshSystem *sys);
-
-GradientFlowSystem *newGradientFlowSystem(QuadRemeshSystem *sys);
-void freeGradientFlowSystem(GradientFlowSystem *gfsys);
-void getPrincipalCurvatures(QuadRemeshSystem *sys);
 
 #endif

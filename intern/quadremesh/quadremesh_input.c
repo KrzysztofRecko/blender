@@ -34,8 +34,7 @@
 
 #include "MOD_util.h"
 
-#include "quadremesh_input.h"
-#include "quadremesh_util.h"
+#include "quadremesh_system.h"
 
 static void createFaceRingMap(InputMesh *im)
 {
@@ -276,10 +275,10 @@ void getInput(QuadRemeshSystem *sys, Object *ob, DerivedMesh *dm)
 	int defgrp_index;
 	MDeformVert *dvert;
 
-	modifier_get_vgroup(ob, dm, sys->qmd->anchor_grp_name, &dvert, &defgrp_index);
+	//modifier_get_vgroup(ob, dm, sys->qmd->anchor_grp_name, &dvert, &defgrp_index);
 
 	getInputMeshData(&sys->input_mesh, dm);
-	getFeatures(&sys->input_mesh, dvert, defgrp_index);
+	//getFeatures(&sys->input_mesh, dvert, defgrp_index);
 
 	createFaceRingMap(&sys->input_mesh);
 	createEdgeRingMap(&sys->input_mesh);

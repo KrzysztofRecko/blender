@@ -64,8 +64,8 @@ static bool isDisabled(ModifierData *md, int UNUSED(useRenderParams))
 {
 	QuadRemeshModifierData *lmd = (QuadRemeshModifierData *)md;
 
-	if (!lmd->anchor_grp_name[0])
-		return true;
+	//if (!lmd->anchor_grp_name[0])
+		//return true;
 
 	return false;
 }
@@ -78,7 +78,7 @@ static CustomDataMask requiredDataMask(Object *UNUSED(ob), ModifierData *md)
 	return dataMask;
 }
 
-#define QR_SHOW_UFIELD
+//#define QR_SHOW_UFIELD
 
 static DerivedMesh *applyModifier(ModifierData *md,
 	Object *ob,

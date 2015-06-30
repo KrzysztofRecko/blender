@@ -22,11 +22,12 @@
  *
  */
 
+#ifdef QR_GENERATE
 #include "BLI_utildefines.h"
 #include "BLI_memarena.h"
 #include "BLI_math.h"
 
-#include "quadremesh_util.h"
+#include "quadremesh_system.h"
 
 static QRDiskLink *getLink(OutputMesh *om, QRVertID in_v1, QRVertID in_v2)
 {
@@ -177,3 +178,5 @@ void dissolveVert(OutputMesh *om, QRVertID in_v)
 		om->num_edges -= 2;
 	}
 }
+
+#endif

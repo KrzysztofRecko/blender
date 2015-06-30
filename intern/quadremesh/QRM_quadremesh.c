@@ -42,7 +42,7 @@
 #include "PIL_time.h"
 
 #include "MOD_util.h"
-#include "quadremesh_util.h"
+#include "quadremesh_system.h"
 
 #define QR_MAKEPOLYS
 #define QR_SHOWORIENTATIONS
@@ -223,6 +223,7 @@ static float getSamplingDistanceFunctionOnFace(GradientFlowSystem *gfsys, int in
 }
 #endif // UNUSED ROUTINES
 
+#ifdef QR_GENERATE
 /* MESH GENERATION */
 
 static void makeFeatureEdges(OutputMesh *om, InputMesh *im)
@@ -449,6 +450,7 @@ static void freeOutputMesh(OutputMesh *om)
 		om->memarena = NULL;
 	}
 }
+#endif
 
 static DerivedMesh *makeOrientationsMesh(QuadRemeshSystem *sys)
 {
@@ -489,7 +491,7 @@ static DerivedMesh *makeOrientationsMesh(QuadRemeshSystem *sys)
 		mid_v3_v3v3v3(mid, im->co[im->faces[i][0]], im->co[im->faces[i][1]], im->co[im->faces[i][2]]);
 
 		for (j = 0; j < 4; j++) {
-			madd_v3_v3v3fl(gra1, mid, sys->cf[i][j], 0.08f);
+			madd_v3_v3v3fl(gra1, mid, sys->cf[i][j], 0.04f);
 			copy_v3_v3(verts[i * 4 + j].co, gra1);
 		}
 
@@ -506,6 +508,7 @@ static DerivedMesh *makeOrientationsMesh(QuadRemeshSystem *sys)
 	return ret;
 }
 
+#ifdef QR_GENERATE
 static DerivedMesh *remesh(QuadRemeshSystem *sys)
 {
 	int i, num_loops, num_polys;
@@ -568,6 +571,7 @@ static DerivedMesh *remesh(QuadRemeshSystem *sys)
 
 	return ret;
 }
+#endif
 
 DerivedMesh *makeResultMesh(QuadRemeshSystem *sys, Object *ob, DerivedMesh *in)
 {
@@ -598,8 +602,8 @@ DerivedMesh *makeResultMesh(QuadRemeshSystem *sys, Object *ob, DerivedMesh *in)
 			sys->is_alloc = false;
 		}
 
-		getHarmonicGradients(sys);
-		//getPrincipalCurvatures(sys);
+		//getHarmonicGradients(sys);
+		getPrincipalCurvatures(sys);
 
 		if (!sys->has_solution) {
 			modifier_setError((ModifierData*)sys->qmd, "No soultion found given these constraints");
@@ -609,6 +613,7 @@ DerivedMesh *makeResultMesh(QuadRemeshSystem *sys, Object *ob, DerivedMesh *in)
 		sys->qmd->flag |= MOD_QUADREMESH_REMESH;
 	}
 
+#ifdef QR_GENERATE
 	/* Remesh */
 	if (sys->qmd->flag & MOD_QUADREMESH_REMESH) {
 		if (sys->cache_mesh) {
@@ -617,6 +622,7 @@ DerivedMesh *makeResultMesh(QuadRemeshSystem *sys, Object *ob, DerivedMesh *in)
 
 		sys->cache_mesh = remesh(sys);
 	}
+#endif
 
 	sys->qmd->flag = 0;
 

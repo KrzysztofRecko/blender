@@ -22,6 +22,7 @@
  *
  */
 
+#ifdef QR_GENERATE
 #include <float.h>
 
 #include "BLI_utildefines.h"
@@ -178,3 +179,5 @@ QREdge *addQREdgeToFace(OutputMesh *om, InputMesh *im, GFSysID sys_id, int in_f,
 	
 	return newe;
 }
+
+#endif

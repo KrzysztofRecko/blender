@@ -35,7 +35,7 @@
 #include "ONL_opennl.h"
 #include "MOD_util.h"
 
-#include "quadremesh_util.h"
+#include "quadremesh_system.h"
 
 static void initLaplacianMatrix(InputMesh *im)
 {

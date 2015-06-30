@@ -23,6 +23,7 @@ set(INC
 	../../source/blender/makesdna
 	../../source/blender/modifiers/intern
 	../../source/blender/modifiers
+	../../source/blender/depsgraph
 	../opennl/extern
 	../guardedalloc
 )

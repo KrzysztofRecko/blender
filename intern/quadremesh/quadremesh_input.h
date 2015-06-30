@@ -25,6 +25,8 @@
 #ifndef __QUADREMESH_INPUT_H__
 #define __QUADREMESH_INPUT_H__
 
+#include "quadremesh_util.h"
+
 typedef struct QuadRemeshSystem QuadRemeshSystem;
 typedef struct Object Object;
 typedef struct DerivedMesh DerivedMesh;

@@ -30,7 +30,7 @@ extern "C" {
 
 #include "BKE_mesh_mapping.h"
 
-#include "quadremesh_util.h"
+#include "quadremesh_system.h"
 
 }
 
@@ -142,14 +142,20 @@ static void getCurvatures(QuadRemeshSystem *sys)
 			normalize_v3(sys->cf[f][0]);
 			//sys->gfsys[0]->h[f] = 0.0f;
 		}
+
+		copy_v3_v3(ev, sys->cf[f][0]);
+		for (int i = 1; i < 4; i++) {
+			cross_v3_v3v3(sys->cf[f][i], ev, sys->input_mesh.no[f]);
+			copy_v3_v3(ev, sys->cf[f][i]);
+		}
 	}
 
 	delete[] face_curvatures;
 
-	for (int i = 0; i < 20; i++)
-		for (int e = 0; e < im->num_edges; e++) {
-			alignAtEdge(sys, e);
-		}
+	//for (int i = 0; i < 20; i++)
+		//for (int e = 0; e < im->num_edges; e++) {
+			//alignAtEdge(sys, e);
+		//}
 }
 
 void getPrincipalCurvatures(QuadRemeshSystem *sys)

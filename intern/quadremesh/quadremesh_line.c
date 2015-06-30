@@ -21,7 +21,7 @@
  * ***** END GPL LICENSE BLOCK *****
  *
  */
-
+#ifdef QR_GENERATE
 #include "MEM_guardedalloc.h"
 
 #include "DNA_modifier_types.h"
@@ -512,3 +512,5 @@ void computeFlowLines(QuadRemeshSystem *sys) {
 		}
 	}
 }
+
+#endif

@@ -34,8 +34,9 @@
 #include "BKE_mesh_mapping.h"
 #include "BKE_DerivedMesh.h"
 
-#include "quadremesh_util.h"
+#include "quadremesh_system.h"
 
+#ifdef QR_GENERATE
 /* ADDING STUFF TO OUTPUT MESH */
 
 QRVertID addVert(OutputMesh *om, float in_co[3], float in_no[3])
@@ -87,7 +88,7 @@ void addGFPoint(InputMesh *im, OutputMesh *om, GFPoint *in_p)
 
 	in_p->id = newv;
 }
-
+#endif
 
 /*
 * List of vertices from original mesh with special features (edge dihedral angle less that 90) to be preserves
@@ -139,6 +140,7 @@ static int *findFeaturesOnMesh(InputMesh *im, int size[2])
 	return listdest;
 }
 
+#ifdef QR_GENERATE
 void addSeedToQueue(Heap *aheap, float in_co[3], GFPointType in_type, int in_val, float weight)
 {
 	GFPoint *seed;
@@ -156,7 +158,7 @@ void addSeedToQueue(Heap *aheap, float in_co[3], GFPointType in_type, int in_val
 	BLI_heap_insert(aheap, weight, seed);
 }
 
-void getInitialSeeds(GradientFlowSystem *gfsys)
+void getInitialSeeds(QuadRemeshSystem *gfsys)
 {
 	int i, *lverts, sizeverts[2];
 
@@ -216,6 +218,7 @@ bool isectPointWithQREdge(OutputMesh *om, GFSysID sys_id, float in_co[3], int in
 
 	return false;
 }
+#endif
 
 void freeQuadRemeshSystem(QuadRemeshSystem *sys)
 {
