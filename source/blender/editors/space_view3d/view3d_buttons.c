@@ -45,7 +45,7 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLF_translation.h"
+#include "BLT_translation.h"
 
 #include "BLI_math.h"
 #include "BLI_blenlib.h"
@@ -199,7 +199,7 @@ static void v3d_editvertex_buts(uiLayout *layout, View3D *v3d, Object *ob, float
 	bool has_skinradius = false;
 	PointerRNA data_ptr;
 
-	fill_vn_fl(median, NBR_TRANSFORM_PROPERTIES, 0.0f);
+	copy_vn_fl(median, NBR_TRANSFORM_PROPERTIES, 0.0f);
 	tot = totedgedata = totcurvedata = totlattdata = totcurvebweight = 0;
 
 	/* make sure we got storage */
@@ -476,7 +476,7 @@ static void v3d_editvertex_buts(uiLayout *layout, View3D *v3d, Object *ob, float
 				uiDefButF(block, UI_BTYPE_NUM, B_OBJECTPANELMEDIAN,
 				          totedgedata == 1 ? IFACE_("Crease:") : IFACE_("Mean Crease:"),
 				          0, yi -= buth + but_margin, 200, buth,
-				          &(tfp->ve_median[M_CREASE]), 0.0, 1.0, 1, 2, TIP_("Weight used by SubSurf modifier"));
+				          &(tfp->ve_median[M_CREASE]), 0.0, 1.0, 1, 2, TIP_("Weight used by the Subdivision Surface modifier"));
 			}
 		}
 		/* Curve... */
@@ -491,7 +491,7 @@ static void v3d_editvertex_buts(uiLayout *layout, View3D *v3d, Object *ob, float
 		else if (totcurvedata > 1) {
 			uiDefButF(block, UI_BTYPE_NUM, B_OBJECTPANELMEDIAN, IFACE_("Mean Weight:"),
 			          0, yi -= buth + but_margin, 200, buth,
-			          &(tfp->ve_median[C_WEIGHT]), 0.0, 1.0, 1, 3, TIP_("Weight used for SoftBody Goal"));
+			          &(tfp->ve_median[C_WEIGHT]), 0.0, 1.0, 1, 3, TIP_("Weight used for Soft Body Goal"));
 			uiDefButF(block, UI_BTYPE_NUM, B_OBJECTPANELMEDIAN, IFACE_("Mean Radius:"),
 			          0, yi -= buth + but_margin, 200, buth,
 			          &(tfp->ve_median[C_RADIUS]), 0.0, 100.0, 1, 3, TIP_("Radius of curve control points"));
@@ -509,7 +509,7 @@ static void v3d_editvertex_buts(uiLayout *layout, View3D *v3d, Object *ob, float
 		else if (totlattdata > 1) {
 			uiDefButF(block, UI_BTYPE_NUM, B_OBJECTPANELMEDIAN, IFACE_("Mean Weight:"),
 			          0, yi -= buth + but_margin, 200, buth,
-			          &(tfp->ve_median[L_WEIGHT]), 0.0, 1.0, 1, 3, TIP_("Weight used for SoftBody Goal"));
+			          &(tfp->ve_median[L_WEIGHT]), 0.0, 1.0, 1, 3, TIP_("Weight used for Soft Body Goal"));
 		}
 
 		UI_block_align_end(block);
@@ -992,9 +992,8 @@ static void v3d_transform_butsR(uiLayout *layout, PointerRNA *ptr)
 
 	if (ptr->type == &RNA_Object) {
 		Object *ob = ptr->data;
-		/* dimensions and material support just happen to be the same checks
-		 * later we may want to add dimensions for lattice, armature etc too */
-		if (OB_TYPE_SUPPORT_MATERIAL(ob->type)) {
+		/* dimensions and editmode just happen to be the same checks */
+		if (OB_TYPE_SUPPORT_EDITMODE(ob->type)) {
 			uiItemR(layout, ptr, "dimensions", 0, NULL, ICON_NONE);
 		}
 	}
@@ -1157,7 +1156,7 @@ static void view3d_panel_transform(const bContext *C, Panel *pa)
 		}
 		else {
 			View3D *v3d = CTX_wm_view3d(C);
-			const float lim = 10000.0f * max_ff(1.0f, v3d->grid);
+			const float lim = 10000.0f * max_ff(1.0f, ED_view3d_grid_scale(scene, v3d, NULL));
 			v3d_editvertex_buts(col, v3d, ob, lim);
 		}
 	}
@@ -1179,7 +1178,7 @@ void view3d_buttons_register(ARegionType *art)
 	pt = MEM_callocN(sizeof(PanelType), "spacetype view3d panel object");
 	strcpy(pt->idname, "VIEW3D_PT_transform");
 	strcpy(pt->label, N_("Transform"));  /* XXX C panels not  available through RNA (bpy.types)! */
-	strcpy(pt->translation_context, BLF_I18NCONTEXT_DEFAULT_BPYRNA);
+	strcpy(pt->translation_context, BLT_I18NCONTEXT_DEFAULT_BPYRNA);
 	pt->draw = view3d_panel_transform;
 	pt->poll = view3d_panel_transform_poll;
 	BLI_addtail(&art->paneltypes, pt);
@@ -1187,7 +1186,7 @@ void view3d_buttons_register(ARegionType *art)
 	pt = MEM_callocN(sizeof(PanelType), "spacetype view3d panel vgroup");
 	strcpy(pt->idname, "VIEW3D_PT_vgroup");
 	strcpy(pt->label, N_("Vertex Weights"));  /* XXX C panels are not available through RNA (bpy.types)! */
-	strcpy(pt->translation_context, BLF_I18NCONTEXT_DEFAULT_BPYRNA);
+	strcpy(pt->translation_context, BLT_I18NCONTEXT_DEFAULT_BPYRNA);
 	pt->draw = view3d_panel_vgroup;
 	pt->poll = view3d_panel_vgroup_poll;
 	BLI_addtail(&art->paneltypes, pt);
@@ -1207,7 +1206,7 @@ static int view3d_properties_toggle_exec(bContext *C, wmOperator *UNUSED(op))
 void VIEW3D_OT_properties(wmOperatorType *ot)
 {
 	ot->name = "Properties";
-	ot->description = "Toggles the properties panel display";
+	ot->description = "Toggle the properties region visibility";
 	ot->idname = "VIEW3D_OT_properties";
 
 	ot->exec = view3d_properties_toggle_exec;

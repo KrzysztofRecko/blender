@@ -15,7 +15,7 @@ varying vec4 uvcoordsvar;
 /* ssao_params.x : pixel scale for the ssao radious */
 /* ssao_params.y : factor for the ssao darkening */
 uniform vec4 ssao_params;
-uniform vec4 ssao_sample_params;
+uniform vec3 ssao_sample_params;
 uniform vec4 ssao_color;
 
 /* store the view space vectors for the corners of the view frustum here.
@@ -27,14 +27,13 @@ vec3 calculate_view_space_normal(in vec3 viewposition)
 {
 	vec3 normal = cross(normalize(dFdx(viewposition)),
 	                    ssao_params.w * normalize(dFdy(viewposition)));
-	normalize(normal);
-	return normal;
+	return normalize(normal);
 }
 
 float calculate_ssao_factor(float depth)
 {
 	/* take the normalized ray direction here */
-	vec2 rotX = texture2D(jitter_tex, uvcoordsvar.xy * ssao_sample_params.zw).rg;
+	vec2 rotX = texture2D(jitter_tex, uvcoordsvar.xy * ssao_sample_params.yz).rg;
 	vec2 rotY = vec2(-rotX.y, rotX.x);
 
 	/* occlusion is zero in full depth */
@@ -44,7 +43,8 @@ float calculate_ssao_factor(float depth)
 	vec3 position = get_view_space_from_depth(uvcoordsvar.xy, viewvecs[0].xyz, viewvecs[1].xyz, depth);
 	vec3 normal = calculate_view_space_normal(position);
 
-	// find the offset in screen space by multiplying a point in camera space at the depth of the point by the projection matrix.
+	/* find the offset in screen space by multiplying a point
+	 * in camera space at the depth of the point by the projection matrix. */
 	vec2 offset;
 	float homcoord = gl_ProjectionMatrix[2][3] * position.z + gl_ProjectionMatrix[3][3];
 	offset.x = gl_ProjectionMatrix[0][0] * ssao_params.x / homcoord;
@@ -76,7 +76,7 @@ float calculate_ssao_factor(float depth)
 
 			/* use minor bias here to avoid self shadowing */
 			if (f > 0.05 * len + 0.0001)
-				factor += f * 1.0/(len * (1.0 + len * len * ssao_params.z));
+				factor += f * 1.0 / (len * (1.0 + len * len * ssao_params.z));
 		}
 	}
 

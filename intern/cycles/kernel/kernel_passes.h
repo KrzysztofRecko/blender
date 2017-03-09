@@ -19,23 +19,49 @@ CCL_NAMESPACE_BEGIN
 ccl_device_inline void kernel_write_pass_float(ccl_global float *buffer, int sample, float value)
 {
 	ccl_global float *buf = buffer;
+#if defined(__SPLIT_KERNEL__)
+	atomic_add_and_fetch_float(buf, value);
+#else
 	*buf = (sample == 0)? value: *buf + value;
+#endif  /* __SPLIT_KERNEL__ */
 }
 
 ccl_device_inline void kernel_write_pass_float3(ccl_global float *buffer, int sample, float3 value)
 {
+#if defined(__SPLIT_KERNEL__)
+	ccl_global float *buf_x = buffer + 0;
+	ccl_global float *buf_y = buffer + 1;
+	ccl_global float *buf_z = buffer + 2;
+
+	atomic_add_and_fetch_float(buf_x, value.x);
+	atomic_add_and_fetch_float(buf_y, value.y);
+	atomic_add_and_fetch_float(buf_z, value.z);
+#else
 	ccl_global float3 *buf = (ccl_global float3*)buffer;
 	*buf = (sample == 0)? value: *buf + value;
+#endif  /* __SPLIT_KERNEL__ */
 }
 
 ccl_device_inline void kernel_write_pass_float4(ccl_global float *buffer, int sample, float4 value)
 {
+#if defined(__SPLIT_KERNEL__)
+	ccl_global float *buf_x = buffer + 0;
+	ccl_global float *buf_y = buffer + 1;
+	ccl_global float *buf_z = buffer + 2;
+	ccl_global float *buf_w = buffer + 3;
+
+	atomic_add_and_fetch_float(buf_x, value.x);
+	atomic_add_and_fetch_float(buf_y, value.y);
+	atomic_add_and_fetch_float(buf_z, value.z);
+	atomic_add_and_fetch_float(buf_w, value.w);
+#else
 	ccl_global float4 *buf = (ccl_global float4*)buffer;
 	*buf = (sample == 0)? value: *buf + value;
+#endif  /* __SPLIT_KERNEL__ */
 }
 
 ccl_device_inline void kernel_write_data_passes(KernelGlobals *kg, ccl_global float *buffer, PathRadiance *L,
-	ShaderData *sd, int sample, PathState *state, float3 throughput)
+	ShaderData *sd, int sample, ccl_addr_space PathState *state, float3 throughput)
 {
 #ifdef __PASSES__
 	int path_flag = state->flag;
@@ -102,7 +128,7 @@ ccl_device_inline void kernel_write_data_passes(KernelGlobals *kg, ccl_global fl
 		float mist_inv_depth = kernel_data.film.mist_inv_depth;
 
 		float depth = camera_distance(kg, sd->P);
-		float mist = clamp((depth - mist_start)*mist_inv_depth, 0.0f, 1.0f);
+		float mist = saturate((depth - mist_start)*mist_inv_depth);
 
 		/* falloff */
 		float mist_falloff = kernel_data.film.mist_falloff;

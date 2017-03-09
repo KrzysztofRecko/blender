@@ -41,7 +41,7 @@
 #include "BLI_string.h"
 #include "BLI_listbase.h"
 
-#include "BLF_translation.h"
+#include "BLT_translation.h"
 
 #include "BKE_report.h"
 
@@ -51,6 +51,9 @@
 
 #include "UI_interface.h"
 #include "UI_resources.h"
+
+#include "WM_api.h"
+#include "WM_types.h"
 
 #include "interface_intern.h"
 
@@ -117,7 +120,9 @@ uiBut *uiDefAutoButR(uiBlock *block, PointerRNA *ptr, PropertyRNA *prop, int ind
 				but = uiDefButR_prop(block, UI_BTYPE_TEXT, 0, name, x1, y1, x2, y2, ptr, prop, index, 0, 0, -1, -1, NULL);
 
 			if (RNA_property_flag(prop) & PROP_TEXTEDIT_UPDATE) {
-				UI_but_flag_enable(but, UI_BUT_TEXTEDIT_UPDATE);
+				/* TEXTEDIT_UPDATE is usally used for search buttons. For these we also want
+				 * the 'x' icon to clear search string, so setting VALUE_CLEAR flag, too. */
+				UI_but_flag_enable(but, UI_BUT_TEXTEDIT_UPDATE | UI_BUT_VALUE_CLEAR);
 			}
 			break;
 		case PROP_POINTER:
@@ -154,9 +159,10 @@ uiBut *uiDefAutoButR(uiBlock *block, PointerRNA *ptr, PropertyRNA *prop, int ind
  * \a check_prop callback filters functions to avoid drawing certain properties,
  * in cases where PROP_HIDDEN flag can't be used for a property.
  */
-int uiDefAutoButsRNA(uiLayout *layout, PointerRNA *ptr,
-                     bool (*check_prop)(PointerRNA *, PropertyRNA *),
-                     const char label_align)
+int uiDefAutoButsRNA(
+        uiLayout *layout, PointerRNA *ptr,
+        bool (*check_prop)(PointerRNA *, PropertyRNA *),
+        const char label_align)
 {
 	uiLayout *split, *col;
 	int flag;
@@ -307,6 +313,34 @@ int UI_calc_float_precision(int prec, double value)
 	CLAMP(prec, 0, UI_PRECISION_FLOAT_MAX);
 
 	return prec;
+}
+
+bool UI_but_online_manual_id(const uiBut *but, char *r_str, size_t maxlength)
+{
+	if (but->rnapoin.id.data && but->rnapoin.data && but->rnaprop) {
+		BLI_snprintf(r_str, maxlength, "%s.%s", RNA_struct_identifier(but->rnapoin.type),
+		             RNA_property_identifier(but->rnaprop));
+		return true;
+	}
+	else if (but->optype) {
+		WM_operator_py_idname(r_str, but->optype->idname);
+		return true;
+	}
+
+	*r_str = '\0';
+	return false;
+}
+
+bool UI_but_online_manual_id_from_active(const struct bContext *C, char *r_str, size_t maxlength)
+{
+	uiBut *but = UI_context_active_but_get(C);
+
+	if (but) {
+		return UI_but_online_manual_id(but, r_str, maxlength);
+	}
+
+	*r_str = '\0';
+	return false;
 }
 
 

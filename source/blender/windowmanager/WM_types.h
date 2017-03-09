@@ -123,17 +123,23 @@ struct ImBuf;
 /* ************** wmOperatorType ************************ */
 
 /* flag */
-#define OPTYPE_REGISTER		1	/* register operators in stack after finishing */
-#define OPTYPE_UNDO			2	/* do undo push after after */
-#define OPTYPE_BLOCKING		4	/* let blender grab all input from the WM (X11) */
-#define OPTYPE_MACRO		8
-#define OPTYPE_GRAB_POINTER	16	/* grabs the cursor and optionally enables continuous cursor wrapping */
-#define OPTYPE_PRESET		32	/* show preset menu */
-#define OPTYPE_INTERNAL		64	/* some operators are mainly for internal use
-								 * and don't make sense to be accessed from the
-								 * search menu, even if poll() returns true.
-								 * currently only used for the search toolbox */
-#define OPTYPE_LOCK_BYPASS		128	/* Allow operator to run when interface is locked */
+enum {
+	OPTYPE_REGISTER     = (1 << 0),  /* register operators in stack after finishing */
+	OPTYPE_UNDO         = (1 << 1),  /* do undo push after after */
+	OPTYPE_BLOCKING     = (1 << 2),  /* let blender grab all input from the WM (X11) */
+	OPTYPE_MACRO        = (1 << 3),
+	OPTYPE_GRAB_CURSOR  = (1 << 4),  /* grabs the cursor and optionally enables continuous cursor wrapping */
+	OPTYPE_PRESET       = (1 << 5),  /* show preset menu */
+
+	/* some operators are mainly for internal use
+	 * and don't make sense to be accessed from the
+	 * search menu, even if poll() returns true.
+	 * currently only used for the search toolbox */
+	OPTYPE_INTERNAL     = (1 << 6),
+
+	OPTYPE_LOCK_BYPASS  = (1 << 7),  /* Allow operator to run when interface is locked */
+	OPTYPE_UNDO_GROUPED = (1 << 8),  /* Special type of undo which doesn't store itself multiple times */
+};
 
 /* context to call operator in for WM_operator_name_call */
 /* rna_ui.c contains EnumPropertyItem's of these, keep in sync */
@@ -356,6 +362,7 @@ typedef struct wmNotifier {
 #define ND_SPACE_NODE_VIEW		(17<<16)
 #define ND_SPACE_CHANGED		(18<<16) /*sent to a new editor type after it's replaced an old one*/
 #define ND_SPACE_CLIP			(19<<16)
+#define ND_SPACE_FILE_PREVIEW   (20<<16)
 
 /* subtype, 256 entries too */
 #define NOTE_SUBTYPE		0x0000FF00
@@ -453,7 +460,7 @@ typedef struct wmEvent {
 	const char *keymap_idname;
 
 	/* tablet info, only use when the tablet is active */
-	struct wmTabletData *tablet_data;
+	const struct wmTabletData *tablet_data;
 
 	/* custom data */
 	short custom;		/* custom data type, stylus, 6dof, see wm_event_types.h */
@@ -479,6 +486,7 @@ typedef enum {  /* motion progress, for modal handlers */
 	P_FINISHED
 } wmProgress;
 
+#ifdef WITH_INPUT_NDOF
 typedef struct wmNDOFMotionData {
 	/* awfully similar to GHOST_TEventNDOFMotionData... */
 	/* Each component normally ranges from -1 to +1, but can exceed that.
@@ -490,6 +498,7 @@ typedef struct wmNDOFMotionData {
 	float dt; /* time since previous NDOF Motion event */
 	wmProgress progress; /* is this the first event, the last, or one of many in between? */
 } wmNDOFMotionData;
+#endif /* WITH_INPUT_NDOF */
 
 typedef struct wmTimer {
 	struct wmTimer *next, *prev;
@@ -514,6 +523,7 @@ typedef struct wmOperatorType {
 	const char *idname;		/* unique identifier */
 	const char *translation_context;
 	const char *description;	/* tooltips and python docs */
+	const char *undo_group;	/* identifier to group operators together */
 
 	/* this callback executes the operator without any interactive input,
 	 * parameters may be provided through operator properties. cannot use

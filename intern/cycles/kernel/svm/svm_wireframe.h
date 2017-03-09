@@ -34,11 +34,11 @@ CCL_NAMESPACE_BEGIN
 
 /* Wireframe Node */
 
-ccl_device float wireframe(KernelGlobals *kg,
-                           ShaderData *sd,
-                           float size,
-                           int pixel_size,
-                           float3 *P)
+ccl_device_inline float wireframe(KernelGlobals *kg,
+                                  ShaderData *sd,
+                                  float size,
+                                  int pixel_size,
+                                  float3 *P)
 {
 #ifdef __HAIR__
 	if(sd->prim != PRIM_NONE && sd->type & PRIMITIVE_ALL_TRIANGLE)
@@ -57,7 +57,7 @@ ccl_device float wireframe(KernelGlobals *kg,
 		else
 			motion_triangle_vertices(kg, sd->object, sd->prim, sd->time, Co);
 
-		if(!(sd->flag & SD_TRANSFORM_APPLIED)) {
+		if(!(sd->object_flag & SD_OBJECT_TRANSFORM_APPLIED)) {
 			object_position_transform(kg, sd, &Co[0]);
 			object_position_transform(kg, sd, &Co[1]);
 			object_position_transform(kg, sd, &Co[2]);
@@ -106,7 +106,18 @@ ccl_device void svm_node_wireframe(KernelGlobals *kg,
 	int pixel_size = (int)use_pixel_size;
 
 	/* Calculate wireframe */
+#ifdef __SPLIT_KERNEL__
+	/* TODO(sergey): This is because sd is actually a global space,
+	 * which makes it difficult to re-use same wireframe() function.
+	 *
+	 * With OpenCL 2.0 it's possible to avoid this change, but for until
+	 * then we'll be living with such an exception.
+	 */
+	float3 P = sd->P;
+	float f = wireframe(kg, sd, size, pixel_size, &P);
+#else
 	float f = wireframe(kg, sd, size, pixel_size, &sd->P);
+#endif
 
 	/* TODO(sergey): Think of faster way to calculate derivatives. */
 	if(bump_offset == NODE_BUMP_OFFSET_DX) {

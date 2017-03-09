@@ -103,6 +103,13 @@ class DATA_PT_lamp(DataButtonsPanel, Panel):
                 sub.prop(lamp, "linear_attenuation", slider=True, text="Linear")
                 sub.prop(lamp, "quadratic_attenuation", slider=True, text="Quadratic")
 
+            elif lamp.falloff_type == 'INVERSE_COEFFICIENTS':
+                col.label(text="Inverse Coefficients:")
+                sub = col.column(align=True)
+                sub.prop(lamp, "constant_coefficient", text="Constant")
+                sub.prop(lamp, "linear_coefficient", text="Linear")
+                sub.prop(lamp, "quadratic_coefficient", text="Quadratic")
+
             col.prop(lamp, "use_sphere")
 
         if lamp.type == 'AREA':
@@ -355,6 +362,7 @@ class DATA_PT_spot(DataButtonsPanel, Panel):
 
         col = split.column()
 
+        col.active = (lamp.shadow_method != 'BUFFER_SHADOW' or lamp.shadow_buffer_type != 'DEEP')
         col.prop(lamp, "use_halo")
         sub = col.column(align=True)
         sub.active = lamp.use_halo

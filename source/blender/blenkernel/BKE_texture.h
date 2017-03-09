@@ -42,6 +42,7 @@ struct Brush;
 struct ColorBand;
 struct EnvMap;
 struct FreestyleLineStyle;
+struct ImagePool;
 struct Lamp;
 struct Main;
 struct Material;
@@ -69,10 +70,10 @@ void colorband_update_sort(struct ColorBand *coba);
 
 void         BKE_texture_free(struct Tex *tex);
 void         BKE_texture_default(struct Tex *tex);
-struct Tex  *BKE_texture_copy(struct Tex *tex);
+struct Tex  *BKE_texture_copy(struct Main *bmain, struct Tex *tex);
 struct Tex  *BKE_texture_add(struct Main *bmain, const char *name);
 struct Tex  *BKE_texture_localize(struct Tex *tex);
-void         BKE_texture_make_local(struct Tex *tex);
+void         BKE_texture_make_local(struct Main *bmain, struct Tex *tex, const bool lib_local);
 void         BKE_texture_type_set(struct Tex *tex, int type);
 
 void         BKE_texture_mtex_default(struct MTex *mtex);
@@ -115,6 +116,7 @@ void           BKE_texture_envmap_free(struct EnvMap *env);
 struct EnvMap *BKE_texture_envmap_add(void);
 struct EnvMap *BKE_texture_envmap_copy(struct EnvMap *env);
 
+void                 BKE_texture_pointdensity_init_data(struct PointDensity *pd);
 void                 BKE_texture_pointdensity_free_data(struct PointDensity *pd);
 void                 BKE_texture_pointdensity_free(struct PointDensity *pd);
 struct PointDensity *BKE_texture_pointdensity_add(void);
@@ -131,6 +133,12 @@ struct OceanTex *BKE_texture_ocean_copy(struct OceanTex *ot);
 
 bool    BKE_texture_dependsOnTime(const struct Tex *texture);
 bool    BKE_texture_is_image_user(const struct Tex *tex);
+
+void BKE_texture_get_value_ex(
+        const struct Scene *scene, struct Tex *texture,
+        float *tex_co, struct TexResult *texres,
+        struct ImagePool *pool,
+        bool use_color_management);
 
 void BKE_texture_get_value(
         const struct Scene *scene, struct Tex *texture,

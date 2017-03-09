@@ -322,30 +322,30 @@ void IMB_rectblend(ImBuf *dbuf, ImBuf *obuf, ImBuf *sbuf, unsigned short *dmask,
 	do_float = (sbuf && sbuf->rect_float && dbuf->rect_float && obuf->rect_float);
 
 	if (do_char) {
-		drect = dbuf->rect + desty * dbuf->x + destx;
-		orect = obuf->rect + origy * obuf->x + origx;
+		drect = dbuf->rect + ((size_t)desty) * dbuf->x + destx;
+		orect = obuf->rect + ((size_t)origy) * obuf->x + origx;
 	}
 	if (do_float) {
-		drectf = dbuf->rect_float + (desty * dbuf->x + destx) * 4;
-		orectf = obuf->rect_float + (origy * obuf->x + origx) * 4;
+		drectf = dbuf->rect_float + (((size_t)desty) * dbuf->x + destx) * 4;
+		orectf = obuf->rect_float + (((size_t)origy) * obuf->x + origx) * 4;
 	}
 
 	if (dmaskrect)
-		dmaskrect += origy * obuf->x + origx;
+		dmaskrect += ((size_t)origy) * obuf->x + origx;
 
 	destskip = dbuf->x;
 	origskip = obuf->x;
 
 	if (sbuf) {
-		if (do_char) srect = sbuf->rect + srcy * sbuf->x + srcx;
-		if (do_float) srectf = sbuf->rect_float + (srcy * sbuf->x + srcx) * 4;
+		if (do_char) srect = sbuf->rect + ((size_t)srcy) * sbuf->x + srcx;
+		if (do_float) srectf = sbuf->rect_float + (((size_t)srcy) * sbuf->x + srcx) * 4;
 		srcskip = sbuf->x;
 
 		if (cmaskrect)
-			cmaskrect += srcy * sbuf->x + srcx;
+			cmaskrect += ((size_t)srcy) * sbuf->x + srcx;
 
 		if (texmaskrect)
-			texmaskrect += srcy * sbuf->x + srcx;
+			texmaskrect += ((size_t)srcy) * sbuf->x + srcx;
 	}
 	else {
 		srect = drect;
@@ -690,6 +690,69 @@ void IMB_rectblend(ImBuf *dbuf, ImBuf *obuf, ImBuf *sbuf, unsigned short *dmask,
 				srectf += srcskip * 4;
 			}
 		}
+	}
+}
+
+typedef struct RectBlendThreadData {
+	ImBuf *dbuf, *obuf, *sbuf;
+	unsigned short *dmask, *curvemask, *texmask;
+	float mask_max;
+	int destx, desty, origx, origy;
+	int srcx, srcy, width;
+	IMB_BlendMode mode;
+	bool accumulate;
+} RectBlendThreadData;
+
+static void rectblend_thread_do(void *data_v,
+                                int start_scanline,
+                                int num_scanlines)
+{
+	RectBlendThreadData *data = (RectBlendThreadData *)data_v;
+	IMB_rectblend(data->dbuf, data->obuf, data->sbuf,
+	              data->dmask, data->curvemask, data->texmask,
+	              data->mask_max,
+	              data->destx,
+	              data->desty + start_scanline,
+	              data->origx,
+	              data->origy + start_scanline,
+	              data->srcx,
+	              data->srcy + start_scanline,
+	              data->width, num_scanlines,
+	              data->mode, data->accumulate);
+}
+
+void IMB_rectblend_threaded(ImBuf *dbuf, ImBuf *obuf, ImBuf *sbuf,
+                            unsigned short *dmask, unsigned short *curvemask,
+                            unsigned short *texmask, float mask_max,
+                            int destx, int desty, int origx, int origy,
+                            int srcx, int srcy, int width, int height,
+                            IMB_BlendMode mode, bool accumulate)
+{
+	if (((size_t)width) * height < 64 * 64) {
+		IMB_rectblend(dbuf, obuf, sbuf, dmask, curvemask, texmask,
+		              mask_max, destx,  desty, origx, origy,
+		              srcx, srcy, width, height, mode, accumulate);
+	}
+	else {
+		RectBlendThreadData data;
+		data.dbuf = dbuf;
+		data.obuf = obuf;
+		data.sbuf = sbuf;
+		data.dmask = dmask;
+		data.curvemask = curvemask;
+		data.texmask = texmask;
+		data.mask_max = mask_max;
+		data.destx = destx;
+		data.desty = desty;
+		data.origx = origx;
+		data.origy = origy;
+		data.srcx = srcx;
+		data.srcy = srcy;
+		data.width = width;
+		data.mode = mode;
+		data.accumulate = accumulate;
+		IMB_processor_apply_threaded_scanlines(
+		    height, rectblend_thread_do, &data);
 	}
 }
 

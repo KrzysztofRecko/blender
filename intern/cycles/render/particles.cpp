@@ -19,6 +19,7 @@
 #include "scene.h"
 
 #include "util_foreach.h"
+#include "util_logging.h"
 #include "util_map.h"
 #include "util_progress.h"
 #include "util_vector.h"
@@ -57,8 +58,8 @@ void ParticleSystemManager::device_update_particles(Device *device, DeviceScene 
 	 * adds one dummy particle at the beginning to avoid invalid lookups,
 	 * in case a shader uses particle info without actual particle data. */
 	int num_particles = 1;
-	foreach(ParticleSystem *psys, scene->particle_systems)
-		num_particles += psys->particles.size();
+	for(size_t j = 0; j < scene->particle_systems.size(); j++)
+		num_particles += scene->particle_systems[j]->particles.size();
 	
 	float4 *particles = dscene->particles.resize(PARTICLE_SIZE*num_particles);
 	
@@ -70,9 +71,12 @@ void ParticleSystemManager::device_update_particles(Device *device, DeviceScene 
 	particles[4] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
 	
 	int i = 1;
-	foreach(ParticleSystem *psys, scene->particle_systems) {
-		foreach(Particle &pa, psys->particles) {
+	for(size_t j = 0; j < scene->particle_systems.size(); j++) {
+		ParticleSystem *psys = scene->particle_systems[j];
+
+		for(size_t k = 0; k < psys->particles.size(); k++) {
 			/* pack in texture */
+			Particle& pa = psys->particles[k];
 			int offset = i*PARTICLE_SIZE;
 			
 			particles[offset] = make_float4(pa.index, pa.age, pa.lifetime, pa.size);
@@ -94,7 +98,10 @@ void ParticleSystemManager::device_update(Device *device, DeviceScene *dscene, S
 {
 	if(!need_update)
 		return;
-	
+
+	VLOG(1) << "Total " << scene->particle_systems.size()
+	        << " particle systems.";
+
 	device_free(device, dscene);
 
 	progress.set_status("Updating Particle Systems", "Copying Particles to device");

@@ -98,7 +98,7 @@ ccl_device uint sobol_lookup(const uint m, const uint frame, const uint ex, cons
 	return index;
 }
 
-ccl_device_inline float path_rng_1D(KernelGlobals *kg, RNG *rng, int sample, int num_samples, int dimension)
+ccl_device_forceinline float path_rng_1D(KernelGlobals *kg, ccl_addr_space RNG *rng, int sample, int num_samples, int dimension)
 {
 #ifdef __CMJ__
 	if(kernel_data.integrator.sampling_pattern == SAMPLING_PATTERN_CMJ) {
@@ -120,19 +120,17 @@ ccl_device_inline float path_rng_1D(KernelGlobals *kg, RNG *rng, int sample, int
 	/* Cranly-Patterson rotation using rng seed */
 	float shift;
 
-	/* using the same *rng value to offset seems to give correlation issues,
-	 * we could hash it with the dimension but this has a performance impact,
-	 * we need to find a solution for this */
-	if(dimension & 1)
-		shift = (*rng >> 16) * (1.0f/(float)0xFFFF);
-	else
-		shift = (*rng & 0xFFFF) * (1.0f/(float)0xFFFF);
+	/* Hash rng with dimension to solve correlation issues.
+	 * See T38710, T50116.
+	 */
+	RNG tmp_rng = cmj_hash_simple(dimension, *rng);
+	shift = tmp_rng * (1.0f/(float)0xFFFFFFFF);
 
 	return r + shift - floorf(r + shift);
 #endif
 }
 
-ccl_device_inline void path_rng_2D(KernelGlobals *kg, RNG *rng, int sample, int num_samples, int dimension, float *fx, float *fy)
+ccl_device_forceinline void path_rng_2D(KernelGlobals *kg, ccl_addr_space RNG *rng, int sample, int num_samples, int dimension, float *fx, float *fy)
 {
 #ifdef __CMJ__
 	if(kernel_data.integrator.sampling_pattern == SAMPLING_PATTERN_CMJ) {
@@ -149,7 +147,7 @@ ccl_device_inline void path_rng_2D(KernelGlobals *kg, RNG *rng, int sample, int 
 	}
 }
 
-ccl_device_inline void path_rng_init(KernelGlobals *kg, ccl_global uint *rng_state, int sample, int num_samples, RNG *rng, int x, int y, float *fx, float *fy)
+ccl_device_inline void path_rng_init(KernelGlobals *kg, ccl_global uint *rng_state, int sample, int num_samples, ccl_addr_space RNG *rng, int x, int y, float *fx, float *fy)
 {
 #ifdef __SOBOL_FULL_SCREEN__
 	uint px, py;
@@ -193,7 +191,7 @@ ccl_device void path_rng_end(KernelGlobals *kg, ccl_global uint *rng_state, RNG 
 
 /* Linear Congruential Generator */
 
-ccl_device_inline float path_rng_1D(KernelGlobals *kg, RNG& rng, int sample, int num_samples, int dimension)
+ccl_device_forceinline float path_rng_1D(KernelGlobals *kg, RNG& rng, int sample, int num_samples, int dimension)
 {
 	/* implicit mod 2^32 */
 	rng = (1103515245*(rng) + 12345);
@@ -261,12 +259,12 @@ ccl_device uint lcg_init(uint seed)
  * For branches in the path we must be careful not to reuse the same number
  * in a sequence and offset accordingly. */
 
-ccl_device_inline float path_state_rng_1D(KernelGlobals *kg, RNG *rng, const PathState *state, int dimension)
+ccl_device_inline float path_state_rng_1D(KernelGlobals *kg, ccl_addr_space RNG *rng, const ccl_addr_space PathState *state, int dimension)
 {
 	return path_rng_1D(kg, rng, state->sample, state->num_samples, state->rng_offset + dimension);
 }
 
-ccl_device_inline float path_state_rng_1D_for_decision(KernelGlobals *kg, RNG *rng, const PathState *state, int dimension)
+ccl_device_inline float path_state_rng_1D_for_decision(KernelGlobals *kg, ccl_addr_space RNG *rng, const ccl_addr_space PathState *state, int dimension)
 {
 	/* the rng_offset is not increased for transparent bounces. if we do then
 	 * fully transparent objects can become subtly visible by the different
@@ -279,25 +277,42 @@ ccl_device_inline float path_state_rng_1D_for_decision(KernelGlobals *kg, RNG *r
 	return path_rng_1D(kg, rng, state->sample, state->num_samples, rng_offset + dimension);
 }
 
-ccl_device_inline void path_state_rng_2D(KernelGlobals *kg, RNG *rng, const PathState *state, int dimension, float *fx, float *fy)
+ccl_device_inline void path_state_rng_2D(KernelGlobals *kg, ccl_addr_space RNG *rng, const ccl_addr_space PathState *state, int dimension, float *fx, float *fy)
 {
 	path_rng_2D(kg, rng, state->sample, state->num_samples, state->rng_offset + dimension, fx, fy);
 }
 
-ccl_device_inline float path_branched_rng_1D(KernelGlobals *kg, RNG *rng, const PathState *state, int branch, int num_branches, int dimension)
+ccl_device_inline float path_branched_rng_1D(KernelGlobals *kg, ccl_addr_space RNG *rng, const PathState *state, int branch, int num_branches, int dimension)
 {
 	return path_rng_1D(kg, rng, state->sample*num_branches + branch, state->num_samples*num_branches, state->rng_offset + dimension);
 }
 
-ccl_device_inline float path_branched_rng_1D_for_decision(KernelGlobals *kg, RNG *rng, const PathState *state, int branch, int num_branches, int dimension)
+ccl_device_inline float path_branched_rng_1D_for_decision(KernelGlobals *kg, ccl_addr_space RNG *rng, const PathState *state, int branch, int num_branches, int dimension)
 {
 	int rng_offset = state->rng_offset + state->transparent_bounce*PRNG_BOUNCE_NUM;
 	return path_rng_1D(kg, rng, state->sample*num_branches + branch, state->num_samples*num_branches, rng_offset + dimension);
 }
 
-ccl_device_inline void path_branched_rng_2D(KernelGlobals *kg, RNG *rng, const PathState *state, int branch, int num_branches, int dimension, float *fx, float *fy)
+ccl_device_inline void path_branched_rng_2D(KernelGlobals *kg, ccl_addr_space RNG *rng, const PathState *state, int branch, int num_branches, int dimension, float *fx, float *fy)
 {
 	path_rng_2D(kg, rng, state->sample*num_branches + branch, state->num_samples*num_branches, state->rng_offset + dimension, fx, fy);
+}
+
+/* Utitility functions to get light termination value, since it might not be needed in many cases. */
+ccl_device_inline float path_state_rng_light_termination(KernelGlobals *kg, ccl_addr_space RNG *rng, const ccl_addr_space PathState *state)
+{
+	if(kernel_data.integrator.light_inv_rr_threshold > 0.0f) {
+		return path_state_rng_1D_for_decision(kg, rng, state, PRNG_LIGHT_TERMINATE);
+	}
+	return 0.0f;
+}
+
+ccl_device_inline float path_branched_rng_light_termination(KernelGlobals *kg, ccl_addr_space RNG *rng, const PathState *state, int branch, int num_branches)
+{
+	if(kernel_data.integrator.light_inv_rr_threshold > 0.0f) {
+		return path_branched_rng_1D_for_decision(kg, rng, state, branch, num_branches, PRNG_LIGHT_TERMINATE);
+	}
+	return 0.0f;
 }
 
 ccl_device_inline void path_state_branch(PathState *state, int branch, int num_branches)
@@ -312,6 +327,22 @@ ccl_device_inline void path_state_branch(PathState *state, int branch, int num_b
 ccl_device_inline uint lcg_state_init(RNG *rng, const PathState *state, uint scramble)
 {
 	return lcg_init(*rng + state->rng_offset + state->sample*scramble);
+}
+
+/* TODO(sergey): For until we can use generic address space from OpenCL 2.0. */
+
+ccl_device_inline uint lcg_state_init_addrspace(ccl_addr_space RNG *rng,
+                                                const ccl_addr_space PathState *state,
+                                                uint scramble)
+{
+	return lcg_init(*rng + state->rng_offset + state->sample*scramble);
+}
+
+ccl_device float lcg_step_float_addrspace(ccl_addr_space uint *rng)
+{
+	/* implicit mod 2^32 */
+	*rng = (1103515245*(*rng) + 12345);
+	return (float)*rng * (1.0f/(float)0xFFFFFFFF);
 }
 
 CCL_NAMESPACE_END

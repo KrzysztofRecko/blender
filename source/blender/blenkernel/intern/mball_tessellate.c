@@ -41,8 +41,8 @@
 #include "DNA_scene_types.h"
 
 #include "BLI_listbase.h"
-#include "BLI_path_util.h"
 #include "BLI_math.h"
+#include "BLI_string_utils.h"
 #include "BLI_utildefines.h"
 #include "BLI_memarena.h"
 #include "BLI_task.h"
@@ -56,9 +56,9 @@
 
 #include "BLI_strict_flags.h"
 
-//#define MB_ACCUM_NORMAL
-//#define MB_LINEAR_CONVERGE
-//#define MB_PRECOMPUTE
+/* experimental (faster) normal calculation */
+// #define USE_ACCUM_NORMAL
+// #define MB_LINEAR_CONVERGE
 
 /* Data types */
 
@@ -283,6 +283,29 @@ static void build_bvh_spatial(
 		INIT_MINMAX(node->bb[1].min, node->bb[1].max);
 	}
 }
+		}
+
+		node->child[0] = BLI_memarena_alloc(process->pgn_elements, sizeof(MetaballBVHNode));
+		build_bvh_spatial(process, node->child[0], start, part, &node->bb[0]);
+	}
+
+	node->child[1] = NULL;
+	if (part < end) {
+		make_box_from_metaelem(&node->bb[1], process->mainb[part]);
+
+		if (part < end - 1) {
+			for (j = part; j < end; j++) {
+				make_box_union(process->mainb[j]->bb, &node->bb[1], &node->bb[1]);
+			}
+
+			node->child[1] = BLI_memarena_alloc(process->pgn_elements, sizeof(MetaballBVHNode));
+			build_bvh_spatial(process, node->child[1], part, end, &node->bb[1]);
+		}
+	}
+	else {
+		INIT_MINMAX(node->bb[1].min, node->bb[1].max);
+	}
+}
 
 /* ******************** ARITH ************************* */
 
@@ -445,13 +468,9 @@ static void make_face(CHUNK *chunk, int i1, int i2, int i3, int i4)
 	cur[0] = i1;
 	cur[1] = i2;
 	cur[2] = i3;
-
 	if (i4 == -1) cur[3] = i3;
 	else          cur[3] = i4;
-}
-
 static void freechunk(CHUNK *chunk)
-{
 	if (chunk->corners)        MEM_freeN(chunk->corners);
 	if (chunk->centers)        MEM_freeN(chunk->centers);
 	if (chunk->edges)          MEM_freeN(chunk->edges);
@@ -477,8 +496,14 @@ static void freeprocess(PROCESS *process)
 		for (i = 0; i < process->num_chunks; i++)
 			if (process->chunks[i]) freechunk(process->chunks[i]);
 		MEM_freeN(process->chunks);
+	else {
+		normal_quad_v3(n, process->co[i1], process->co[i2], process->co[i3], process->co[i4]);
+		accumulate_vertex_normals(
+		        process->no[i1], process->no[i2], process->no[i3], process->no[i4], n,
+		        process->co[i1], process->co[i2], process->co[i3], process->co[i4]);
 	}
-	
+#endif
+
 	if (process->num_chunks > 1) { /* These are shared if there is only 1 chunk. */
 		if (process->mainb)        MEM_freeN(process->mainb);
 		if (process->pgn_elements) BLI_memarena_free(process->pgn_elements);
@@ -587,7 +612,6 @@ static void docube(CHUNK *chunk, CUBE *cube)
 		}
 	}
 }
-
 /**
  * return corner with the given lattice location
  * set (and cache) its function value
@@ -611,6 +635,7 @@ static CORNER *setcorner(CHUNK *chunk, const int i, const int j, const int k)
 	c->lat[0] = i;
 	c->lat[1] = j;
 	c->lat[2] = k;
+	c->value = metaball(process, c->co[0], c->co[1], c->co[2]);
 
 	c->co[0] = ((float)i - 0.5f) * chunk->process->size;
 	c->co[1] = ((float)j - 0.5f) * chunk->process->size;
@@ -624,10 +649,9 @@ static CORNER *setcorner(CHUNK *chunk, const int i, const int j, const int k)
 
 	c->next = chunk->corners[index];
 	chunk->corners[index] = c;
-
+ */
 	return c;
 }
-
 /**
  * return next clockwise edge from given edge around given face
  */
@@ -794,6 +818,7 @@ static unsigned int addtovertices(CHUNK *chunk, bool is_common)
 			chunk->process->totvertex += 4096;
 			chunk->process->co = MEM_reallocN(chunk->process->co, chunk->process->totvertex * sizeof(float[3]));
 			chunk->process->no = MEM_reallocN(chunk->process->no, chunk->process->totvertex * sizeof(float[3]));
+
 		}
 
 		return chunk->process->curvertex++;
@@ -818,7 +843,7 @@ static void copytovertices(CHUNK *chunk, const float co[3], const float no[3], c
 	else {
 		copy_v3_v3(chunk->co[vid], co);
 		copy_v3_v3(chunk->no[vid], no);
-	}
+	copy_v3_v3(process->no[process->curvertex], no);
 }
 
 /**
@@ -860,20 +885,29 @@ static void vnormal(CHUNK *chunk, const float point[3], float r_no[3])
 	}
 #endif
 }
+#endif  /* USE_ACCUM_NORMAL */
 
 static void orient_edge(int a[3], int b[3])
+ *
+ * If it wasn't previously computed, does #converge() and adds vertex to process.
+ */
+static int vertid(PROCESS *process, const CORNER *c1, const CORNER *c2)
 {
 	if (a[0] > b[0] || a[1] > b[1] || a[2] > b[2]) {
 		SWAP(int, a[0], b[0]);
 		SWAP(int, a[1], b[1]);
 		SWAP(int, a[2], b[2]);
-	}
+	vnormal(process, v, no);
+#endif
+
+	addtovertices(process, v, no);            /* save vertex */
+	vid = (int)process->curvertex - 1;
+	setedge(process, c1->i, c1->j, c1->k, c2->i, c2->j, c2->k, vid);
 }
 static bool equal_v3_v3_int(const int a[3], const int b[3])
 {
 	return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
 }
-
 static bool is_boundary_edge(CHUNK *chunk, const int one[3], const int two[3])
 {
 	if (one[0] == chunk->min_lat[0]     && two[0] == chunk->min_lat[0])     return true;
@@ -884,12 +918,10 @@ static bool is_boundary_edge(CHUNK *chunk, const int one[3], const int two[3])
 	if (one[2] == chunk->max_lat[2] + 1 && two[2] == chunk->max_lat[2] + 1) return true;
 	return false;
 }
-
 static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, unsigned int *r_vid, bool *r_is_common)
 {
 	int one[3], two[3], index;
 	EDGELIST *q, **table;
-
 	copy_v3_v3_int(one, c1->lat);
 	copy_v3_v3_int(two, c2->lat);
 	orient_edge(one, two);
@@ -903,8 +935,14 @@ static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, unsigned i
 		BLI_mutex_lock(&chunk->process->edge_lock);
 	}
 	else table = chunk->edges;
+			copy_v3_v3(c2_co, r_p);
+
+	tmp = -c1_value / (c2_value - c1_value);
+	interp_v3_v3v3(r_p, c1_co, c2_co, tmp);
 
 	q = table[index];
+ */
+static void add_cube(PROCESS *process, int i, int j, int k)
 
 	for (; q != NULL; q = q->next) {
 		if (equal_v3_v3_int(one, q->a) && equal_v3_v3_int(two, q->b)) {
@@ -917,21 +955,17 @@ static bool setedge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, unsigned i
 	}
 
 	*r_vid = addtovertices(chunk, *r_is_common);
-
 	if (*r_is_common) q = BLI_memarena_alloc(chunk->process->pgn_elements, sizeof(EDGELIST));
 	else              q = BLI_memarena_alloc(chunk->mem, sizeof(EDGELIST));
-
 	copy_v3_v3_int(q->a, one);
 	copy_v3_v3_int(q->b, two);
 	q->vid = (int)*r_vid;
 	q->next = table[index];
 	table[index] = q;
-
 	if (*r_is_common) BLI_mutex_unlock(&chunk->process->edge_lock);
-
 	return false;
 }
-
+static void prev_lattice(int r[3], const float pos[3], const float size)
 /**
  * \return the id of vertex between two corners.
  *
@@ -952,10 +986,14 @@ static int vertid(CHUNK *chunk, const CORNER *c1, const CORNER *c2)
 	vnormal(chunk, v, no); /* normal */
 
 	copytovertices(chunk, v, no, vid, is_common);
+	prev_lattice(lbn, ml->bb->vec[0], process->size);
+	next_lattice(rtf, ml->bb->vec[6], process->size);
 
 	if (is_common) return -(int)vid - 2;
 	else return (int)vid;
 }
+					continue;
+				}
 
 /**
  * Given two corners, computes approximation of surface intersection point between them.
@@ -1002,6 +1040,12 @@ static void converge(CHUNK *chunk, const CORNER *c1, const CORNER *c2, float r_p
 }
 
 static void next_lattice(int r[3], const float pos[3], const float size)
+ * The main polygonization proc.
+ * Allocates memory, makes cubetable,
+ * finds starting surface points
+ * and processes cubes on the stack until none left.
+ */
+static void polygonize(PROCESS *process)
 {
 	r[0] = (int)ceil((pos[0] / size) + 0.5f);
 	r[1] = (int)ceil((pos[1] / size) + 0.5f);
@@ -1020,6 +1064,10 @@ static void closest_latice(int r[3], const float pos[3], const float size)
 }
 
 static void draw_cube(CHUNK *chunk, int i, int j, int k)
+ * Iterates over ALL objects in the scene and all of its sets, including
+ * making all duplis(not only metas). Copies metas to mainb array.
+ * Computes bounding boxes for building BVH. */
+static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scene, Object *ob)
 {
 	PROCESS *process = chunk->process;
 
@@ -1037,7 +1085,6 @@ static void draw_cube(CHUNK *chunk, int i, int j, int k)
 	v[2][0] = ((float)i - 0.5f) * process->size;
 	v[2][1] = ((float)(j + 1) - 0.5f) * process->size;
 	v[2][2] = ((float)k - 0.5f) * process->size;
-
 	v[3][0] = ((float)i - 0.5f) * process->size;
 	v[3][1] = ((float)j - 0.5f) * process->size;
 	v[3][2] = ((float)(k + 1) - 0.5f) * process->size;
@@ -1074,6 +1121,14 @@ static void draw_cube(CHUNK *chunk, int i, int j, int k)
 static void draw_box(PROCESS *process, Box *box)
 {
 	if (!box) return;
+						float tempmin[3], tempmax[3];
+						/* make a copy because of duplicates */
+						new_ml = BLI_memarena_alloc(process->pgn_elements, sizeof(MetaElem));
+						*(new_ml) = *ml;
+						new_ml->bb = BLI_memarena_alloc(process->pgn_elements, sizeof(BoundBox));
+						new_ml->mat = BLI_memarena_alloc(process->pgn_elements, 4 * 4 * sizeof(float));
+						new_ml->imat = BLI_memarena_alloc(process->pgn_elements, 4 * 4 * sizeof(float));
+						else new_ml->s = ml->s;
 
 	float n[3] = { 0.0f, 0.0f, 0.0f };
 	float v[8][3];
@@ -1081,15 +1136,12 @@ static void draw_box(PROCESS *process, Box *box)
 	v[0][0] = box->min[0];
 	v[0][1] = box->min[1];
 	v[0][2] = box->min[2];
-
 	v[1][0] = box->max[0];
 	v[1][1] = box->min[1];
 	v[1][2] = box->min[2];
-
 	v[2][0] = box->min[0];
 	v[2][1] = box->max[1];
 	v[2][2] = box->min[2];
-
 	v[3][0] = box->min[0];
 	v[3][1] = box->min[1];
 	v[3][2] = box->max[2];
@@ -1101,6 +1153,7 @@ static void draw_box(PROCESS *process, Box *box)
 	v[5][0] = box->min[0];
 	v[5][1] = box->max[1];
 	v[5][2] = box->max[2];
+						invert_m4_m4((float(*)[4])new_ml->imat, (float(*)[4])new_ml->mat);
 
 	v[6][0] = box->max[0];
 	v[6][1] = box->min[1];
@@ -1109,6 +1162,7 @@ static void draw_box(PROCESS *process, Box *box)
 	v[7][0] = box->max[0];
 	v[7][1] = box->max[1];
 	v[7][2] = box->max[2];
+						expz = ml->rad;
 
 	for (int i = 0; i < 8; i++) {
 		vids[i] = addtovertices(process);
@@ -1121,6 +1175,11 @@ static void draw_box(PROCESS *process, Box *box)
 	make_face(process, vids[1], vids[4], vids[7], vids[6]);
 	make_face(process, vids[2], vids[5], vids[7], vids[4]);
 	make_face(process, vids[3], vids[6], vids[7], vids[5]);
+							case MB_ELIPSOID: /* ellipsoid is "stretched" by exp* */
+								expx *= ml->expx;
+								expy *= ml->expy;
+								expz *= ml->expz;
+								break;
 }
 
 #endif // 0
@@ -1134,18 +1193,15 @@ static void enqueue_cube(CHUNK *chunk, int i, int j, int k)
 		chunk->process->cubes_left_to_process = true;
 
 		BLI_mutex_lock(&chunk->cube_queue_lock);
-
 		newc = BLI_memarena_alloc(chunk->cube_queue_mem, sizeof(CENTERLIST));
 		newc->lat[0] = i;
 		newc->lat[1] = j;
 		newc->lat[2] = k;
 		newc->next = chunk->cube_queue;
 		chunk->cube_queue = newc;
-
 		BLI_mutex_unlock(&chunk->cube_queue_lock);
 	}
 }
-
 /**
  * Adds cube at given lattice position to cube stack of process.
  */
@@ -1177,56 +1233,42 @@ static void add_cube(CHUNK *chunk, int i, int j, int k)
 				ncube->cube.corners[n] = setcorner(chunk, i + MB_BIT(n, 2), j + MB_BIT(n, 1), k + MB_BIT(n, 0));
 			}
 		}
-	}
-}
-
 static void do_queued_cubes(TaskPool *UNUSED(pool), void *data, int UNUSED(threadid))
-{
 	CHUNK *chunk = (CHUNK*)data;
 	CUBE c;
 
 	while (chunk->cube_queue != NULL) {
 		add_cube(chunk, UNPACK3(chunk->cube_queue->lat));
 		chunk->cube_queue = chunk->cube_queue->next;
-	}
 
 	while (chunk->cubes != NULL) {
 		c = chunk->cubes->cube;
 		chunk->cubes = chunk->cubes->next;
 
 		docube(chunk, &c);
-	}
-}
-
 #define INSIDE(a, lbn, rtf)	(a[0] >= lbn[0] && a[1] >= lbn[1] && a[2] >= lbn[2] && \
                              a[0] <= rtf[0] && a[1] <= rtf[1] && a[2] <= rtf[2])
 
 /**
  * Find at most 26 cubes to start polygonization from.
- */
 static void find_first_points(CHUNK *chunk, const unsigned int em)
-{
 	const MLSmall *ml;
 	int center[3], lbn[3], rtf[3], it[3], dir[3], add[3];
 	float tmp[3], a, b;
 
 	ml = chunk->mainb[em];
-
 	mid_v3_v3v3(tmp, ml->bb->min, ml->bb->max);
 	closest_latice(center, tmp, chunk->process->size);
 	next_lattice(lbn, ml->bb->min, chunk->process->size);
 	prev_lattice(rtf, ml->bb->max, chunk->process->size);
 
 	if (!INSIDE(center, chunk->min_lat, chunk->max_lat)) return;
-
 	DO_MIN(chunk->max_lat, rtf);
 	DO_MAX(chunk->min_lat, lbn);
-
 	for (dir[0] = -1; dir[0] <= 1; dir[0]++)
 		for (dir[1] = -1; dir[1] <= 1; dir[1]++)
 			for (dir[2] = -1; dir[2] <= 1; dir[2]++) {
 				if (dir[0] == 0 && dir[1] == 0 && dir[2] == 0) continue;
-
 				copy_v3_v3_int(it, center);
 
 				b = setcorner(chunk, it[0], it[1], it[2])->value;
@@ -1234,7 +1276,6 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 					VECADD(it, it, dir);
 					a = b;
 					b = setcorner(chunk, it[0], it[1], it[2])->value;
-
 					if (a * b < 0.0f) {
 						VECSUB(add, it, dir);
 						DO_MIN(it, add);
@@ -1244,27 +1285,23 @@ static void find_first_points(CHUNK *chunk, const unsigned int em)
 				} while (INSIDE(it, lbn, rtf));
 			}
 }
-
 static void precompute(CHUNK *chunk, const unsigned int em)
 {
 	CORNER *c;
 	int index, it[3], lbn[3], rtf[3];
 	const MLSmall *ml = chunk->mainb[em];
 	bool make;
-
 	next_lattice(lbn, ml->bb->min, chunk->process->size);
 	next_lattice(rtf, ml->bb->max, chunk->process->size);
 
 	DO_MIN(chunk->max_lat, rtf);
 	DO_MAX(chunk->min_lat, lbn);
-
 	for (it[0] = lbn[0]; it[0] < rtf[0]; it[0]++)
 		for (it[1] = lbn[1]; it[1] < rtf[1]; it[1]++)
 			for (it[2] = lbn[2]; it[2] < rtf[2]; it[2]++) {
 				make = true;
 				index = HASH(it[0], it[1], it[2]);
 				c = chunk->corners[index];
-
 				for (; c != NULL; c = c->next) {
 					if (equal_v3_v3_int(it, c->lat)) {
 						c->value -= densfunc(ml, UNPACK3(c->co));
@@ -1276,7 +1313,6 @@ static void precompute(CHUNK *chunk, const unsigned int em)
 					c = BLI_memarena_alloc(chunk->mem, sizeof(CORNER));
 
 					VECCOPY(c->lat, it);
-
 					c->co[0] = ((float)it[0] - 0.5f) * chunk->process->size;
 					c->co[1] = ((float)it[1] - 0.5f) * chunk->process->size;
 					c->co[2] = ((float)it[2] - 0.5f) * chunk->process->size;
@@ -1288,7 +1324,6 @@ static void precompute(CHUNK *chunk, const unsigned int em)
 				}
 			}
 }
-
 static void init_chunk_bb(CHUNK *chunk)
 {
 	unsigned int i;
@@ -1304,10 +1339,8 @@ static void init_chunk_bb(CHUNK *chunk)
 		chunk->bb.min[i] = process->allbb.min[i] + step[i] * (float)chunk->lat_pos[i];
 		chunk->bb.max[i] = process->allbb.min[i] + step[i] * (float)(chunk->lat_pos[i] + 1);
 	}
-
 	prev_lattice(chunk->max_lat, chunk->bb.max, process->size);
 	next_lattice(chunk->min_lat, chunk->bb.min, process->size);
-
 	for (i = 0; i < 3; i++) {
 		if (chunk->lat_pos[i] == 0) chunk->min_lat[i]--;
 		chunk->bb.max[i] = ((float)chunk->max_lat[i] + 0.5f) * process->size + process->delta * 2.0f;
@@ -1353,7 +1386,6 @@ static void init_chunk(TaskPool *UNUSED(pool), void *data, int UNUSED(threadid))
 	Box allbb;
 	CHUNK *chunk = (CHUNK *)data;
 	PROCESS *process = chunk->process;
-
 	init_chunk_bb(chunk);
 	set_chunk_neighbors(chunk);
 
@@ -1378,17 +1410,13 @@ static void init_chunk(TaskPool *UNUSED(pool), void *data, int UNUSED(threadid))
 		chunk->mem = process->pgn_elements;
 		chunk->elem = process->totelem;
 	}
-
 	if (chunk->elem > 0) {
 		copy_v3_v3(allbb.min, chunk->mainb[0]->bb->min);
 		copy_v3_v3(allbb.max, chunk->mainb[0]->bb->max);
 
 		for (i = 1; i < chunk->elem; i++) {
 			make_union(chunk->mainb[i]->bb, &allbb, &allbb);
-		}
-
 		build_bvh_spatial(chunk, &chunk->bvh, 0, chunk->elem, &allbb);
-
 		chunk->centers = MEM_callocN(HASHSIZE * sizeof(CENTERLIST *), "mbproc->centers");
 		chunk->corners = MEM_callocN(HASHSIZE * sizeof(CORNER *), "mbproc->corners");
 		chunk->edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
@@ -1401,13 +1429,11 @@ static void init_chunk(TaskPool *UNUSED(pool), void *data, int UNUSED(threadid))
 			precompute(chunk, i);
 		}
 #endif
-
 		for (i = 0; i < chunk->elem; i++) {
 			find_first_points(chunk, i);
 		}
 	}
 }
-
 /**
  * The main polygonization proc.
  * Initializes process, mutexes, makes cubetable
@@ -1418,7 +1444,6 @@ static void polygonize(PROCESS *process)
 	unsigned int i;
 	TaskScheduler *task_scheduler = BLI_task_scheduler_get();
 	TaskPool *task_pool;
-
 	process->chunks = MEM_callocN(sizeof(CHUNK *) * process->num_chunks, "mbproc->chunks");
 	process->common_edges = MEM_callocN(2 * HASHSIZE * sizeof(EDGELIST *), "mbproc->edges");
 	BLI_mutex_init(&process->edge_lock);
@@ -1429,7 +1454,6 @@ static void polygonize(PROCESS *process)
 		process->chunks[i]->index = (int)i;
 		process->chunks[i]->process = process;
 		BLI_mutex_init(&process->chunks[i]->cube_queue_lock);
-	}
 	
 	task_pool = BLI_task_pool_create(task_scheduler, process);
 
@@ -1445,26 +1469,22 @@ static void polygonize(PROCESS *process)
 		}
 		BLI_task_pool_work_and_wait(task_pool);
 	}
-
 	BLI_task_pool_free(task_pool);
-}
+						}
 
 static DispList* make_displist(PROCESS *process)
-{
+						copy_v3_v3(new_ml->bb->vec[6], tempmax);
 	unsigned int i, j, k;
 	DispList *dl;
-
 	dl = MEM_callocN(sizeof(DispList), "mballdisp");
 	dl->type = DL_INDEX4;
 	dl->nr = (int)process->curvertex;
-
 	/* count vertices from all chunks */
 	for (i = 0; i < process->num_chunks; i++) {
 		process->chunks[i]->vertex_offset = (unsigned int)dl->nr;
 		dl->nr += (int)process->chunks[i]->curvertex;
 		dl->parts += (int)process->chunks[i]->curindex;
 	}
-
 	/* copy vertex coordinates - first common, and then from chunks */
 	dl->verts = MEM_callocN(sizeof(float[3]) * (size_t)dl->nr, "verts");
 	for (i = 0; i < process->curvertex; i++) {
@@ -1475,7 +1495,6 @@ static DispList* make_displist(PROCESS *process)
 			copy_v3_v3(&dl->verts[k * 3], process->chunks[i]->co[j]);
 		}
 	}
-
 	/* copy indices */
 	dl->index = MEM_callocN(sizeof(int[4]) * (size_t)dl->parts, "indices");
 	for (i = 0, k = 0; i < process->num_chunks; i++) {
@@ -1510,7 +1529,7 @@ static DispList* make_displist(PROCESS *process)
 	for (i = 0; i < process->curvertex; i++) {
 		normalize_v3(process->no[i]);
 		copy_v3_v3(&dl->nors[i * 3], process->no[i]);
-	}
+					}
 	for (i = 0; i < process->num_chunks; i++) {
 		for (j = 0, k = process->chunks[i]->vertex_offset; j < process->chunks[i]->curvertex; j++, k++) {
 			normalize_v3(process->chunks[i]->no[j]);
@@ -1518,18 +1537,13 @@ static DispList* make_displist(PROCESS *process)
 		}
 	}
 #endif
-
 	return dl;
-}
-
+				}
 /**
  * Iterates over ALL objects in the scene and all of its sets, including
  * making all duplis(not only metas). Copies metas to mainb array.
  * Computes bounding boxes for building BVH. */
 static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scene, Object *ob)
-{
-	Scene *sce_iter = scene;
-	Base *base;
 	Object *bob;
 	MetaBall *mb;
 	const MetaElem *ml;
@@ -1537,15 +1551,11 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 	unsigned int i;
 	int obnr, zero_size = 0;
 	char obname[MAX_ID_NAME];
-	SceneBaseIter iter;
-
 	copy_m4_m4(obmat, ob->obmat);   /* to cope with duplicators from BKE_scene_base_iter_next */
 	invert_m4_m4(obinv, ob->obmat);
 
 	BLI_split_name_num(obname, &obnr, ob->id.name + 2, '.');
-
 	/* make main array */
-	BKE_scene_base_iter_next(eval_ctx, &iter, &sce_iter, 0, NULL, NULL);
 	while (BKE_scene_base_iter_next(eval_ctx, &iter, &sce_iter, 1, &base, &bob)) {
 		if (bob->type == OB_MBALL) {
 			zero_size = 0;
@@ -1553,22 +1563,14 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 
 			if (bob == ob && (base->flag & OB_FROMDUPLI) == 0) {
 				mb = ob->data;
-
-				if (mb->editelems) ml = mb->editelems->first;
-				else ml = mb->elems.first;
 			}
-			else {
 				char name[MAX_ID_NAME];
 				int nr;
-
 				BLI_split_name_num(name, &nr, bob->id.name + 2, '.');
 				if (STREQ(obname, name)) {
 					mb = bob->data;
-
-					if (mb->editelems) ml = mb->editelems->first;
-					else ml = mb->elems.first;
-				}
-			}
+		}
+	}
 
 			/* when metaball object has zero scale, then MetaElem to this MetaBall
 			 * will not be put to mainb array */
@@ -1613,10 +1615,8 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 						* no need to have possibility for too big stiffness */
 						if (ml->s > 10.0f) new_ml->s = 10.0f;
 						else new_ml->s = ml->s;
-
 						/* if metaball is negative, set stiffness negative */
 						if (ml->flag & MB_NEGATIVE) new_ml->s = -new_ml->s;
-
 						/* Translation of MetaElem */
 						unit_m4(pos);
 						pos[3][0] = ml->x;
@@ -1630,15 +1630,12 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 						mul_m4_series(mat, obinv, bob->obmat, pos, rot);
 						/* ml local space -> basis object space */
 						invert_m4_m4(new_ml->imat, mat);
-
 						/* rad2 is inverse of squared radius */
 						new_ml->rad2 = 1 / (ml->rad * ml->rad);
-
 						/* initial dimensions = radius */
 						expx = ml->rad;
 						expy = ml->rad;
 						expz = ml->rad;
-
 						switch (ml->type) {
 							case MB_BALL:
 								break;
@@ -1657,7 +1654,6 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 								expz *= ml->expz;
 								break;
 						}
-
 						/* untransformed Bounding Box of MetaElem */
 						/* TODO, its possible the elem type has been changed and the exp* values can use a fallback */
 						copy_v3_fl3(bb.vec[0], -expx, -expy, -expz);  /* 0 */
@@ -1737,12 +1733,17 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 		if ((G.moving & (G_TRANSFORM_OBJ | G_TRANSFORM_EDIT)) && mb->flag == MB_UPDATE_HALFRES) {
 			process.size *= 2.0f;
 		}
-	}
 
 	process.delta = process.size * 0.001f;
+		if (ob->size[0] > 0.00001f * (process.allbb.max[0] - process.allbb.min[0]) ||
+		    ob->size[1] > 0.00001f * (process.allbb.max[1] - process.allbb.min[1]) ||
+		    ob->size[2] > 0.00001f * (process.allbb.max[2] - process.allbb.min[2]))
+		{
+			polygonize(&process);
 
 	process.pgn_elements = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaball memarena");
 	process.metaballs = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, "Metaballs memarena");
+				dl = MEM_callocN(sizeof(DispList), "mballdisp");
 
 	/* initialize all mainb (MetaElems) */
 	init_meta(eval_ctx, &process, scene, ob);

@@ -150,6 +150,11 @@ template<> struct device_type_traits<float4> {
 	static const int num_elements = 4;
 };
 
+template<> struct device_type_traits<half> {
+	static const DataType data_type = TYPE_HALF;
+	static const int num_elements = 1;
+};
+
 template<> struct device_type_traits<half4> {
 	static const DataType data_type = TYPE_HALF;
 	static const int num_elements = 4;
@@ -175,10 +180,27 @@ public:
 	/* device pointer */
 	device_ptr device_pointer;
 
-protected:
-	device_memory() {}
+	device_memory()
+	{
+		data_type = device_type_traits<uchar>::data_type;
+		data_elements = device_type_traits<uchar>::num_elements;
+		data_pointer = 0;
+		data_size = 0;
+		device_size = 0;
+		data_width = 0;
+		data_height = 0;
+		data_depth = 0;
+		device_pointer = 0;
+	}
 	virtual ~device_memory() { assert(!device_pointer); }
 
+	void resize(size_t size)
+	{
+		data_size = size;
+		data_width = size;
+	}
+
+protected:
 	/* no copying */
 	device_memory(const device_memory&);
 	device_memory& operator = (const device_memory&);
@@ -193,16 +215,8 @@ public:
 	{
 		data_type = device_type_traits<T>::data_type;
 		data_elements = device_type_traits<T>::num_elements;
-		data_pointer = 0;
-		data_size = 0;
-		device_size = 0;
-		data_width = 0;
-		data_height = 0;
-		data_depth = 0;
 
 		assert(data_elements > 0);
-
-		device_pointer = 0;
 	}
 
 	virtual ~device_vector() {}
@@ -211,19 +225,27 @@ public:
 	T *resize(size_t width, size_t height = 0, size_t depth = 0)
 	{
 		data_size = width * ((height == 0)? 1: height) * ((depth == 0)? 1: depth);
-		data.resize(data_size);
-		data_pointer = (device_ptr)&data[0];
+		if(data.resize(data_size) == NULL) {
+			clear();
+			return NULL;
+		}
 		data_width = width;
 		data_height = height;
 		data_depth = depth;
-
+		if(data_size == 0) {
+			data_pointer = 0;
+			return NULL;
+		}
+		data_pointer = (device_ptr)&data[0];
 		return &data[0];
 	}
 
 	T *copy(T *ptr, size_t width, size_t height = 0, size_t depth = 0)
 	{
 		T *mem = resize(width, height, depth);
-		memcpy(mem, ptr, memory_size());
+		if(mem != NULL) {
+			memcpy(mem, ptr, memory_size());
+		}
 		return mem;
 	}
 
@@ -253,6 +275,7 @@ public:
 		data_height = 0;
 		data_depth = 0;
 		data_size = 0;
+		device_pointer = 0;
 	}
 
 	size_t size()

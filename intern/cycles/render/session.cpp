@@ -20,13 +20,17 @@
 #include "buffers.h"
 #include "camera.h"
 #include "device.h"
+#include "graph.h"
 #include "integrator.h"
+#include "mesh.h"
+#include "object.h"
 #include "scene.h"
 #include "session.h"
 #include "bake.h"
 
 #include "util_foreach.h"
 #include "util_function.h"
+#include "util_logging.h"
 #include "util_math.h"
 #include "util_opengl.h"
 #include "util_task.h"
@@ -63,10 +67,7 @@ Session::Session(const SessionParams& params_)
 	session_thread = NULL;
 	scene = NULL;
 
-	start_time = 0.0;
 	reset_time = 0.0;
-	preview_time = 0.0;
-	paused_time = 0.0;
 	last_update_time = 0.0;
 
 	delayed_reset.do_reset = false;
@@ -77,6 +78,9 @@ Session::Session(const SessionParams& params_)
 	gpu_need_tonemap = false;
 	pause = false;
 	kernels_loaded = false;
+
+	/* TODO(sergey): Check if it's indeed optimal value for the split kernel. */
+	max_closure_global = 1;
 }
 
 Session::~Session()
@@ -194,12 +198,10 @@ void Session::run_gpu()
 {
 	bool tiles_written = false;
 
-	start_time = time_dt();
 	reset_time = time_dt();
-	paused_time = 0.0;
 	last_update_time = time_dt();
 
-	progress.set_render_start_time(start_time + paused_time);
+	progress.set_render_start_time();
 
 	while(!progress.get_cancel()) {
 		/* advance to next tile */
@@ -226,13 +228,11 @@ void Session::run_gpu()
 				update_status_time(pause, no_tiles);
 
 				while(1) {
-					double pause_start = time_dt();
+					scoped_timer pause_timer;
 					pause_cond.wait(pause_lock);
-					paused_time += time_dt() - pause_start;
-
-					if(!params.background)
-						progress.set_start_time(start_time + paused_time);
-					progress.set_render_start_time(start_time + paused_time);
+					if(pause) {
+						progress.add_skip_time(pause_timer, params.background);
+					}
 
 					update_status_time(pause, no_tiles);
 					progress.set_update();
@@ -248,7 +248,9 @@ void Session::run_gpu()
 
 		if(!no_tiles) {
 			/* update scene */
+			scoped_timer update_timer;
 			update_scene();
+			progress.add_skip_time(update_timer, params.background);
 
 			if(!device->error_message().empty())
 				progress.set_error(device->error_message());
@@ -405,6 +407,11 @@ bool Session::acquire_tile(Device *tile_device, RenderTile& rtile)
 		if(tile_buffers.size() == 0)
 			tile_buffers.resize(tile_manager.state.num_tiles, NULL);
 
+		/* In certain circumstances number of tiles in the tile manager could
+		 * be changed. This is not supported by the progressive refine feature.
+		 */
+		assert(tile_buffers.size() == tile_manager.state.num_tiles);
+
 		tilebuffers = tile_buffers[tile.index];
 		if(tilebuffers == NULL) {
 			tilebuffers = new RenderBuffers(tile_device);
@@ -452,6 +459,8 @@ void Session::update_tile_sample(RenderTile& rtile)
 void Session::release_tile(RenderTile& rtile)
 {
 	thread_scoped_lock tile_lock(tile_mutex);
+
+	progress.add_finished_tile();
 
 	if(write_render_tile_cb) {
 		if(params.progressive_refine == false) {
@@ -511,13 +520,11 @@ void Session::run_cpu()
 				update_status_time(pause, no_tiles);
 
 				while(1) {
-					double pause_start = time_dt();
+					scoped_timer pause_timer;
 					pause_cond.wait(pause_lock);
-					paused_time += time_dt() - pause_start;
-
-					if(!params.background)
-						progress.set_start_time(start_time + paused_time);
-					progress.set_render_start_time(start_time + paused_time);
+					if(pause) {
+						progress.add_skip_time(pause_timer, params.background);
+					}
 
 					update_status_time(pause, no_tiles);
 					progress.set_update();
@@ -538,7 +545,9 @@ void Session::run_cpu()
 			thread_scoped_lock buffers_lock(buffers_mutex);
 
 			/* update scene */
+			scoped_timer update_timer;
 			update_scene();
+			progress.add_skip_time(update_timer, params.background);
 
 			if(!device->error_message().empty())
 				progress.set_error(device->error_message());
@@ -593,6 +602,51 @@ void Session::run_cpu()
 		update_progressive_refine(true);
 }
 
+DeviceRequestedFeatures Session::get_requested_device_features()
+{
+	/* TODO(sergey): Consider moving this to the Scene level. */
+	DeviceRequestedFeatures requested_features;
+	requested_features.experimental = params.experimental;
+
+	requested_features.max_closure = get_max_closure_count();
+	scene->shader_manager->get_requested_features(
+	        scene,
+	        &requested_features);
+	if(!params.background) {
+		/* Avoid too much re-compilations for viewport render. */
+		requested_features.max_closure = 64;
+		requested_features.max_nodes_group = NODE_GROUP_LEVEL_MAX;
+		requested_features.nodes_features = NODE_FEATURE_ALL;
+	}
+
+	/* This features are not being tweaked as often as shaders,
+	 * so could be done selective magic for the viewport as well.
+	 */
+	requested_features.use_hair = false;
+	requested_features.use_object_motion = false;
+	requested_features.use_camera_motion = scene->camera->use_motion;
+	foreach(Object *object, scene->objects) {
+		Mesh *mesh = object->mesh;
+		if(mesh->num_curves()) {
+			requested_features.use_hair = true;
+		}
+		requested_features.use_object_motion |= object->use_motion | mesh->use_motion_blur;
+		requested_features.use_camera_motion |= mesh->use_motion_blur;
+#ifdef WITH_OPENSUBDIV
+		if(mesh->subdivision_type != Mesh::SUBDIVISION_NONE) {
+			requested_features.use_patch_evaluation = true;
+		}
+#endif
+	}
+
+	BakeManager *bake_manager = scene->bake_manager;
+	requested_features.use_baking = bake_manager->get_baking();
+	requested_features.use_integrator_branched = (scene->integrator->method == Integrator::BRANCHED_PATH);
+	requested_features.use_transparent &= scene->integrator->transparent_shadows;
+
+	return requested_features;
+}
+
 void Session::load_kernels()
 {
 	thread_scoped_lock scene_lock(scene->mutex);
@@ -600,7 +654,11 @@ void Session::load_kernels()
 	if(!kernels_loaded) {
 		progress.set_status("Loading render kernels (may take a few minutes the first time)");
 
-		if(!device->load_kernels(params.experimental)) {
+		scoped_timer timer;
+
+		DeviceRequestedFeatures requested_features = get_requested_device_features();
+		VLOG(2) << "Requested features:\n" << requested_features;
+		if(!device->load_kernels(requested_features)) {
 			string message = device->error_message();
 			if(message.empty())
 				message = "Failed loading render kernel, see console for errors";
@@ -610,6 +668,9 @@ void Session::load_kernels()
 			progress.set_update();
 			return;
 		}
+
+		progress.add_skip_time(timer, false);
+		VLOG(1) << "Total time spent loading kernels: " << time_dt() - timer.get_start();
 
 		kernels_loaded = true;
 	}
@@ -660,14 +721,14 @@ void Session::reset_(BufferParams& buffer_params, int samples)
 	}
 
 	tile_manager.reset(buffer_params, samples);
+	progress.reset_sample();
 
-	start_time = time_dt();
-	preview_time = 0.0;
-	paused_time = 0.0;
+	bool show_progress = params.background || tile_manager.get_num_effective_samples() != INT_MAX;
+	progress.set_total_pixel_samples(show_progress? tile_manager.state.total_pixel_samples : 0);
 
 	if(!params.background)
-		progress.set_start_time(start_time);
-	progress.set_render_start_time(start_time);
+		progress.set_start_time();
+	progress.set_render_start_time();
 }
 
 void Session::reset(BufferParams& buffer_params, int samples)
@@ -763,52 +824,46 @@ void Session::update_scene()
 	/* update scene */
 	if(scene->need_update()) {
 		progress.set_status("Updating Scene");
-		scene->device_update(device, progress);
+		MEM_GUARDED_CALL(&progress, scene->device_update, device, progress);
 	}
 }
 
 void Session::update_status_time(bool show_pause, bool show_done)
 {
-	int sample = tile_manager.state.sample;
-	int resolution = tile_manager.state.resolution_divider;
-	int num_tiles = tile_manager.state.num_tiles;
+	int progressive_sample = tile_manager.state.sample;
+	int num_samples = tile_manager.get_num_effective_samples();
+
 	int tile = tile_manager.state.num_rendered_tiles;
+	int num_tiles = tile_manager.state.num_tiles;
 
 	/* update status */
 	string status, substatus;
 
 	if(!params.progressive) {
-		bool is_gpu = params.device.type == DEVICE_CUDA || params.device.type == DEVICE_OPENCL;
-		bool is_multidevice = params.device.multi_devices.size() > 1;
-		bool is_cpu = params.device.type == DEVICE_CPU;
+		const bool is_cpu = params.device.type == DEVICE_CPU;
+		const bool is_last_tile = (progress.get_finished_tiles() + 1) == num_tiles;
 
 		substatus = string_printf("Path Tracing Tile %d/%d", tile, num_tiles);
 
-		if((is_gpu && !is_multidevice) || (is_cpu && num_tiles == 1)) {
-			/* when rendering on GPU multithreading happens within single tile, as in
-			 * tiles are handling sequentially and in this case we could display
-			 * currently rendering sample number
-			 * this helps a lot from feedback point of view.
-			 * also display the info on CPU, when using 1 tile only
+		if(device->show_samples() || (is_cpu && is_last_tile)) {
+			/* Some devices automatically support showing the sample number:
+			 * - CUDADevice
+			 * - OpenCLDevice when using the megakernel (the split kernel renders multiple
+			 *   samples at the same time, so the current sample isn't really defined)
+			 * - CPUDevice when using one thread
+			 * For these devices, the current sample is always shown.
+			 *
+			 * The other option is when the last tile is currently being rendered by the CPU.
 			 */
-
-			int sample = progress.get_sample(), num_samples = tile_manager.num_samples;
-
-			if(tile > 1) {
-				/* sample counter is global for all tiles, subtract samples
-				 * from already finished tiles to get sample counter for
-				 * current tile only
-				 */
-				sample -= (tile - 1) * num_samples;
-			}
-
-			substatus += string_printf(", Sample %d/%d", sample, num_samples);
+			substatus += string_printf(", Sample %d/%d", progress.get_current_sample(), num_samples);
 		}
 	}
-	else if(tile_manager.num_samples == USHRT_MAX)
-		substatus = string_printf("Path Tracing Sample %d", sample+1);
+	else if(tile_manager.num_samples == INT_MAX)
+		substatus = string_printf("Path Tracing Sample %d", progressive_sample+1);
 	else
-		substatus = string_printf("Path Tracing Sample %d/%d", sample+1, tile_manager.num_samples);
+		substatus = string_printf("Path Tracing Sample %d/%d",
+		                          progressive_sample+1,
+		                          num_samples);
 	
 	if(show_pause) {
 		status = "Paused";
@@ -822,22 +877,6 @@ void Session::update_status_time(bool show_pause, bool show_done)
 	}
 
 	progress.set_status(status, substatus);
-
-	/* update timing */
-	if(preview_time == 0.0 && resolution == 1)
-		preview_time = time_dt();
-	
-	double tile_time = (tile == 0 || sample == 0)? 0.0: (time_dt() - preview_time - paused_time) / sample;
-
-	/* negative can happen when we pause a bit before rendering, can discard that */
-	if(preview_time < 0.0) preview_time = 0.0;
-
-	progress.set_tile(tile, tile_time);
-}
-
-void Session::update_progress_sample()
-{
-	progress.increment_sample();
 }
 
 void Session::path_trace()
@@ -849,9 +888,11 @@ void Session::path_trace()
 	task.release_tile = function_bind(&Session::release_tile, this, _1);
 	task.get_cancel = function_bind(&Progress::get_cancel, &this->progress);
 	task.update_tile_sample = function_bind(&Session::update_tile_sample, this, _1);
-	task.update_progress_sample = function_bind(&Session::update_progress_sample, this);
+	task.update_progress_sample = function_bind(&Progress::add_samples, &this->progress, _1, _2);
 	task.need_finish_queue = params.progressive_refine;
 	task.integrator_branched = scene->integrator->method == Integrator::BRANCHED_PATH;
+	task.requested_tile_size = params.tile_size;
+	task.passes_size = tile_manager.params.get_passes_size();
 
 	device->task_add(task);
 }
@@ -891,7 +932,7 @@ bool Session::update_progressive_refine(bool cancel)
 
 	if(current_time - last_update_time < params.progressive_update_timeout) {
 		/* if last sample was processed, we need to write buffers anyway  */
-		if(!write)
+		if(!write && sample != 1)
 			return false;
 	}
 
@@ -901,10 +942,14 @@ bool Session::update_progressive_refine(bool cancel)
 			rtile.buffers = buffers;
 			rtile.sample = sample;
 
-			if(write)
-				write_render_tile_cb(rtile);
-			else
-				update_render_tile_cb(rtile);
+			if(write) {
+				if(write_render_tile_cb)
+					write_render_tile_cb(rtile);
+			}
+			else {
+				if(update_render_tile_cb)
+					update_render_tile_cb(rtile);
+			}
 		}
 	}
 
@@ -925,6 +970,17 @@ void Session::device_free()
 	/* used from background render only, so no need to
 	 * re-create render/display buffers here
 	 */
+}
+
+int Session::get_max_closure_count()
+{
+	int max_closures = 0;
+	for(int i = 0; i < scene->shaders.size(); i++) {
+		int num_closures = scene->shaders[i]->graph->get_num_closures();
+		max_closures = max(max_closures, num_closures);
+	}
+	max_closure_global = max(max_closure_global, max_closures);
+	return max_closure_global;
 }
 
 CCL_NAMESPACE_END

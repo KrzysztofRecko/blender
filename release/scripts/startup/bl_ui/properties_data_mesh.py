@@ -38,6 +38,7 @@ class MESH_MT_vertex_group_specials(Menu):
         layout.operator("object.vertex_group_mirror", text="Mirror Vertex Group (Topology)", icon='ARROW_LEFTRIGHT').use_topology = True
         layout.operator("object.vertex_group_remove_from", icon='X', text="Remove from All Groups").use_all_groups = True
         layout.operator("object.vertex_group_remove_from", icon='X', text="Clear Active Group").use_all_verts = True
+        layout.operator("object.vertex_group_remove", icon='X', text="Delete All Unlocked Groups").all_unlocked = True
         layout.operator("object.vertex_group_remove", icon='X', text="Delete All Groups").all = True
         layout.separator()
         layout.operator("object.vertex_group_lock", icon='LOCKED', text="Lock All").action = 'LOCK'
@@ -70,7 +71,7 @@ class MESH_UL_vgroups(UIList):
             layout.prop(vgroup, "name", text="", emboss=False, icon_value=icon)
             icon = 'LOCKED' if vgroup.lock_weight else 'UNLOCKED'
             layout.prop(vgroup, "lock_weight", text="", icon=icon, emboss=False)
-        elif self.layout_type in {'GRID'}:
+        elif self.layout_type == 'GRID':
             layout.alignment = 'CENTER'
             layout.label(text="", icon_value=icon)
 
@@ -94,7 +95,7 @@ class MESH_UL_shape_keys(UIList):
             else:
                 row.label(text="")
             row.prop(key_block, "mute", text="", emboss=False)
-        elif self.layout_type in {'GRID'}:
+        elif self.layout_type == 'GRID':
             layout.alignment = 'CENTER'
             layout.label(text="", icon_value=icon)
 
@@ -106,7 +107,7 @@ class MESH_UL_uvmaps_vcols(UIList):
             layout.prop(item, "name", text="", emboss=False, icon_value=icon)
             icon = 'RESTRICT_RENDER_OFF' if item.active_render else 'RESTRICT_RENDER_ON'
             layout.prop(item, "active_render", text="", icon=icon, emboss=False)
-        elif self.layout_type in {'GRID'}:
+        elif self.layout_type == 'GRID':
             layout.alignment = 'CENTER'
             layout.label(text="", icon_value=icon)
 
@@ -369,8 +370,8 @@ class DATA_PT_customdata(MeshButtonsPanel, Panel):
         me = context.mesh
         col = layout.column()
 
-        col.operator("mesh.customdata_clear_mask", icon='X')
-        col.operator("mesh.customdata_clear_skin", icon='X')
+        col.operator("mesh.customdata_mask_clear", icon='X')
+        col.operator("mesh.customdata_skin_clear", icon='X')
 
         if me.has_custom_normals:
             col.operator("mesh.customdata_custom_splitnormals_clear", icon='X')

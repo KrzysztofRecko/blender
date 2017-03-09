@@ -40,7 +40,7 @@
 
 #include <stddef.h>
 
-#include "ListValue.h"
+#include "EXP_ListValue.h"
 #include "SCA_IObject.h"
 #include "SG_Node.h"
 #include "MT_Transform.h"
@@ -67,7 +67,7 @@ struct bAction;
 
 #ifdef WITH_PYTHON
 /* utility conversion function */
-bool ConvertPythonToGameObject(PyObject *value, KX_GameObject **object, bool py_none_ok, const char *error_prefix);
+bool ConvertPythonToGameObject(SCA_LogicManager *logicmgr, PyObject *value, KX_GameObject **object, bool py_none_ok, const char *error_prefix);
 #endif
 
 #ifdef USE_MATHUTILS
@@ -100,8 +100,8 @@ protected:
 	MT_Vector4							m_objectColor;
 
 	// Bit fields for user control over physics collisions
-	short								m_userCollisionGroup;
-	short								m_userCollisionMask;
+	unsigned short						m_userCollisionGroup;
+	unsigned short						m_userCollisionMask;
 
 	// visible = user setting
 	// culled = while rendering, depending on camera
@@ -111,9 +111,6 @@ protected:
 
 	PHY_IPhysicsController*				m_pPhysicsController;
 	PHY_IGraphicController*				m_pGraphicController;
-	STR_String							m_testPropName;
-	bool								m_xray;
-	KX_GameObject*						m_pHitObject;
 
 	SG_Node*							m_pSGNode;
 
@@ -131,8 +128,17 @@ protected:
 	BL_ActionManager* GetActionManager();
 	
 	bool								m_bRecordAnimation;
+
 public:
 	bool								m_isDeformable;
+
+	/**
+	 * KX_GameObject custom infos for ray cast, it contains property name,
+	 * collision mask, xray flag and hited object.
+	 * This structure is created during ray cast and passed as argument 
+	 * "data" to functions KX_GameObject::NeedRayCast and KX_GameObject::RayHit.
+	 */
+	struct RayCastData;
 
 	/**
 	 * Helper function for modules that can't include KX_ClientObjectInfo.h
@@ -169,7 +175,7 @@ public:
 	 * side effect of storing the result internally. The
 	 * memory for the matrix remains the property of this class.
 	 */ 
-		double *
+		float *
 	GetOpenGLMatrix(
 	);
 
@@ -277,6 +283,11 @@ public:
 	float GetActionFrame(short layer);
 
 	/**
+	 * Gets the name of the current action
+	 */
+	const char *GetActionName(short layer);
+
+	/**
 	 * Sets the current frame of an action
 	 */
 	void SetActionFrame(short layer, float frame);
@@ -302,6 +313,11 @@ public:
 	void StopAction(short layer);
 
 	/**
+	 * Remove playing tagged actions.
+	 */
+	void RemoveTaggedActions();
+
+	/**
 	 * Check if an action has finished playing
 	 */
 	bool IsActionDone(short layer);
@@ -310,12 +326,6 @@ public:
 	 * Kick the object's action manager
 	 */
 	void UpdateActionManager(float curtime);
-
-	/**
-	 * Have the action manager update IPOs
-	 * note: not thread-safe!
-	 */
-	void UpdateActionIPOs();
 
 	/*********************************
 	 * End Animation API
@@ -517,8 +527,17 @@ public:
 	 */
 	void ActivateGraphicController(bool recurse);
 
-	void SetUserCollisionGroup(short filter);
-	void SetUserCollisionMask(short mask);
+	/** Set the object's collison group
+	 * \param filter The group bitfield
+	 */
+	void SetUserCollisionGroup(unsigned short filter);
+
+	/** Set the object's collison mask
+	 * \param filter The mask bitfield
+	 */
+	void SetUserCollisionMask(unsigned short mask);
+	unsigned short GetUserCollisionGroup();
+	unsigned short GetUserCollisionMask();
 	/**
 	 * Extra broadphase check for user controllable collisions
 	 */
@@ -642,8 +661,10 @@ public:
 		return (m_pSGNode && m_pSGNode->GetSGParent() && m_pSGNode->GetSGParent()->IsVertexParent());
 	}
 
-	bool RayHit(KX_ClientObjectInfo* client, KX_RayCast* result, void * const data);
-	bool NeedRayCast(KX_ClientObjectInfo* client);
+	/// \see KX_RayCast
+	bool RayHit(KX_ClientObjectInfo *client, KX_RayCast *result, RayCastData *rayData);
+	/// \see KX_RayCast
+	bool NeedRayCast(KX_ClientObjectInfo *client, RayCastData *rayData);
 
 
 	/**
@@ -905,7 +926,7 @@ public:
 	 * Change the layer of the object (when it is added in another layer
 	 * than the original layer)
 	 */
-		void
+	virtual void
 	SetLayer(
 		int l
 	);
@@ -996,7 +1017,7 @@ public:
 	KX_PYMETHOD_O(KX_GameObject,SetState);
 	KX_PYMETHOD_VARARGS(KX_GameObject,AlignAxisToVect);
 	KX_PYMETHOD_O(KX_GameObject,GetAxisVect);
-	KX_PYMETHOD_NOARGS(KX_GameObject,SuspendDynamics);
+	KX_PYMETHOD_VARARGS(KX_GameObject,SuspendDynamics);
 	KX_PYMETHOD_NOARGS(KX_GameObject,RestoreDynamics);
 	KX_PYMETHOD_NOARGS(KX_GameObject,EnableRigidBody);
 	KX_PYMETHOD_NOARGS(KX_GameObject,DisableRigidBody);
@@ -1023,6 +1044,7 @@ public:
 	KX_PYMETHOD_DOC(KX_GameObject, playAction);
 	KX_PYMETHOD_DOC(KX_GameObject, stopAction);
 	KX_PYMETHOD_DOC(KX_GameObject, getActionFrame);
+	KX_PYMETHOD_DOC(KX_GameObject, getActionName);
 	KX_PYMETHOD_DOC(KX_GameObject, setActionFrame);
 	KX_PYMETHOD_DOC(KX_GameObject, isPlayingAction);
 	
@@ -1045,6 +1067,10 @@ public:
 	static int			pyattr_set_lin_vel_min(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef, PyObject *value);
 	static PyObject*	pyattr_get_lin_vel_max(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef);
 	static int			pyattr_set_lin_vel_max(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef, PyObject *value);
+	static PyObject*	pyattr_get_ang_vel_min(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef);
+	static int			pyattr_set_ang_vel_min(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef, PyObject *value);
+	static PyObject*	pyattr_get_ang_vel_max(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef);
+	static int			pyattr_set_ang_vel_max(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef, PyObject *value);
 	static PyObject*	pyattr_get_visible(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef);
 	static int			pyattr_set_visible(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef, PyObject *value);
 	static PyObject*	pyattr_get_record_animation(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef);
@@ -1087,6 +1113,10 @@ public:
 	static int			pyattr_set_obcolor(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef, PyObject *value);
 	static PyObject*	pyattr_get_collisionCallbacks(void *selv_v, const KX_PYATTRIBUTE_DEF *attrdef);
 	static int			pyattr_set_collisionCallbacks(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef, PyObject *value);
+	static PyObject*	pyattr_get_collisionGroup(void *selv_v, const KX_PYATTRIBUTE_DEF *attrdef);
+	static int			pyattr_set_collisionGroup(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef, PyObject *value);
+	static PyObject*	pyattr_get_collisionMask(void *selv_v, const KX_PYATTRIBUTE_DEF *attrdef);
+	static int			pyattr_set_collisionMask(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef, PyObject *value);
 	static PyObject*	pyattr_get_debug(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef);
 	static int			pyattr_set_debug(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef, PyObject *value);
 	static PyObject*	pyattr_get_debugRecursive(void *self_v, const KX_PYATTRIBUTE_DEF *attrdef);

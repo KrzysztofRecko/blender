@@ -23,6 +23,7 @@
 #include "COM_RenderLayersProg.h"
 
 #include "BLI_listbase.h"
+#include "BKE_scene.h"
 #include "DNA_scene_types.h"
 
 extern "C" {
@@ -57,11 +58,10 @@ void RenderLayersBaseProg::initExecution()
 		if (srl) {
 
 			RenderLayer *rl = RE_GetRenderLayer(rr, srl->name);
-			if (rl && rl->rectf) {
-				this->m_inputBuffer = RE_RenderLayerGetPass(rl, this->m_renderpass);
-
+			if (rl) {
+				this->m_inputBuffer = RE_RenderLayerGetPass(rl, this->m_renderpass, this->m_viewName);
 				if (this->m_inputBuffer == NULL && this->m_renderpass == SCE_PASS_COMBINED) {
-					this->m_inputBuffer = rl->rectf;
+					this->m_inputBuffer = RE_RenderLayerGetPass(rl, SCE_PASS_COMBINED, this->m_viewName);
 				}
 			}
 		}
@@ -77,21 +77,19 @@ void RenderLayersBaseProg::doInterpolation(float output[4], float x, float y, Pi
 	unsigned int offset;
 	int width = this->getWidth(), height = this->getHeight();
 
+	int ix = x, iy = y;
+	if (ix < 0 || iy < 0 || ix >= width || iy >= height) {
+		if (this->m_elementsize == 1)
+			output[0] = 0.0f;
+		else if (this->m_elementsize == 3)
+			zero_v3(output);
+		else
+			zero_v4(output);
+		return;
+	}
+
 	switch (sampler) {
 		case COM_PS_NEAREST: {
-			int ix = x;
-			int iy = y;
-			if (ix < 0 || iy < 0 || ix >= width || iy >= height) {
-				if (this->m_elementsize == 1)
-					output[0] = 0.0f;
-				else if (this->m_elementsize == 3)
-					zero_v3(output);
-				else
-					zero_v4(output);
-				break;
-				
-			}
-
 			offset = (iy * width + ix) * this->m_elementsize;
 
 			if (this->m_elementsize == 1)
@@ -150,6 +148,7 @@ void RenderLayersBaseProg::executePixelSampled(float output[4], float x, float y
 			expected_element_size = 4;
 		}
 		else {
+			expected_element_size = 0;
 			BLI_assert(!"Something horribly wrong just happened");
 		}
 		BLI_assert(expected_element_size == actual_element_size);
@@ -195,7 +194,7 @@ void RenderLayersBaseProg::determineResolution(unsigned int resolution[2], unsig
 		SceneRenderLayer *srl   = (SceneRenderLayer *)BLI_findlink(&sce->r.layers, getLayerId());
 		if (srl) {
 			RenderLayer *rl = RE_GetRenderLayer(rr, srl->name);
-			if (rl && rl->rectf) {
+			if (rl) {
 				resolution[0] = rl->rectx;
 				resolution[1] = rl->recty;
 			}
@@ -276,7 +275,7 @@ void RenderLayersDepthProg::executePixelSampled(float output[4], float x, float 
 	float *inputBuffer = this->getInputBuffer();
 
 	if (inputBuffer == NULL || ix < 0 || iy < 0 || ix >= (int)this->getWidth() || iy >= (int)this->getHeight() ) {
-		output[0] = 0.0f;
+		output[0] = 10e10f;
 	}
 	else {
 		unsigned int offset = (iy * this->getWidth() + ix);
@@ -388,3 +387,29 @@ RenderLayersUVOperation::RenderLayersUVOperation() : RenderLayersBaseProg(SCE_PA
 {
 	this->addOutputSocket(COM_DT_VECTOR);
 }
+
+/* ******** Debug Render Layers Cycles Operation ******** */
+
+#ifdef WITH_CYCLES_DEBUG
+
+RenderLayersCyclesDebugOperation::RenderLayersCyclesDebugOperation(
+        int pass,
+        int debug_pass_type)
+	: RenderLayersBaseProg(pass, RE_debug_pass_num_channels_get(debug_pass_type))
+{
+	switch (m_elementsize) {
+		case 1:
+			this->addOutputSocket(COM_DT_VALUE);
+			break;
+		case 3:
+			this->addOutputSocket(COM_DT_VECTOR);
+			break;
+		case 4:
+			this->addOutputSocket(COM_DT_COLOR);
+			break;
+		default:
+			BLI_assert(!"Unkown debug pass type element size.");
+	}
+}
+
+#endif
