@@ -157,7 +157,7 @@ ModifierTypeInfo modifierType_QuadRemesh = {
 	/* foreachTexLink */    NULL,
 };
 
-#endif
+#else
 
 ModifierTypeInfo modifierType_QuadRemesh = {
 	/* name */              "QuadRemesh",
@@ -185,3 +185,5 @@ ModifierTypeInfo modifierType_QuadRemesh = {
 	/* foreachIDLink */     NULL,
 	/* foreachTexLink */    NULL,
 };
+
+#endif
