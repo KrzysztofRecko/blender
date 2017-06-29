@@ -847,6 +847,8 @@ void DepsgraphRelationBuilder::build_animdata(ID *id)
 		add_relation(time_src_key, adt_key, "[TimeSrc -> Animation]");
 
 		// XXX: Hook up specific update callbacks for special properties which may need it...
+		OperationKey parameters_key(id, DEG_NODE_TYPE_PARAMETERS, DEG_OPCODE_PLACEHOLDER, "Parameters Eval");
+		add_relation(adt_key, parameters_key, "[Animation -> Parameters]");
 
 		// XXX: animdata "hierarchy" - top-level overrides need to go after lower-down
 	}
@@ -1012,6 +1014,10 @@ void DepsgraphRelationBuilder::build_driver(ID *id, FCurve *fcu)
 	else if (strstr(rna_path, "key_blocks[")) {
 		ComponentKey geometry_key(id, DEG_NODE_TYPE_GEOMETRY);
 		add_relation(driver_key, geometry_key, "[Driver -> ShapeKey Geom]");
+	}
+	else if (GS(id->name) == ID_CU && strstr(rna_path, "eval_time")) {
+		OperationKey transform_key(id, DEG_NODE_TYPE_PARAMETERS, DEG_OPCODE_PLACEHOLDER, "Parameters Eval");
+		add_relation(driver_key, transform_key, "[Driver -> Curve Transform]");
 	}
 	else {
 		if (GS(id->name) == ID_OB) {
@@ -1440,6 +1446,14 @@ void DepsgraphRelationBuilder::build_obdata_geom(Main *bmain, Scene *scene, Obje
 	/* geometry collision */
 	if (ELEM(ob->type, OB_MESH, OB_CURVE, OB_LATTICE)) {
 		// add geometry collider relations
+	}
+
+	if (ob->type == OB_CURVE) {
+		OperationKey ob_final_transform_key(&ob->id,
+											DEG_NODE_TYPE_TRANSFORM,
+											DEG_OPCODE_TRANSFORM_FINAL);
+		OperationKey parameters_key(obdata, DEG_NODE_TYPE_PARAMETERS, DEG_OPCODE_PLACEHOLDER, "Parameters Eval");
+		add_relation(parameters_key, ob_final_transform_key, "[Curve Parameters -> Curve Transform]");
 	}
 
 	/* Make sure uber update is the last in the dependencies.
