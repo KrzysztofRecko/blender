@@ -2036,7 +2036,7 @@ static void dynamicPaint_frameUpdate(DynamicPaintModifierData *pmd, Scene *scene
 				else if (can_simulate) {
 					/* calculate surface frame */
 					canvas->flags |= MOD_DPAINT_BAKING;
-					dynamicPaint_calculateFrame(surface, scene, ob, current_frame);
+					dynamicPaint_calculateFrame(NULL, surface, scene, ob, current_frame);
 					canvas->flags &= ~MOD_DPAINT_BAKING;
 
 					/* restore canvas derivedmesh if required */
@@ -5758,7 +5758,7 @@ static int dynamicPaint_generateBakeData(DynamicPaintSurface *surface, const Sce
 /*
  * Do Dynamic Paint step. Paints scene brush objects of current state/frame to the surface.
  */
-static int dynamicPaint_doStep(Scene *scene, Object *ob, DynamicPaintSurface *surface, float timescale, float subframe)
+static int dynamicPaint_doStep(Main *bmain, Scene *scene, Object *ob, DynamicPaintSurface *surface, float timescale, float subframe)
 {
 	PaintSurfaceData *sData = surface->data;
 	PaintBakeData *bData = sData->bData;
@@ -5834,11 +5834,15 @@ static int dynamicPaint_doStep(Scene *scene, Object *ob, DynamicPaintSurface *su
 					}
 
 					/* update object data on this subframe */
-					if (subframe) {
+					//if (subframe) {
 						scene_setSubframe(scene, subframe);
-						BKE_object_modifier_update_subframe(scene, brushObj, true, SUBFRAME_RECURSION,
-						                                    BKE_scene_frame_get(scene), eModifierType_DynamicPaint);
-					}
+						if (bmain) {
+							//brushObj->recalc |= OB_RECALC_OB | OB_RECALC_DATA | OB_RECALC_TIME;
+							BKE_scene_update_for_newframe(bmain->eval_ctx, bmain, scene, 0xFFFFFFFF);
+							//BKE_object_modifier_update_subframe(scene, brushObj, true, SUBFRAME_RECURSION,
+							//									BKE_scene_frame_get(scene), eModifierType_DynamicPaint);
+						}
+					//}
 					/* Prepare materials if required	*/
 					if (brush_usesMaterial(brush, scene))
 						dynamicPaint_updateBrushMaterials(brushObj, brush->mat, scene, &bMats);
@@ -5931,7 +5935,7 @@ static int dynamicPaint_doStep(Scene *scene, Object *ob, DynamicPaintSurface *su
 /*
  * Calculate a single frame and included subframes for surface
  */
-int dynamicPaint_calculateFrame(DynamicPaintSurface *surface, Scene *scene, Object *cObject, int frame)
+int dynamicPaint_calculateFrame(Main *bmain, DynamicPaintSurface *surface, Scene *scene, Object *cObject, int frame)
 {
 	float timescale = 1.0f;
 
@@ -5949,10 +5953,10 @@ int dynamicPaint_calculateFrame(DynamicPaintSurface *surface, Scene *scene, Obje
 
 		for (st = 1; st <= surface->substeps; st++) {
 			float subframe = ((float) st) / (surface->substeps + 1);
-			if (!dynamicPaint_doStep(scene, cObject, surface, timescale, subframe))
+			if (!dynamicPaint_doStep(bmain, scene, cObject, surface, timescale, subframe))
 				return 0;
 		}
 	}
 
-	return dynamicPaint_doStep(scene, cObject, surface, timescale, 0.0f);
+	return dynamicPaint_doStep(bmain, scene, cObject, surface, timescale, 0.0f);
 }
