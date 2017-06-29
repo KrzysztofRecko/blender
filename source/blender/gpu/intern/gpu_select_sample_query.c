@@ -23,7 +23,7 @@
  * ***** END GPL LICENSE BLOCK *****
  */
 
-/** \file blender/gpu/intern/gpu_select.c
+/** \file blender/gpu/intern/gpu_select_sample_query.c
  *  \ingroup gpu
  *
  * Interface for accessing gpu-related methods for selection. The semantics will be
@@ -142,13 +142,17 @@ bool gpu_select_query_load_id(unsigned int id)
 	g_query_state.active_query++;
 	g_query_state.query_issued = true;
 
-	if (g_query_state.mode == GPU_SELECT_NEAREST_SECOND_PASS && g_query_state.index < g_query_state.oldhits) {
-		if (g_query_state.buffer[g_query_state.index][3] == id) {
-			g_query_state.index++;
-			return true;
-		}
-		else {
-			return false;
+	if (g_query_state.mode == GPU_SELECT_NEAREST_SECOND_PASS) {
+		/* Second pass should never run if first pass fails, can read past 'bufsize' in this case. */
+		BLI_assert(g_query_state.oldhits != -1);
+		if (g_query_state.index < g_query_state.oldhits) {
+			if (g_query_state.buffer[g_query_state.index][3] == id) {
+				g_query_state.index++;
+				return true;
+			}
+			else {
+				return false;
+			}
 		}
 	}
 

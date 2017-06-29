@@ -17,16 +17,16 @@
 #ifndef __KERNEL_SPLIT_DATA_H__
 #define __KERNEL_SPLIT_DATA_H__
 
-#include "kernel_split_data_types.h"
-#include "kernel_globals.h"
+#include "kernel/split/kernel_split_data_types.h"
+#include "kernel/kernel_globals.h"
 
 CCL_NAMESPACE_BEGIN
 
-ccl_device_inline size_t split_data_buffer_size(KernelGlobals *kg, size_t num_elements)
+ccl_device_inline uint64_t split_data_buffer_size(KernelGlobals *kg, size_t num_elements)
 {
 	(void)kg;  /* Unused on CPU. */
 
-	size_t size = 0;
+	uint64_t size = 0;
 #define SPLIT_DATA_ENTRY(type, name, num) + align_up(num_elements * num * sizeof(type), 16)
 	size = size SPLIT_DATA_ENTRIES;
 #undef SPLIT_DATA_ENTRY
@@ -46,7 +46,7 @@ ccl_device_inline void split_data_init(KernelGlobals *kg,
 
 #define SPLIT_DATA_ENTRY(type, name, num) \
 	split_data->name = (type*)p; p += align_up(num_elements * num * sizeof(type), 16);
-	SPLIT_DATA_ENTRIES
+	SPLIT_DATA_ENTRIES;
 #undef SPLIT_DATA_ENTRY
 
 	split_data->ray_state = ray_state;

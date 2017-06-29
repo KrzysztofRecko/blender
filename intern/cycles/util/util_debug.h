@@ -20,7 +20,7 @@
 #include <cassert>
 #include <iostream>
 
-#include "util_static_assert.h"
+#include "util/util_static_assert.h"
 
 CCL_NAMESPACE_BEGIN
 
@@ -112,6 +112,9 @@ public:
 
 		/* Use debug version of the kernel. */
 		bool debug;
+
+		/* Use single program */
+		bool single_program;
 	};
 
 	/* Get instance of debug flags registry. */
