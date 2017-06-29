@@ -847,8 +847,25 @@ void DepsgraphRelationBuilder::build_animdata(ID *id)
 		add_relation(time_src_key, adt_key, "[TimeSrc -> Animation]");
 
 		// XXX: Hook up specific update callbacks for special properties which may need it...
-		OperationKey parameters_key(id, DEG_NODE_TYPE_PARAMETERS, DEG_OPCODE_PLACEHOLDER, "Parameters Eval");
-		add_relation(adt_key, parameters_key, "[Animation -> Parameters]");
+		if (adt->action) {
+			LINKLIST_FOREACH (FCurve *, fcu, &adt->action->curves) {
+				RNAPathKey rna_key(id, fcu->rna_path ? fcu->rna_path : "");
+				add_relation(adt_key, rna_key, "[Animation -> Parameters]");
+			}
+		} else {
+			LINKLIST_FOREACH (NlaTrack *, trk, &adt->nla_tracks) {
+				LINKLIST_FOREACH (NlaStrip *, nla, &trk->strips) {
+					if (!nla->act)
+						continue;
+					LINKLIST_FOREACH(FCurve *, fcu, &nla->act->curves) {
+						RNAPathKey rna_key(id, fcu->rna_path ? fcu->rna_path : "");
+						add_relation(adt_key, rna_key, "[Animation -> Parameters]");
+					}
+				}
+			}
+		}
+		//OperationKey parameters_key(id, DEG_NODE_TYPE_PARAMETERS, DEG_OPCODE_PLACEHOLDER, "Parameters Eval");
+		//add_relation(adt_key, parameters_key, "[Animation -> Parameters]");
 
 		// XXX: animdata "hierarchy" - top-level overrides need to go after lower-down
 	}
@@ -1017,7 +1034,7 @@ void DepsgraphRelationBuilder::build_driver(ID *id, FCurve *fcu)
 	}
 	else if (GS(id->name) == ID_CU && strstr(rna_path, "eval_time")) {
 		OperationKey transform_key(id, DEG_NODE_TYPE_PARAMETERS, DEG_OPCODE_PLACEHOLDER, "Parameters Eval");
-		add_relation(driver_key, transform_key, "[Driver -> Curve Transform]");
+		//add_relation(driver_key, transform_key, "[Driver -> Curve Transform]");
 	}
 	else {
 		if (GS(id->name) == ID_OB) {
@@ -1453,7 +1470,7 @@ void DepsgraphRelationBuilder::build_obdata_geom(Main *bmain, Scene *scene, Obje
 											DEG_NODE_TYPE_TRANSFORM,
 											DEG_OPCODE_TRANSFORM_FINAL);
 		OperationKey parameters_key(obdata, DEG_NODE_TYPE_PARAMETERS, DEG_OPCODE_PLACEHOLDER, "Parameters Eval");
-		add_relation(parameters_key, ob_final_transform_key, "[Curve Parameters -> Curve Transform]");
+		//add_relation(parameters_key, ob_final_transform_key, "[Curve Parameters -> Curve Transform]");
 	}
 
 	/* Make sure uber update is the last in the dependencies.
