@@ -32,11 +32,11 @@
 
 #include "BKE_deform.h"
 
-#include "ONL_opennl.h"
 #include "MOD_util.h"
 
 #include "quadremesh_system.h"
 
+#if 0
 static void initLaplacianMatrix(InputMesh *im)
 {
 	float v1[3], v2[3], v3[3];
@@ -225,3 +225,5 @@ void getUField(QuadRemeshSystem *sys, MDeformVert *dvert, int defgrp_index)
 		}
 	}
 }
+
+#endif
