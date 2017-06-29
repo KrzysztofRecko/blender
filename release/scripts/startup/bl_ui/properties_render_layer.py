@@ -187,6 +187,7 @@ class RENDERLAYER_UL_renderviews(UIList):
 class RENDERLAYER_PT_views(RenderLayerButtonsPanel, Panel):
     bl_label = "Views"
     COMPAT_ENGINES = {'BLENDER_RENDER'}
+    bl_options = {'DEFAULT_CLOSED'}
 
     def draw_header(self, context):
         rd = context.scene.render
@@ -226,5 +227,16 @@ class RENDERLAYER_PT_views(RenderLayerButtonsPanel, Panel):
             row.prop(rv, "camera_suffix", text="")
 
 
+classes = (
+    RENDERLAYER_UL_renderlayers,
+    RENDERLAYER_PT_layers,
+    RENDERLAYER_PT_layer_options,
+    RENDERLAYER_PT_layer_passes,
+    RENDERLAYER_UL_renderviews,
+    RENDERLAYER_PT_views,
+)
+
 if __name__ == "__main__":  # only for live edit.
-    bpy.utils.register_module(__name__)
+    from bpy.utils import register_class
+    for cls in classes:
+        register_class(cls)

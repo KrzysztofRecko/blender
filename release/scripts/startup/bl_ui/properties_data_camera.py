@@ -79,7 +79,7 @@ class DATA_PT_lens(CameraButtonsPanel, Panel):
 
         cam = context.camera
 
-        layout.prop(cam, "type", expand=True)
+        layout.row().prop(cam, "type", expand=True)
 
         split = layout.split()
 
@@ -147,21 +147,38 @@ class DATA_PT_camera_stereoscopy(CameraButtonsPanel, Panel):
 
     def draw(self, context):
         layout = self.layout
-        # render = context.scene.render
+        render = context.scene.render
         st = context.camera.stereo
+        cam = context.camera
+
+        is_spherical_stereo = cam.type != 'ORTHO' and render.use_spherical_stereo
+        use_spherical_stereo = is_spherical_stereo and st.use_spherical_stereo
 
         col = layout.column()
         col.row().prop(st, "convergence_mode", expand=True)
 
-        if st.convergence_mode == 'PARALLEL':
-            col.prop(st, "viewport_convergence")
-        else:
-            col.prop(st, "convergence_distance")
+        sub = col.column()
+        sub.active = st.convergence_mode != 'PARALLEL'
+        sub.prop(st, "convergence_distance")
 
         col.prop(st, "interocular_distance")
 
+        if is_spherical_stereo:
+            col.separator()
+            row = col.row()
+            row.prop(st, "use_spherical_stereo")
+            sub = row.row()
+            sub.active = st.use_spherical_stereo
+            sub.prop(st, "use_pole_merge")
+            row = col.row(align=True)
+            row.active = st.use_pole_merge
+            row.prop(st, "pole_merge_angle_from")
+            row.prop(st, "pole_merge_angle_to")
+
         col.label(text="Pivot:")
-        col.row().prop(st, "pivot", expand=True)
+        row = col.row()
+        row.active = not use_spherical_stereo
+        row.prop(st, "pivot", expand=True)
 
 
 class DATA_PT_camera(CameraButtonsPanel, Panel):
@@ -308,5 +325,20 @@ def draw_display_safe_settings(layout, safe_data, settings):
     col.prop(safe_data, "action_center", slider=True)
 
 
+classes = (
+    CAMERA_MT_presets,
+    SAFE_AREAS_MT_presets,
+    DATA_PT_context_camera,
+    DATA_PT_lens,
+    DATA_PT_camera,
+    DATA_PT_camera_stereoscopy,
+    DATA_PT_camera_dof,
+    DATA_PT_camera_display,
+    DATA_PT_camera_safe_areas,
+    DATA_PT_custom_props_camera,
+)
+
 if __name__ == "__main__":  # only for live edit.
-    bpy.utils.register_module(__name__)
+    from bpy.utils import register_class
+    for cls in classes:
+        register_class(cls)

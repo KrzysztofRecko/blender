@@ -35,13 +35,15 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_blenlib.h"
-#include "BLI_math.h"
-#include "BLI_utildefines.h"
 #include "BLI_ghash.h"
+#include "BLI_math.h"
+#include "BLI_timecode.h"
+#include "BLI_utildefines.h"
 
-#include "BLF_translation.h"
+#include "BLT_translation.h"
 
 #include "DNA_scene_types.h"
+#include "DNA_sound_types.h"
 
 #include "BKE_context.h"
 #include "BKE_global.h"
@@ -59,6 +61,7 @@
 
 /* for menu/popup icons etc etc*/
 
+#include "ED_anim_api.h"
 #include "ED_numinput.h"
 #include "ED_screen.h"
 #include "ED_transform.h"
@@ -91,6 +94,7 @@ EnumPropertyItem sequencer_prop_effect_types[] = {
 	{SEQ_TYPE_MULTICAM, "MULTICAM", 0, "Multicam Selector", ""},
 	{SEQ_TYPE_ADJUSTMENT, "ADJUSTMENT", 0, "Adjustment Layer", ""},
 	{SEQ_TYPE_GAUSSIAN_BLUR, "GAUSSIAN_BLUR", 0, "Gaussian Blur", ""},
+	{SEQ_TYPE_TEXT, "TEXT", 0, "Text", ""},
 	{0, NULL, 0, NULL, NULL}
 };
 
@@ -558,7 +562,7 @@ int seq_effect_find_selected(Scene *scene, Sequence *activeseq, int type, Sequen
 			}
 			if (seq1 == NULL) seq1 = seq2;
 			if (seq3 == NULL) seq3 = seq2;
-			/* fall-through */
+			ATTR_FALLTHROUGH;
 		case 2:
 			if (seq1 == NULL || seq2 == NULL) {
 				*error_str = N_("2 selected sequence strips are needed");
@@ -682,6 +686,14 @@ static Sequence *cut_seq_hard(Scene *scene, Sequence *seq, int cutframe)
 	/* First Strip! */
 	/* strips with extended stillfames before */
 	
+	/* Precaution, needed because the length saved on-disk may not match the length saved in the blend file,
+	 * or our code may have minor differences reading file length between versions.
+	 * This causes hard-cut to fail, see: T47862 */
+	if (seq->type != SEQ_TYPE_META) {
+		BKE_sequence_reload_new_file(scene, seq, true);
+		BKE_sequence_calc(scene, seq);
+	}
+
 	if ((seq->startstill) && (cutframe < seq->start)) {
 		/* don't do funny things with METAs ... */
 		if (seq->type == SEQ_TYPE_META) {
@@ -900,6 +912,7 @@ static bool sequence_offset_after_frame(Scene *scene, const int delta, const int
 	Sequence *seq;
 	Editing *ed = BKE_sequencer_editing_get(scene, false);
 	bool done = false;
+	TimeMarker *marker;
 
 	/* all strips >= cfra are shifted */
 	
@@ -913,38 +926,15 @@ static bool sequence_offset_after_frame(Scene *scene, const int delta, const int
 		}
 	}
 
-	return done;
-}
-
-static void UNUSED_FUNCTION(touch_seq_files) (Scene *scene)
-{
-	Sequence *seq;
-	Editing *ed = BKE_sequencer_editing_get(scene, false);
-	char str[256];
-
-	/* touch all strips with movies */
-	
-	if (ed == NULL) return;
-
-	// XXX25 if (okee("Touch and print selected movies")==0) return;
-
-	WM_cursor_wait(1);
-
-	SEQP_BEGIN (ed, seq)
-	{
-		if (seq->flag & SELECT) {
-			if (seq->type == SEQ_TYPE_MOVIE) {
-				if (seq->strip && seq->strip->stripdata) {
-					BLI_make_file_string(G.main->name, str, seq->strip->dir, seq->strip->stripdata->name);
-					BLI_file_touch(seq->name);
-				}
+	if (!scene->toolsettings->lock_markers) {
+		for (marker = scene->markers.first; marker; marker = marker->next) {
+			if (marker->frame >= cfra) {
+				marker->frame += delta;
 			}
-
 		}
 	}
-	SEQ_END
 
-	WM_cursor_wait(0);
+	return done;
 }
 
 #if 0
@@ -1035,7 +1025,7 @@ static int sequencer_gap_remove_exec(bContext *C, wmOperator *op)
 			break;
 		}
 	}
-	
+
 	for ( ; cfra < efra; cfra++) {
 		/* first == 0 means there's still no strip to remove a gap for */
 		if (first == false) {
@@ -1194,6 +1184,7 @@ static int sequencer_snap_exec(bContext *C, wmOperator *op)
 					BKE_sequence_tx_set_final_right(seq, snap_frame);
 				}
 				BKE_sequence_tx_handle_xlimits(seq, seq->flag & SEQ_LEFTSEL, seq->flag & SEQ_RIGHTSEL);
+				BKE_sequence_single_fix(seq);
 			}
 			BKE_sequence_calc(scene, seq);
 		}
@@ -1515,23 +1506,20 @@ static int sequencer_slip_exec(bContext *C, wmOperator *op)
 
 static void sequencer_slip_update_header(Scene *scene, ScrArea *sa, SlipData *data, int offset)
 {
-#define HEADER_LENGTH 40
-	char msg[HEADER_LENGTH];
+	char msg[UI_MAX_DRAW_STR];
 
 	if (sa) {
 		if (hasNumInput(&data->num_input)) {
 			char num_str[NUM_STR_REP_LEN];
 			outputNumInput(&data->num_input, num_str, &scene->unit);
-			BLI_snprintf(msg, HEADER_LENGTH, "Trim offset: %s", num_str);
+			BLI_snprintf(msg, sizeof(msg), IFACE_("Trim offset: %s"), num_str);
 		}
 		else {
-			BLI_snprintf(msg, HEADER_LENGTH, "Trim offset: %d", offset);
+			BLI_snprintf(msg, sizeof(msg), IFACE_("Trim offset: %d"), offset);
 		}
 	}
 
 	ED_area_headerprint(sa, msg);
-
-#undef HEADER_LENGTH
 }
 
 static int sequencer_slip_modal(bContext *C, wmOperator *op, const wmEvent *event)
@@ -1915,6 +1903,14 @@ void SEQUENCER_OT_reload(struct wmOperatorType *ot)
 }
 
 /* reload operator */
+static int sequencer_refresh_all_poll(bContext *C)
+{
+	if (G.is_rendering) {
+		return 0;
+	}
+	return sequencer_edit_poll(C);
+}
+
 static int sequencer_refresh_all_exec(bContext *C, wmOperator *UNUSED(op))
 {
 	Scene *scene = CTX_data_scene(C);
@@ -1936,7 +1932,7 @@ void SEQUENCER_OT_refresh_all(struct wmOperatorType *ot)
 	
 	/* api callbacks */
 	ot->exec = sequencer_refresh_all_exec;
-	ot->poll = sequencer_edit_poll;
+	ot->poll = sequencer_refresh_all_poll;
 }
 
 static int sequencer_reassign_inputs_exec(bContext *C, wmOperator *op)
@@ -2198,7 +2194,7 @@ void SEQUENCER_OT_duplicate(wmOperatorType *ot)
 	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 	
 	/* to give to transform */
-	RNA_def_enum(ot->srna, "mode", transform_mode_types, TFM_TRANSLATION, "Mode", "");
+	RNA_def_enum(ot->srna, "mode", rna_enum_transform_mode_types, TFM_TRANSLATION, "Mode", "");
 }
 
 /* delete operator */
@@ -2366,7 +2362,7 @@ static int sequencer_separate_images_exec(bContext *C, wmOperator *op)
 			/* remove seq so overlap tests don't conflict,
 			 * see seq_free_sequence below for the real free'ing */
 			BLI_remlink(ed->seqbasep, seq);
-			/* if (seq->ipo) seq->ipo->id.us--; */
+			/* if (seq->ipo) id_us_min(&seq->ipo->id); */
 			/* XXX, remove fcurve and assign to split image strips */
 
 			start_ofs = cfra = BKE_sequence_tx_get_final_left(seq, false);
@@ -2436,7 +2432,7 @@ void SEQUENCER_OT_images_separate(wmOperatorType *ot)
 	
 	/* api callbacks */
 	ot->exec = sequencer_separate_images_exec;
-	ot->invoke = WM_operator_props_popup;
+	ot->invoke = WM_operator_props_popup_confirm;
 	ot->poll = sequencer_edit_poll;
 	
 	/* flags */
@@ -2496,6 +2492,7 @@ static int sequencer_meta_toggle_exec(bContext *C, wmOperator *UNUSED(op))
 #if 1
 		BKE_sequence_tx_set_final_left(ms->parseq, ms->disp_range[0]);
 		BKE_sequence_tx_set_final_right(ms->parseq, ms->disp_range[1]);
+		BKE_sequence_single_fix(ms->parseq);
 		BKE_sequence_calc(scene, ms->parseq);
 #else
 		if (BKE_sequence_test_overlap(ed->seqbasep, ms->parseq))
@@ -2696,6 +2693,29 @@ void SEQUENCER_OT_view_all(wmOperatorType *ot)
 	
 	/* flags */
 	ot->flag = OPTYPE_REGISTER;
+}
+
+static int sequencer_view_frame_exec(bContext *C, wmOperator *op)
+{
+	const int smooth_viewtx = WM_operator_smooth_viewtx_get(op);
+	ANIM_center_frame(C, smooth_viewtx);
+	
+	return OPERATOR_FINISHED;
+}
+
+void SEQUENCER_OT_view_frame(wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "View Frame";
+	ot->idname = "SEQUENCER_OT_view_frame";
+	ot->description = "Reset viewable area to show range around current frame";
+	
+	/* api callbacks */
+	ot->exec = sequencer_view_frame_exec;
+	ot->poll = ED_operator_sequencer_active;
+	
+	/* flags */
+	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
 /* view_all operator */
@@ -3332,6 +3352,9 @@ static int sequencer_swap_data_exec(bContext *C, wmOperator *op)
 	if (seq_act->sound) BKE_sound_add_scene_sound_defaults(scene, seq_act);
 	if (seq_other->sound) BKE_sound_add_scene_sound_defaults(scene, seq_other);
 
+	BKE_sequence_invalidate_cache(scene, seq_act);
+	BKE_sequence_invalidate_cache(scene, seq_other);
+
 	WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, scene);
 
 	return OPERATOR_FINISHED;
@@ -3752,6 +3775,16 @@ static int sequencer_change_path_exec(bContext *C, wmOperator *op)
 		/* important else we don't get the imbuf cache flushed */
 		BKE_sequencer_free_imbuf(scene, &ed->seqbase, false);
 	}
+	else if (ELEM(seq->type, SEQ_TYPE_SOUND_RAM, SEQ_TYPE_SOUND_HD)) {
+		bSound *sound = seq->sound;
+		if (sound == NULL) {
+			return OPERATOR_CANCELLED;
+		}
+		char filepath[FILE_MAX];
+		RNA_string_get(op->ptr, "filepath", filepath);
+		BLI_strncpy(sound->name, filepath, sizeof(sound->name));
+		BKE_sound_load(bmain, sound);
+	}
 	else {
 		/* lame, set rna filepath */
 		PointerRNA seq_ptr;
@@ -3810,8 +3843,125 @@ void SEQUENCER_OT_change_path(struct wmOperatorType *ot)
 	/* flags */
 	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 
-	WM_operator_properties_filesel(ot, FILE_TYPE_FOLDER | FILE_TYPE_IMAGE | FILE_TYPE_MOVIE, FILE_SPECIAL, FILE_OPENFILE,
-	                               WM_FILESEL_DIRECTORY | WM_FILESEL_RELPATH | WM_FILESEL_FILEPATH | WM_FILESEL_FILES,
-	                               FILE_DEFAULTDISPLAY);
+	WM_operator_properties_filesel(
+	        ot, FILE_TYPE_FOLDER, FILE_SPECIAL, FILE_OPENFILE,
+	        WM_FILESEL_DIRECTORY | WM_FILESEL_RELPATH | WM_FILESEL_FILEPATH | WM_FILESEL_FILES,
+	        FILE_DEFAULTDISPLAY, FILE_SORT_ALPHA);
 	RNA_def_boolean(ot->srna, "use_placeholders", false, "Use Placeholders", "Use placeholders for missing frames of the strip");
+}
+
+static int sequencer_export_subtitles_invoke(bContext *C, wmOperator *op, const wmEvent *UNUSED(event))
+{
+	if (!RNA_struct_property_is_set(op->ptr, "filepath")) {
+		char filepath[FILE_MAX];
+
+		if (G.main->name[0] == 0)
+			BLI_strncpy(filepath, "untitled", sizeof(filepath));
+		else
+			BLI_strncpy(filepath, G.main->name, sizeof(filepath));
+
+		BLI_replace_extension(filepath, sizeof(filepath), ".srt");
+		RNA_string_set(op->ptr, "filepath", filepath);
+	}
+
+	WM_event_add_fileselect(C, op);
+
+	return OPERATOR_RUNNING_MODAL;
+}
+
+static int sequencer_export_subtitles_exec(bContext *C, wmOperator *op)
+{
+	Scene *scene = CTX_data_scene(C);
+	Sequence *seq, *seq_next;
+	Editing *ed = BKE_sequencer_editing_get(scene, false);
+	ListBase text_seq = {0};
+	int iter = 0;
+	FILE *file;
+	char filepath[FILE_MAX];
+
+	if (!RNA_struct_property_is_set(op->ptr, "filepath")) {
+		BKE_report(op->reports, RPT_ERROR, "No filename given");
+		return OPERATOR_CANCELLED;
+	}
+
+	RNA_string_get(op->ptr, "filepath", filepath);
+	BLI_ensure_extension(filepath, sizeof(filepath), ".srt");
+
+	/* Avoid File write exceptions */
+	if (!BLI_exists(filepath)) {
+		BLI_make_existing_file(filepath);
+		if (!BLI_file_touch(filepath)) {
+			BKE_report(op->reports, RPT_ERROR, "Can't create subtitle file");
+			return OPERATOR_CANCELLED;
+		}
+	}
+	else if (!BLI_file_is_writable(filepath)) {
+		BKE_report(op->reports, RPT_ERROR, "Can't overwrite export file");
+		return OPERATOR_CANCELLED;
+	}
+
+	SEQ_BEGIN(ed, seq)
+	{
+		if (seq->type == SEQ_TYPE_TEXT) {
+			BLI_addtail(&text_seq, MEM_dupallocN(seq));
+		}
+	}
+	SEQ_END
+
+	if (BLI_listbase_is_empty(&text_seq)) {
+		BKE_report(op->reports, RPT_ERROR, "No subtitles (text strips) to export");
+		return OPERATOR_CANCELLED;
+	}
+
+	BLI_listbase_sort(&text_seq, BKE_sequencer_cmp_time_startdisp);
+
+	/* time to open and write! */
+	file = BLI_fopen(filepath, "w");
+
+	for (seq = text_seq.first; seq; seq = seq_next) {
+		TextVars *data = seq->effectdata;
+		char timecode_str_start[32];
+		char timecode_str_end[32];
+
+		BLI_timecode_string_from_time(timecode_str_start, sizeof(timecode_str_start),
+		                              -2, FRA2TIME(seq->startdisp), FPS, USER_TIMECODE_SUBRIP);
+		BLI_timecode_string_from_time(timecode_str_end, sizeof(timecode_str_end),
+		                              -2, FRA2TIME(seq->enddisp), FPS, USER_TIMECODE_SUBRIP);
+
+		fprintf(file, "%d\n%s --> %s\n%s\n\n", iter++, timecode_str_start, timecode_str_end, data->text);
+
+		seq_next = seq->next;
+		MEM_freeN(seq);
+	}
+
+	fclose(file);
+
+	return OPERATOR_FINISHED;
+}
+
+static int sequencer_strip_is_text_poll(bContext *C)
+{
+	Editing *ed;
+	Sequence *seq;
+	return (((ed = BKE_sequencer_editing_get(CTX_data_scene(C), false)) != NULL) && ((seq = ed->act_seq) != NULL) && (seq->type == SEQ_TYPE_TEXT));
+}
+
+void SEQUENCER_OT_export_subtitles(struct wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "Export Subtitles";
+	ot->idname = "SEQUENCER_OT_export_subtitles";
+	ot->description = "Export .srt file containing text strips";
+
+	/* api callbacks */
+	ot->exec = sequencer_export_subtitles_exec;
+	ot->invoke = sequencer_export_subtitles_invoke;
+	ot->poll = sequencer_strip_is_text_poll;
+
+	/* flags */
+	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+	WM_operator_properties_filesel(
+	        ot,  FILE_TYPE_FOLDER, FILE_BLENDER, FILE_SAVE,
+	        WM_FILESEL_FILEPATH, FILE_DEFAULTDISPLAY, FILE_SORT_ALPHA);
 }

@@ -39,7 +39,7 @@
 #include "BLI_listbase.h"
 #include "BLI_math.h"
 
-#include "BLF_translation.h"
+#include "BLT_translation.h"
 
 #include "BKE_action.h"
 #include "BKE_animsys.h"
@@ -92,9 +92,9 @@ static int node_group_operator_editable(bContext *C)
 		 * Disabled otherwise to allow pynodes define their own operators
 		 * with same keymap.
 		 */
-		if (STREQ(snode->tree_idname, "ShaderNodeTree") ||
-		    STREQ(snode->tree_idname, "CompositorNodeTree") ||
-		    STREQ(snode->tree_idname, "TextureNodeTree"))
+		if (ED_node_is_shader(snode) ||
+		    ED_node_is_compositor(snode) ||
+		    ED_node_is_texture(snode))
 		{
 			return true;
 		}
@@ -112,11 +112,11 @@ static const char *group_node_idname(bContext *C)
 {
 	SpaceNode *snode = CTX_wm_space_node(C);
 	
-	if (STREQ(snode->tree_idname, "ShaderNodeTree"))
+	if (ED_node_is_shader(snode))
 		return "ShaderNodeGroup";
-	else if (STREQ(snode->tree_idname, "CompositorNodeTree"))
+	else if (ED_node_is_compositor(snode))
 		return "CompositorNodeGroup";
-	else if (STREQ(snode->tree_idname, "TextureNodeTree"))
+	else if (ED_node_is_texture(snode))
 		return "TextureNodeGroup";
 	
 	return "";
@@ -253,9 +253,9 @@ static int node_group_ungroup(bNodeTree *ntree, bNode *gnode)
 	if (wgroup->adt) {
 		LinkData *ld, *ldn = NULL;
 		bAction *waction;
-		
+
 		/* firstly, wgroup needs to temporary dummy action that can be destroyed, as it shares copies */
-		waction = wgroup->adt->action = BKE_action_copy(wgroup->adt->action);
+		waction = wgroup->adt->action = BKE_action_copy(G.main, wgroup->adt->action);
 		
 		/* now perform the moving */
 		BKE_animdata_separate_by_basepath(&wgroup->id, &ntree->id, &anim_basepaths);
@@ -271,6 +271,7 @@ static int node_group_ungroup(bNodeTree *ntree, bNode *gnode)
 		/* free temp action too */
 		if (waction) {
 			BKE_libblock_free(G.main, waction);
+			wgroup->adt->action = NULL;
 		}
 	}
 	
@@ -560,7 +561,7 @@ static int node_group_separate_exec(bContext *C, wmOperator *op)
 
 static int node_group_separate_invoke(bContext *C, wmOperator *UNUSED(op), const wmEvent *UNUSED(event))
 {
-	uiPopupMenu *pup = UI_popup_menu_begin(C, CTX_IFACE_(BLF_I18NCONTEXT_OPERATOR_DEFAULT, "Separate"), ICON_NONE);
+	uiPopupMenu *pup = UI_popup_menu_begin(C, CTX_IFACE_(BLT_I18NCONTEXT_OPERATOR_DEFAULT, "Separate"), ICON_NONE);
 	uiLayout *layout = UI_popup_menu_layout(pup);
 	
 	uiLayoutSetOperatorContext(layout, WM_OP_EXEC_DEFAULT);
@@ -793,22 +794,37 @@ static void node_group_make_insert_selected(const bContext *C, bNodeTree *ntree,
 			link->tosock = node_group_find_input_socket(gnode, iosock->identifier);
 		}
 		else if (fromselect) {
-			bNodeSocket *iosock = ntreeAddSocketInterfaceFromSocket(ngroup, link->fromnode, link->fromsock);
-			bNodeSocket *output_sock;
-			
-			/* update the group node and interface node sockets,
-			 * so the new interface socket can be linked.
-			 */
-			node_group_verify(ntree, gnode, (ID *)ngroup);
-			node_group_output_verify(ngroup, output_node, (ID *)ngroup);
+			/* First check whether the source of this link is already connected to an output.
+			 * If yes, reuse that output instead of duplicating it. */
+			bool connected = false;
+			bNodeLink *olink;
+			for (olink = ngroup->links.first; olink; olink = olink->next) {
+				if (olink->fromsock == link->fromsock && olink->tonode == output_node) {
+					bNodeSocket *output_sock = node_group_find_output_socket(gnode, olink->tosock->identifier);
+					link->fromnode = gnode;
+					link->fromsock = output_sock;
+					connected = true;
+				}
+			}
 
-			/* create new internal link */
-			output_sock = node_group_output_find_socket(output_node, iosock->identifier);
-			nodeAddLink(ngroup, link->fromnode, link->fromsock, output_node, output_sock);
-			
-			/* redirect external link */
-			link->fromnode = gnode;
-			link->fromsock = node_group_find_output_socket(gnode, iosock->identifier);
+			if (!connected) {
+				bNodeSocket *iosock = ntreeAddSocketInterfaceFromSocket(ngroup, link->fromnode, link->fromsock);
+				bNodeSocket *output_sock;
+
+				/* update the group node and interface node sockets,
+				 * so the new interface socket can be linked.
+				 */
+				node_group_verify(ntree, gnode, (ID *)ngroup);
+				node_group_output_verify(ngroup, output_node, (ID *)ngroup);
+
+				/* create new internal link */
+				output_sock = node_group_output_find_socket(output_node, iosock->identifier);
+				nodeAddLink(ngroup, link->fromnode, link->fromsock, output_node, output_sock);
+
+				/* redirect external link */
+				link->fromnode = gnode;
+				link->fromsock = node_group_find_output_socket(gnode, iosock->identifier);
+			}
 		}
 	}
 

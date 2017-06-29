@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-#include "device.h"
-#include "device_intern.h"
-#include "device_network.h"
+#include "device/device.h"
+#include "device/device_intern.h"
+#include "device/device_network.h"
 
-#include "util_foreach.h"
-#include "util_logging.h"
+#include "util/util_foreach.h"
+#include "util/util_logging.h"
 
 #if defined(WITH_NETWORK)
 
@@ -50,6 +50,11 @@ public:
 	DeviceTask the_task; /* todo: handle multiple tasks */
 
 	thread_mutex rpc_lock;
+
+	virtual bool show_samples() const
+	{
+		return false;
+	}
 
 	NetworkDevice(DeviceInfo& info, Stats &stats, const char *address)
 	: Device(info, stats, true), socket(io_service)
@@ -82,8 +87,14 @@ public:
 		snd.write();
 	}
 
-	void mem_alloc(device_memory& mem, MemoryType type)
+	void mem_alloc(const char *name, device_memory& mem, MemoryType type)
 	{
+		if(name) {
+			VLOG(1) << "Buffer allocate: " << name << ", "
+				    << string_human_readable_number(mem.memory_size()) << " bytes. ("
+				    << string_human_readable_size(mem.memory_size()) << ")";
+		}
+
 		thread_scoped_lock lock(rpc_lock);
 
 		mem.device_pointer = ++mem_counter;
@@ -163,9 +174,14 @@ public:
 		snd.write_buffer(host, size);
 	}
 
-	void tex_alloc(const char *name, device_memory& mem, InterpolationType interpolation, bool periodic)
+	void tex_alloc(const char *name,
+	               device_memory& mem,
+	               InterpolationType interpolation,
+	               ExtensionType extension)
 	{
-		VLOG(1) << "Texture allocate: " << name << ", " << mem.memory_size() << " bytes.";
+		VLOG(1) << "Texture allocate: " << name << ", "
+		        << string_human_readable_number(mem.memory_size()) << " bytes. ("
+		        << string_human_readable_size(mem.memory_size()) << ")";
 
 		thread_scoped_lock lock(rpc_lock);
 
@@ -178,7 +194,7 @@ public:
 		snd.add(name_string);
 		snd.add(mem);
 		snd.add(interpolation);
-		snd.add(periodic);
+		snd.add(extension);
 		snd.write();
 		snd.write_buffer((void*)mem.data_pointer, mem.memory_size());
 	}
@@ -471,7 +487,7 @@ protected:
 				mem.data_pointer = 0;
 
 			/* perform the allocation on the actual device */
-			device->mem_alloc(mem, type);
+			device->mem_alloc(NULL, mem, type);
 
 			/* store a mapping to/from client_pointer and real device pointer */
 			pointer_mapping_insert(client_pointer, mem.device_pointer);
@@ -571,13 +587,13 @@ protected:
 			network_device_memory mem;
 			string name;
 			InterpolationType interpolation;
-			bool periodic;
+			ExtensionType extension_type;
 			device_ptr client_pointer;
 
 			rcv.read(name);
 			rcv.read(mem);
 			rcv.read(interpolation);
-			rcv.read(periodic);
+			rcv.read(extension_type);
 			lock.unlock();
 
 			client_pointer = mem.device_pointer;
@@ -593,7 +609,7 @@ protected:
 
 			rcv.read_buffer((uint8_t*)mem.data_pointer, data_size);
 
-			device->tex_alloc(name.c_str(), mem, interpolation, periodic);
+			device->tex_alloc(name.c_str(), mem, interpolation, extension_type);
 
 			pointer_mapping_insert(client_pointer, mem.device_pointer);
 		}
@@ -644,6 +660,9 @@ protected:
 
 			if(task.shader_output)
 				task.shader_output = device_ptr_from_client_pointer(task.shader_output);
+
+			if(task.shader_output_luma)
+				task.shader_output_luma = device_ptr_from_client_pointer(task.shader_output_luma);
 
 
 			task.acquire_tile = function_bind(&DeviceServer::task_acquire_tile, this, _1, _2);

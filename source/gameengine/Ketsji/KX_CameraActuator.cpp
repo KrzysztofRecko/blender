@@ -40,7 +40,7 @@
 #include <float.h>
 #include "KX_GameObject.h"
 
-#include "PyObjectPlus.h" 
+#include "EXP_PyObjectPlus.h" 
 
 /* ------------------------------------------------------------------------- */
 /* Native functions                                                          */
@@ -290,11 +290,15 @@ bool KX_CameraActuator::Update(double curtime, bool frame)
 	
 	/* only for it lies: cross test and perpendicular bites up */
 	if (inp < 0.0f) {
-		if (fp1[0] * fp2[1] - fp1[1] * fp2[0] > 0.0f) {
+		/* Don't do anything if the cross product is too small.
+		 * The camera up-axis becomes unstable and starts to oscillate.
+		 * The 0.01f threshold is arbitrary but seems to work well in practice. */
+		float cross = fp1[0] * fp2[1] - fp1[1] * fp2[0];
+		if (cross > 0.01f) {
 			from[0] -= fac * fp1[1];
 			from[1] += fac * fp1[0];
 		}
-		else {
+		else if (cross < -0.01f) {
 			from[0] += fac * fp1[1];
 			from[1] -= fac * fp1[0];
 		}
@@ -407,7 +411,7 @@ int KX_CameraActuator::pyattr_set_object(void *self_v, const KX_PYATTRIBUTE_DEF 
 	KX_CameraActuator* self = static_cast<KX_CameraActuator*>(self_v);
 	KX_GameObject *gameobj;
 	
-	if (!ConvertPythonToGameObject(value, &gameobj, true, "actuator.object = value: KX_CameraActuator"))
+	if (!ConvertPythonToGameObject(self->GetLogicManager(), value, &gameobj, true, "actuator.object = value: KX_CameraActuator"))
 		return PY_SET_ATTR_FAIL; // ConvertPythonToGameObject sets the error
 	
 	if (self->m_ob)

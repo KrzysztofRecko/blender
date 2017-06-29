@@ -41,8 +41,8 @@
 #include "DNA_scene_types.h"
 
 #include "BLI_listbase.h"
-#include "BLI_path_util.h"
 #include "BLI_math.h"
+#include "BLI_string_utils.h"
 #include "BLI_utildefines.h"
 #include "BLI_memarena.h"
 
@@ -316,12 +316,12 @@ static float densfunc(const MetaElem *ball, float x, float y, float z)
 			if      (dvec[2] > ball->expz)  dvec[2] -= ball->expz;
 			else if (dvec[2] < -ball->expz) dvec[2] += ball->expz;
 			else                            dvec[2] = 0.0;
-			/* fall through */
+			ATTR_FALLTHROUGH;
 		case MB_PLANE:
 			if      (dvec[1] >  ball->expy) dvec[1] -= ball->expy;
 			else if (dvec[1] < -ball->expy) dvec[1] += ball->expy;
 			else                            dvec[1] = 0.0;
-			/* fall through */
+			ATTR_FALLTHROUGH;
 		case MB_TUBE:
 			if      (dvec[0] >  ball->expx) dvec[0] -= ball->expx;
 			else if (dvec[0] < -ball->expx) dvec[0] += ball->expx;
@@ -660,7 +660,7 @@ static void makecubetable(void)
 	for (i = 0; i < 256; i++) {
 		for (e = 0; e < 12; e++) done[e] = 0;
 		for (c = 0; c < 8; c++) pos[c] = MB_BIT(i, c);
-		for (e = 0; e < 12; e++)
+		for (e = 0; e < 12; e++) {
 			if (!done[e] && (pos[corner1[e]] != pos[corner2[e]])) {
 				INTLIST *ints = NULL;
 				INTLISTS *lists = MEM_callocN(sizeof(INTLISTS), "mball_intlist");
@@ -687,6 +687,7 @@ static void makecubetable(void)
 				lists->next = cubetable[i];
 				cubetable[i] = lists;
 			}
+		}
 	}
 
 	for (i = 0; i < 256; i++) {
@@ -1159,7 +1160,7 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 						new_ml->imat = BLI_memarena_alloc(process->pgn_elements, 4 * 4 * sizeof(float));
 
 						/* too big stiffness seems only ugly due to linear interpolation
-						* no need to have possibility for too big stiffness */
+						 * no need to have possibility for too big stiffness */
 						if (ml->s > 10.0f) new_ml->s = 10.0f;
 						else new_ml->s = ml->s;
 
@@ -1193,10 +1194,10 @@ static void init_meta(EvaluationContext *eval_ctx, PROCESS *process, Scene *scen
 								break;
 							case MB_CUBE: /* cube is "expanded" by expz, expy and expx */
 								expz += ml->expz;
-								/* fall through */
+								ATTR_FALLTHROUGH;
 							case MB_PLANE: /* plane is "expanded" by expy and expx */
 								expy += ml->expy;
-								/* fall through */
+								ATTR_FALLTHROUGH;
 							case MB_TUBE: /* tube is "expanded" by expx */
 								expx += ml->expx;
 								break;
@@ -1294,7 +1295,7 @@ void BKE_mball_polygonize(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 		build_bvh_spatial(&process, &process.metaball_bvh, 0, process.totelem, &process.allbb);
 
 		/* don't polygonize metaballs with too high resolution (base mball to small)
-		* note: Eps was 0.0001f but this was giving problems for blood animation for durian, using 0.00001f */
+		 * note: Eps was 0.0001f but this was giving problems for blood animation for durian, using 0.00001f */
 		if (ob->size[0] > 0.00001f * (process.allbb.max[0] - process.allbb.min[0]) ||
 		    ob->size[1] > 0.00001f * (process.allbb.max[1] - process.allbb.min[1]) ||
 		    ob->size[2] > 0.00001f * (process.allbb.max[2] - process.allbb.min[2]))

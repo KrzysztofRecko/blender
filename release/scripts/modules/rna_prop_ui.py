@@ -39,6 +39,12 @@ def rna_idprop_ui_del(item):
         pass
 
 
+def rna_idprop_ui_prop_update(item, prop):
+    prop_rna = item.path_resolve("[\"%s\"]" % prop.replace("\"", "\\\""), False)
+    if isinstance(prop_rna, bpy.types.bpy_prop):
+        prop_rna.update()
+
+
 def rna_idprop_ui_prop_get(item, prop, create=True):
 
     rna_ui = rna_idprop_ui_get(item, create)
@@ -170,11 +176,10 @@ def draw(layout, context, context_member, property_type, use_edit=True):
             if not is_rna:
                 props = row.operator("wm.properties_edit", text="Edit")
                 assign_props(props, val_draw, key)
+                props = row.operator("wm.properties_remove", text="", icon='ZOOMOUT')
+                assign_props(props, val_draw, key)
             else:
                 row.label(text="API Defined")
-
-            props = row.operator("wm.properties_remove", text="", icon='ZOOMOUT')
-            assign_props(props, val_draw, key)
 
 
 class PropertyPanel:

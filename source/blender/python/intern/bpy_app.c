@@ -33,9 +33,12 @@
 
 #include "bpy_app.h"
 
+#include "bpy_app_alembic.h"
 #include "bpy_app_ffmpeg.h"
 #include "bpy_app_ocio.h"
 #include "bpy_app_oiio.h"
+#include "bpy_app_opensubdiv.h"
+#include "bpy_app_openvdb.h"
 #include "bpy_app_sdl.h"
 #include "bpy_app_build_options.h"
 
@@ -47,8 +50,16 @@
 #include "BLI_utildefines.h"
 
 #include "BKE_appdir.h"
-#include "BKE_blender.h"
+#include "BKE_blender_version.h"
 #include "BKE_global.h"
+
+#include "DNA_ID.h"
+
+#include "UI_interface_icons.h"
+
+/* for notifiers */
+#include "WM_api.h"
+#include "WM_types.h"
 
 #include "../generic/py_capi_utils.h"
 #include "../generic/python_utildefines.h"
@@ -95,9 +106,12 @@ static PyStructSequence_Field app_info_fields[] = {
 	{(char *)"build_system", (char *)"Build system used"},
 
 	/* submodules */
+	{(char *)"alembic", (char *)"Alembic library information backend"},
 	{(char *)"ffmpeg", (char *)"FFmpeg library information backend"},
 	{(char *)"ocio", (char *)"OpenColorIO library information backend"},
 	{(char *)"oiio", (char *)"OpenImageIO library information backend"},
+	{(char *)"opensubdiv", (char *)"OpenSubdiv library information backend"},
+	{(char *)"openvdb", (char *)"OpenVDB library information backend"},
 	{(char *)"sdl", (char *)"SDL library information backend"},
 	{(char *)"build_options", (char *)"A set containing most important enabled optional build features"},
 	{(char *)"handlers", (char *)"Application handler callbacks"},
@@ -105,9 +119,21 @@ static PyStructSequence_Field app_info_fields[] = {
 	{NULL},
 };
 
+PyDoc_STRVAR(bpy_app_doc,
+"This module contains application values that remain unchanged during runtime.\n"
+"\n"
+"Submodules:\n"
+"\n"
+".. toctree::\n"
+"   :maxdepth: 1\n"
+"\n"
+"   bpy.app.handlers.rst\n"
+"   bpy.app.translations.rst\n"
+);
+
 static PyStructSequence_Desc app_info_desc = {
 	(char *)"bpy.app",     /* name */
-	(char *)"This module contains application values that remain unchanged during runtime.",    /* doc */
+	bpy_app_doc,    /* doc */
 	app_info_fields,    /* fields */
 	ARRAY_SIZE(app_info_fields) - 1
 };
@@ -172,9 +198,12 @@ static PyObject *make_app_info(void)
 	SetBytesItem("Unknown");
 #endif
 
+	SetObjItem(BPY_app_alembic_struct());
 	SetObjItem(BPY_app_ffmpeg_struct());
 	SetObjItem(BPY_app_ocio_struct());
 	SetObjItem(BPY_app_oiio_struct());
+	SetObjItem(BPY_app_opensubdiv_struct());
+	SetObjItem(BPY_app_openvdb_struct());
 	SetObjItem(BPY_app_sdl_struct());
 	SetObjItem(BPY_app_build_options_struct());
 	SetObjItem(BPY_app_handlers_struct());
@@ -220,12 +249,12 @@ static int bpy_app_debug_set(PyObject *UNUSED(self), PyObject *value, void *clos
 	return 0;
 }
 
-
+#define BROKEN_BINARY_PATH_PYTHON_HACK
 
 PyDoc_STRVAR(bpy_app_binary_path_python_doc,
 "String, the path to the python executable (read-only)"
 );
-static PyObject *bpy_app_binary_path_python_get(PyObject *UNUSED(self), void *UNUSED(closure))
+static PyObject *bpy_app_binary_path_python_get(PyObject *self, void *UNUSED(closure))
 {
 	/* refcount is held in BlenderAppType.tp_dict */
 	static PyObject *ret = NULL;
@@ -237,14 +266,18 @@ static PyObject *bpy_app_binary_path_python_get(PyObject *UNUSED(self), void *UN
 		        fullpath, sizeof(fullpath),
 		        PY_MAJOR_VERSION, PY_MINOR_VERSION);
 		ret = PyC_UnicodeFromByte(fullpath);
-		PyDict_SetItemString(BlenderAppType.tp_dict, "binary_path_python", ret);
+#ifdef BROKEN_BINARY_PATH_PYTHON_HACK
+		Py_INCREF(ret);
+		UNUSED_VARS(self);
+#else
+		PyDict_SetItem(BlenderAppType.tp_dict, /* XXX BAAAADDDDDD! self is not a PyDescr at all! it's bpy.app!!! */ PyDescr_NAME(self), ret);
+#endif
 	}
 	else {
 		Py_INCREF(ret);
 	}
 
 	return ret;
-
 }
 
 PyDoc_STRVAR(bpy_app_debug_value_doc,
@@ -265,6 +298,8 @@ static int bpy_app_debug_value_set(PyObject *UNUSED(self), PyObject *value, void
 	}
 	
 	G.debug_value = param;
+
+	WM_main_add_notifier(NC_WINDOW, NULL);
 
 	return 0;
 }
@@ -298,6 +333,14 @@ static PyObject *bpy_app_driver_dict_get(PyObject *UNUSED(self), void *UNUSED(cl
 	return Py_INCREF_RET(bpy_pydriver_Dict);
 }
 
+PyDoc_STRVAR(bpy_app_preview_render_size_doc,
+"Reference size for icon/preview renders (read-only)"
+);
+static PyObject *bpy_app_preview_render_size_get(PyObject *UNUSED(self), void *closure)
+{
+	return PyLong_FromLong((long)UI_preview_render_size(GET_INT_FROM_POINTER(closure)));
+}
+
 static PyObject *bpy_app_autoexec_fail_message_get(PyObject *UNUSED(self), void *UNUSED(closure))
 {
 	return PyC_UnicodeFromByte(G.autoexec_fail);
@@ -322,6 +365,9 @@ static PyGetSetDef bpy_app_getsets[] = {
 	{(char *)"tempdir", bpy_app_tempdir_get, NULL, (char *)bpy_app_tempdir_doc, NULL},
 	{(char *)"driver_namespace", bpy_app_driver_dict_get, NULL, (char *)bpy_app_driver_dict_doc, NULL},
 
+	{(char *)"render_icon_size", bpy_app_preview_render_size_get, NULL, (char *)bpy_app_preview_render_size_doc, (void *)ICON_SIZE_ICON},
+	{(char *)"render_preview_size", bpy_app_preview_render_size_get, NULL, (char *)bpy_app_preview_render_size_doc, (void *)ICON_SIZE_PREVIEW},
+
 	/* security */
 	{(char *)"autoexec_fail", bpy_app_global_flag_get, NULL, NULL, (void *)G_SCRIPT_AUTOEXEC_FAIL},
 	{(char *)"autoexec_fail_quiet", bpy_app_global_flag_get, NULL, NULL, (void *)G_SCRIPT_AUTOEXEC_FAIL_QUIET},
@@ -332,10 +378,10 @@ static PyGetSetDef bpy_app_getsets[] = {
 static void py_struct_seq_getset_init(void)
 {
 	/* tricky dynamic members, not to py-spec! */
-	PyGetSetDef *getset;
-
-	for (getset = bpy_app_getsets; getset->name; getset++) {
-		PyDict_SetItemString(BlenderAppType.tp_dict, getset->name, PyDescr_NewGetSet(&BlenderAppType, getset));
+	for (PyGetSetDef *getset = bpy_app_getsets; getset->name; getset++) {
+		PyObject *item = PyDescr_NewGetSet(&BlenderAppType, getset);
+		PyDict_SetItem(BlenderAppType.tp_dict, PyDescr_NAME(item), item);
+		Py_DECREF(item);
 	}
 }
 /* end dynamic bpy.app */

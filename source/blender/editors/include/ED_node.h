@@ -80,7 +80,7 @@ void ED_node_draw_snap(struct View2D *v2d, const float cent[2], float size, Node
 /* node_draw.c */
 void ED_node_tree_update(const struct bContext *C);
 void ED_node_tag_update_id(struct ID *id);
-void ED_node_tag_update_nodetree(struct Main *bmain, struct bNodeTree *ntree);
+void ED_node_tag_update_nodetree(struct Main *bmain, struct bNodeTree *ntree, struct bNode *node);
 void ED_node_sort(struct bNodeTree *ntree);
 float ED_node_grid_size(void);
 
@@ -103,13 +103,11 @@ void ED_node_set_active(struct Main *bmain, struct bNodeTree *ntree, struct bNod
 
 void ED_node_composite_job(const struct bContext *C, struct bNodeTree *nodetree, struct Scene *scene_owner);
 
-void ED_node_id_unref(struct SpaceNode *snode, const ID *id);
-
 /* node_ops.c */
 void ED_operatormacros_node(void);
 
 /* node_view.c */
-bool ED_space_node_color_sample(struct Scene *scene, struct SpaceNode *snode, struct ARegion *ar, int mval[2], float r_col[3]);
+bool ED_space_node_color_sample(struct SpaceNode *snode, struct ARegion *ar, int mval[2], float r_col[3]);
 
 #endif /* __ED_NODE_H__ */
 

@@ -105,7 +105,7 @@ static float quad_calc_error(
 		area_min = min_ff(area_a, area_b);
 		area_max = max_ff(area_a, area_b);
 
-		diff = area_max ? (1.0 - (area_min / area_max)) : 1.0f;
+		diff = area_max ? (1.0f - (area_min / area_max)) : 1.0f;
 
 		error += diff;
 	}
@@ -132,11 +132,11 @@ struct DelimitData_CD {
 };
 
 struct DelimitData {
-	unsigned int do_seam : 1;
-	unsigned int do_sharp : 1;
-	unsigned int do_mat : 1;
-	unsigned int do_angle_face : 1;
-	unsigned int do_angle_shape : 1;
+	uint do_seam : 1;
+	uint do_sharp : 1;
+	uint do_mat : 1;
+	uint do_angle_face : 1;
+	uint do_angle_shape : 1;
 
 	float angle_face;
 	float angle_face__cos;
@@ -272,7 +272,7 @@ void bmo_join_triangles_exec(BMesh *bm, BMOperator *op)
 	/* data: edge-to-join, sort_value: error weight */
 	struct SortPointerByFloat *jedges;
 	unsigned i, totedge;
-	unsigned int totedge_tag = 0;
+	uint totedge_tag = 0;
 
 	struct DelimitData delimit_data = {0};
 
@@ -315,7 +315,7 @@ void bmo_join_triangles_exec(BMesh *bm, BMOperator *op)
 	/* flag all edges of all input face */
 	BMO_ITER (f, &siter, op->slots_in, "faces", BM_FACE) {
 		if (f->len == 3) {
-			BMO_elem_flag_enable(bm, f, FACE_INPUT);
+			BMO_face_flag_enable(bm, f, FACE_INPUT);
 		}
 	}
 
@@ -323,11 +323,11 @@ void bmo_join_triangles_exec(BMesh *bm, BMOperator *op)
 	BM_ITER_MESH (e, &iter, bm, BM_EDGES_OF_MESH) {
 		BMFace *f_a, *f_b;
 		if (BM_edge_face_pair(e, &f_a, &f_b) &&
-		    (BMO_elem_flag_test(bm, f_a, FACE_INPUT) &&
-		     BMO_elem_flag_test(bm, f_b, FACE_INPUT)))
+		    (BMO_face_flag_test(bm, f_a, FACE_INPUT) &&
+		     BMO_face_flag_test(bm, f_b, FACE_INPUT)))
 		{
 			if (!bm_edge_is_delimit(e, &delimit_data)) {
-				BMO_elem_flag_enable(bm, e, EDGE_MARK);
+				BMO_edge_flag_enable(bm, e, EDGE_MARK);
 				totedge_tag++;
 			}
 		}
@@ -345,7 +345,7 @@ void bmo_join_triangles_exec(BMesh *bm, BMOperator *op)
 		const BMVert *verts[4];
 		float error;
 
-		if (!BMO_elem_flag_test(bm, e, EDGE_MARK))
+		if (!BMO_edge_flag_test(bm, e, EDGE_MARK))
 			continue;
 
 		bm_edge_to_quad_verts(e, verts);
@@ -361,18 +361,18 @@ void bmo_join_triangles_exec(BMesh *bm, BMOperator *op)
 	qsort(jedges, totedge, sizeof(*jedges), BLI_sortutil_cmp_float);
 
 	for (i = 0; i < totedge; i++) {
-		BMFace *f_a, *f_b;
+		BMLoop *l_a, *l_b;
 
 		e = jedges[i].data;
-		f_a = e->l->f;
-		f_b = e->l->radial_next->f;
+		l_a = e->l;
+		l_b = e->l->radial_next;
 
 		/* check if another edge already claimed this face */
-		if ((f_a->len == 3) && (f_b->len == 3)) {
+		if ((l_a->f->len == 3) && (l_b->f->len == 3)) {
 			BMFace *f_new;
-			f_new = BM_faces_join_pair(bm, f_a, f_b, e, true);
+			f_new = BM_faces_join_pair(bm, l_a, l_b, true);
 			if (f_new) {
-				BMO_elem_flag_enable(bm, f_new, FACE_OUT);
+				BMO_face_flag_enable(bm, f_new, FACE_OUT);
 			}
 		}
 	}

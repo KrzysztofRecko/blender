@@ -40,19 +40,19 @@ ImageNode::ImageNode(bNode *editorNode) : Node(editorNode)
 
 }
 NodeOperation *ImageNode::doMultilayerCheck(NodeConverter &converter, RenderLayer *rl, Image *image, ImageUser *user,
-                                            int framenumber, int outputsocketIndex, int passtype, int view, DataType datatype) const
+                                            int framenumber, int outputsocketIndex, int passindex, int view, DataType datatype) const
 {
 	NodeOutput *outputSocket = this->getOutputSocket(outputsocketIndex);
 	MultilayerBaseOperation *operation = NULL;
 	switch (datatype) {
 		case COM_DT_VALUE:
-			operation = new MultilayerValueOperation(passtype, view);
+			operation = new MultilayerValueOperation(passindex, view);
 			break;
 		case COM_DT_VECTOR:
-			operation = new MultilayerVectorOperation(passtype, view);
+			operation = new MultilayerVectorOperation(passindex, view);
 			break;
 		case COM_DT_COLOR:
-			operation = new MultilayerColorOperation(passtype, view);
+			operation = new MultilayerColorOperation(passindex, view);
 			break;
 		default:
 			break;
@@ -95,17 +95,14 @@ void ImageNode::convertToOperations(NodeConverter &converter, const CompositorCo
 					NodeOperation *operation = NULL;
 					socket = this->getOutputSocket(index);
 					bNodeSocket *bnodeSocket = socket->getbNodeSocket();
-					RenderPass *rpass = (RenderPass *)BLI_findstring(&rl->passes, bnodeSocket->identifier, offsetof(RenderPass, internal_name));
+					NodeImageLayer *storage = (NodeImageLayer *)bnodeSocket->storage;
+					RenderPass *rpass = (RenderPass *)BLI_findstring(&rl->passes, storage->pass_name, offsetof(RenderPass, name));
 					int view = 0;
 
-					/* Passes in the file can differ from passes stored in sockets (#36755).
-					 * Look up the correct file pass using the socket identifier instead.
-					 */
-#if 0
-					NodeImageLayer *storage = (NodeImageLayer *)bnodeSocket->storage;*/
-					int passindex = storage->pass_index;*/
-					RenderPass *rpass = (RenderPass *)BLI_findlink(&rl->passes, passindex);
-#endif
+					if (STREQ(storage->pass_name, RE_PASSNAME_COMBINED) && STREQ(bnodeSocket->name, "Alpha")) {
+						/* Alpha output is already handled with the associated combined output. */
+						continue;
+					}
 
 					/* returns the image view to use for the current active view */
 					if (BLI_listbase_count_ex(&image->rr->views, 2) > 1) {
@@ -124,20 +121,21 @@ void ImageNode::convertToOperations(NodeConverter &converter, const CompositorCo
 					}
 
 					if (rpass) {
+						int passindex = BLI_findindex(&rl->passes, rpass);
 						switch (rpass->channels) {
 							case 1:
 								operation = doMultilayerCheck(converter, rl, image, imageuser, framenumber, index,
-								                              rpass->passtype, view, COM_DT_VALUE);
+								                              passindex, view, COM_DT_VALUE);
 								break;
 								/* using image operations for both 3 and 4 channels (RGB and RGBA respectively) */
 								/* XXX any way to detect actual vector images? */
 							case 3:
 								operation = doMultilayerCheck(converter, rl, image, imageuser, framenumber, index,
-								                              rpass->passtype, view, COM_DT_VECTOR);
+								                              passindex, view, COM_DT_VECTOR);
 								break;
 							case 4:
 								operation = doMultilayerCheck(converter, rl, image, imageuser, framenumber, index,
-								                              rpass->passtype, view, COM_DT_COLOR);
+								                              passindex, view, COM_DT_COLOR);
 								break;
 							default:
 								/* dummy operation is added below */
@@ -146,17 +144,25 @@ void ImageNode::convertToOperations(NodeConverter &converter, const CompositorCo
 						if (index == 0 && operation) {
 							converter.addPreview(operation->getOutputSocket());
 						}
-						if (rpass->passtype == SCE_PASS_COMBINED) {
-							BLI_assert(operation != NULL);
-							BLI_assert(index < numberOfOutputs - 1);
-							NodeOutput *outputSocket = this->getOutputSocket(index + 1);
-							SeparateChannelOperation *separate_operation;
-							separate_operation = new SeparateChannelOperation();
-							separate_operation->setChannel(3);
-							converter.addOperation(separate_operation);
-							converter.addLink(operation->getOutputSocket(), separate_operation->getInputSocket(0));
-							converter.mapOutputSocket(outputSocket, separate_operation->getOutputSocket());
-							index++;
+						if (STREQ(rpass->name, RE_PASSNAME_COMBINED)) {
+							for (int alphaIndex = 0; alphaIndex < numberOfOutputs; alphaIndex++) {
+								NodeOutput *alphaSocket = this->getOutputSocket(alphaIndex);
+								bNodeSocket *bnodeAlphaSocket = alphaSocket->getbNodeSocket();
+								if (!STREQ(bnodeAlphaSocket->name, "Alpha")) {
+									continue;
+								}
+								NodeImageLayer *alphaStorage = (NodeImageLayer *)bnodeSocket->storage;
+								if (!STREQ(alphaStorage->pass_name, RE_PASSNAME_COMBINED)) {
+									continue;
+								}
+								SeparateChannelOperation *separate_operation;
+								separate_operation = new SeparateChannelOperation();
+								separate_operation->setChannel(3);
+								converter.addOperation(separate_operation);
+								converter.addLink(operation->getOutputSocket(), separate_operation->getInputSocket(0));
+								converter.mapOutputSocket(alphaSocket, separate_operation->getOutputSocket());
+								break;
+							}
 						}
 					}
 

@@ -65,14 +65,15 @@ class ConstraintButtonsPanel:
                 layout.prop_search(con, "subtarget", con.target.data, "bones", text="Bone")
 
                 if hasattr(con, "head_tail"):
-                    row = layout.row()
+                    row = layout.row(align=True)
                     row.label(text="Head/Tail:")
                     row.prop(con, "head_tail", text="")
+                    row.prop(con, "use_bbone_shape", text="", icon='IPO_BEZIER')  # XXX icon, and only when bone has segments?
             elif con.target.type in {'MESH', 'LATTICE'}:
                 layout.prop_search(con, "subtarget", con.target, "vertex_groups", text="Vertex Group")
 
     @staticmethod
-    def ik_template(self, layout, con):
+    def ik_template(layout, con):
         # only used for iTaSC
         layout.prop(con, "pole_target")
 
@@ -440,7 +441,7 @@ class ConstraintButtonsPanel:
 
         self.space_template(layout, con)
 
-    #def SCRIPT(self, context, layout, con):
+    # def SCRIPT(self, context, layout, con):
 
     def ACTION(self, context, layout, con):
         self.target_template(layout, con)
@@ -879,6 +880,19 @@ class ConstraintButtonsPanel:
 
         layout.operator("clip.constraint_to_fcurve")
 
+    def TRANSFORM_CACHE(self, context, layout, con):
+        layout.label(text="Cache File Properties:")
+        box = layout.box()
+        box.template_cache_file(con, "cache_file")
+
+        cache_file = con.cache_file
+        
+        layout.label(text="Constraint Properties:")
+        box = layout.box()
+        
+        if cache_file is not None:
+            box.prop_search(con, "object_path", cache_file, "object_paths")
+
     def SCRIPT(self, context, layout, con):
         layout.label("Blender 2.6 doesn't support python constraints yet")
 
@@ -927,5 +941,12 @@ class BONE_PT_constraints(ConstraintButtonsPanel, Panel):
         for con in context.pose_bone.constraints:
             self.draw_constraint(context, con)
 
+classes = (
+    OBJECT_PT_constraints,
+    BONE_PT_constraints,
+)
+
 if __name__ == "__main__":  # only for live edit.
-    bpy.utils.register_module(__name__)
+    from bpy.utils import register_class
+    for cls in classes:
+        register_class(cls)

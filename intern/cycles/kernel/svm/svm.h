@@ -39,7 +39,7 @@
  * mostly taken care of in the SVM compiler.
  */
 
-#include "svm_types.h"
+#include "kernel/svm/svm_types.h"
 
 CCL_NAMESPACE_BEGIN
 
@@ -139,46 +139,49 @@ CCL_NAMESPACE_END
 
 /* Nodes */
 
-#include "svm_noise.h"
+#include "kernel/svm/svm_noise.h"
 #include "svm_texture.h"
 
-#include "svm_math_util.h"
+#include "kernel/svm/svm_color_util.h"
+#include "kernel/svm/svm_math_util.h"
 
-#include "svm_attribute.h"
-#include "svm_gradient.h"
-#include "svm_blackbody.h"
-#include "svm_closure.h"
-#include "svm_noisetex.h"
-#include "svm_convert.h"
-#include "svm_displace.h"
-#include "svm_fresnel.h"
-#include "svm_wireframe.h"
-#include "svm_wavelength.h"
-#include "svm_camera.h"
-#include "svm_geometry.h"
-#include "svm_hsv.h"
-#include "svm_image.h"
-#include "svm_gamma.h"
-#include "svm_brightness.h"
-#include "svm_invert.h"
-#include "svm_light_path.h"
-#include "svm_magic.h"
-#include "svm_mapping.h"
-#include "svm_normal.h"
-#include "svm_wave.h"
-#include "svm_math.h"
-#include "svm_mix.h"
-#include "svm_ramp.h"
-#include "svm_sepcomb_hsv.h"
-#include "svm_sepcomb_vector.h"
-#include "svm_musgrave.h"
-#include "svm_sky.h"
-#include "svm_tex_coord.h"
-#include "svm_value.h"
-#include "svm_voronoi.h"
-#include "svm_checker.h"
-#include "svm_brick.h"
-#include "svm_vector_transform.h"
+#include "kernel/svm/svm_attribute.h"
+#include "kernel/svm/svm_gradient.h"
+#include "kernel/svm/svm_blackbody.h"
+#include "kernel/svm/svm_closure.h"
+#include "kernel/svm/svm_noisetex.h"
+#include "kernel/svm/svm_convert.h"
+#include "kernel/svm/svm_displace.h"
+#include "kernel/svm/svm_fresnel.h"
+#include "kernel/svm/svm_wireframe.h"
+#include "kernel/svm/svm_wavelength.h"
+#include "kernel/svm/svm_camera.h"
+#include "kernel/svm/svm_geometry.h"
+#include "kernel/svm/svm_hsv.h"
+#include "kernel/svm/svm_image.h"
+#include "kernel/svm/svm_gamma.h"
+#include "kernel/svm/svm_brightness.h"
+#include "kernel/svm/svm_invert.h"
+#include "kernel/svm/svm_light_path.h"
+#include "kernel/svm/svm_magic.h"
+#include "kernel/svm/svm_mapping.h"
+#include "kernel/svm/svm_normal.h"
+#include "kernel/svm/svm_wave.h"
+#include "kernel/svm/svm_math.h"
+#include "kernel/svm/svm_mix.h"
+#include "kernel/svm/svm_ramp.h"
+#include "kernel/svm/svm_sepcomb_hsv.h"
+#include "kernel/svm/svm_sepcomb_vector.h"
+#include "kernel/svm/svm_musgrave.h"
+#include "kernel/svm/svm_sky.h"
+#include "kernel/svm/svm_tex_coord.h"
+#include "kernel/svm/svm_value.h"
+#include "kernel/svm/svm_voronoi.h"
+#include "kernel/svm/svm_checker.h"
+#include "kernel/svm/svm_brick.h"
+#include "kernel/svm/svm_vector_transform.h"
+#include "kernel/svm/svm_voxel.h"
+#include "kernel/svm/svm_bump.h"
 
 CCL_NAMESPACE_BEGIN
 
@@ -186,10 +189,10 @@ CCL_NAMESPACE_BEGIN
 #define NODES_FEATURE(feature) ((__NODES_FEATURES__ & (feature)) != 0)
 
 /* Main Interpreter Loop */
-ccl_device_noinline void svm_eval_nodes(KernelGlobals *kg, ShaderData *sd, ShaderType type, int path_flag)
+ccl_device_noinline void svm_eval_nodes(KernelGlobals *kg, ShaderData *sd, ccl_addr_space PathState *state, ShaderType type, int path_flag)
 {
 	float stack[SVM_STACK_SIZE];
-	int offset = ccl_fetch(sd, shader) & SHADER_MASK;
+	int offset = sd->shader & SHADER_MASK;
 
 	while(1) {
 		uint4 node = read_node(kg, &offset);
@@ -258,7 +261,7 @@ ccl_device_noinline void svm_eval_nodes(KernelGlobals *kg, ShaderData *sd, Shade
 				svm_node_geometry_bump_dy(kg, sd, stack, node.y, node.z);
 				break;
 			case NODE_SET_DISPLACEMENT:
-				svm_node_set_displacement(sd, stack, node.y);
+				svm_node_set_displacement(kg, sd, stack, node.y);
 				break;
 #  endif  /* NODES_FEATURE(NODE_FEATURE_BUMP) */
 #  ifdef __TEXTURES__
@@ -292,9 +295,17 @@ ccl_device_noinline void svm_eval_nodes(KernelGlobals *kg, ShaderData *sd, Shade
 			case NODE_CLOSURE_SET_NORMAL:
 				svm_node_set_normal(kg, sd, stack, node.y, node.z);
 				break;
+#      if NODES_FEATURE(NODE_FEATURE_BUMP_STATE)
+			case NODE_ENTER_BUMP_EVAL:
+				svm_node_enter_bump_eval(kg, sd, stack, node.y);
+				break;
+			case NODE_LEAVE_BUMP_EVAL:
+				svm_node_leave_bump_eval(kg, sd, stack, node.y);
+				break;
+#      endif /* NODES_FEATURE(NODE_FEATURE_BUMP_STATE) */
 #    endif  /* NODES_FEATURE(NODE_FEATURE_BUMP) */
 			case NODE_HSV:
-				svm_node_hsv(kg, sd, stack, node.y, node.z, node.w, &offset);
+				svm_node_hsv(kg, sd, stack, node, &offset);
 				break;
 #  endif  /* __EXTRA_NODES__ */
 #endif  /* NODES_GROUP(NODE_GROUP_LEVEL_0) */
@@ -334,7 +345,7 @@ ccl_device_noinline void svm_eval_nodes(KernelGlobals *kg, ShaderData *sd, Shade
 				svm_node_brightness(sd, stack, node.y, node.z, node.w);
 				break;
 			case NODE_LIGHT_PATH:
-				svm_node_light_path(sd, stack, node.y, node.z, path_flag);
+				svm_node_light_path(sd, state, stack, node.y, node.z, path_flag);
 				break;
 			case NODE_OBJECT_INFO:
 				svm_node_object_info(kg, sd, stack, node.y, node.z);
@@ -403,10 +414,8 @@ ccl_device_noinline void svm_eval_nodes(KernelGlobals *kg, ShaderData *sd, Shade
 
 #if NODES_GROUP(NODE_GROUP_LEVEL_3)
 			case NODE_RGB_CURVES:
-				svm_node_rgb_curves(kg, sd, stack, node, &offset);
-				break;
 			case NODE_VECTOR_CURVES:
-				svm_node_vector_curves(kg, sd, stack, node, &offset);
+				svm_node_curves(kg, sd, stack, node, &offset);
 				break;
 			case NODE_TANGENT:
 				svm_node_tangent(kg, sd, stack, node);
@@ -446,6 +455,11 @@ ccl_device_noinline void svm_eval_nodes(KernelGlobals *kg, ShaderData *sd, Shade
 				svm_node_blackbody(kg, sd, stack, node.y, node.z);
 				break;
 #  endif  /* __EXTRA_NODES__ */
+#  if NODES_FEATURE(NODE_FEATURE_VOLUME)
+			case NODE_TEX_VOXEL:
+				svm_node_tex_voxel(kg, sd, stack, node, &offset);
+				break;
+#  endif  /* NODES_FEATURE(NODE_FEATURE_VOLUME) */
 #endif  /* NODES_GROUP(NODE_GROUP_LEVEL_3) */
 			case NODE_END:
 				return;

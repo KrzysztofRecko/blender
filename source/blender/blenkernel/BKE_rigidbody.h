@@ -49,9 +49,13 @@ void BKE_rigidbody_free_constraint(struct Object *ob);
 
 /* ...... */
 
-struct RigidBodyOb *BKE_rigidbody_copy_object(struct Object *ob);
-struct RigidBodyCon *BKE_rigidbody_copy_constraint(struct Object *ob);
-void BKE_rigidbody_relink_constraint(struct RigidBodyCon *rbc);
+struct RigidBodyOb *BKE_rigidbody_copy_object(const struct Object *ob);
+struct RigidBodyCon *BKE_rigidbody_copy_constraint(const struct Object *ob);
+
+/* Callback format for performing operations on ID-pointers for rigidbody world. */
+typedef void (*RigidbodyWorldIDFunc)(struct RigidBodyWorld *rbw, struct ID **idpoin, void *userdata, int cb_flag);
+
+void BKE_rigidbody_world_id_loop(struct RigidBodyWorld *rbw, RigidbodyWorldIDFunc func, void *userdata);
 
 /* -------------- */
 /* Setup */
@@ -69,7 +73,7 @@ void BKE_rigidbody_world_groups_relink(struct RigidBodyWorld *rbw);
 void BKE_rigidbody_validate_sim_world(struct Scene *scene, struct RigidBodyWorld *rbw, bool rebuild);
 
 void BKE_rigidbody_calc_volume(struct Object *ob, float *r_vol);
-void BKE_rigidbody_calc_center_of_mass(struct Object *ob, float r_com[3]);
+void BKE_rigidbody_calc_center_of_mass(struct Object *ob, float r_center[3]);
 
 /* -------------- */
 /* Utilities */

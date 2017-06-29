@@ -53,9 +53,9 @@ static bool bm_loop_is_all_radial_tag(BMLoop *l)
 /**
  * Callback to run on source-loops for #BM_face_copy_shared
  */
-static bool bm_loop_is_face_untag(BMElem *ele, void *UNUSED(user_data))
+static bool bm_loop_is_face_untag(const BMLoop *l, void *UNUSED(user_data))
 {
-	return (BM_elem_flag_test(((BMLoop *)ele)->f, BM_ELEM_TAG) == 0);
+	return (BM_elem_flag_test(l->f, BM_ELEM_TAG) == 0);
 }
 
 /**
@@ -91,7 +91,7 @@ static void bm_face_copy_shared_all(
 /**
  * Flood fill attributes.
  */
-static unsigned int bmesh_face_attribute_fill(
+static uint bmesh_face_attribute_fill(
         BMesh *bm,
         const bool use_normals, const bool use_data)
 {
@@ -102,7 +102,7 @@ static unsigned int bmesh_face_attribute_fill(
 	BMIter iter;
 	BMLoop *l;
 
-	unsigned int face_tot = 0;
+	uint face_tot = 0;
 
 
 	BLI_LINKSTACK_INIT(loop_queue_prev);

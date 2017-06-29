@@ -68,7 +68,8 @@ typedef struct bScreen {
 	char do_draw_drag;					/* notifier for dragging draw. */
 	char swap;							/* indicator to survive swap-exchange systems */
 	char skip_handling;					/* set to delay screen handling after switching back from maximized area */
-	char pad[7];
+	char scrubbing;						/* set when scrubbing to avoid some costly updates */
+	char pad[6];
 	
 	short mainwin;						/* screensize subwindow, for screenedges and global menus */
 	short subwinactive;					/* active subwindow */
@@ -217,11 +218,18 @@ typedef struct ScrArea {
 	char temp, pad;
 	
 	struct SpaceType *type;		/* callbacks for this space type */
-	
-	ListBase spacedata;		/* SpaceLink */
-	ListBase regionbase;	/* ARegion */
-	ListBase handlers;		/* wmEventHandler */
-	
+
+	/* A list of space links (editors) that were open in this area before. When
+	 * changing the editor type, we try to reuse old editor data from this list.
+	 * The first item is the active/visible one.
+	 */
+	ListBase spacedata;  /* SpaceLink */
+	/* NOTE: This region list is the one from the active/visible editor (first item in
+	 * spacedata list). Use SpaceLink.regionbase if it's inactive (but only then)!
+	 */
+	ListBase regionbase; /* ARegion */
+	ListBase handlers;   /* wmEventHandler */
+
 	ListBase actionzones;	/* AZone */
 } ScrArea;
 
@@ -289,7 +297,6 @@ enum {
 #define AREAGRID	4
 #define AREAMINX	32
 #define HEADERY		26
-#define AREAMINY	(HEADERY+EDGEWIDTH)
 
 #define HEADERDOWN	1
 #define HEADERTOP	2
@@ -344,8 +351,10 @@ enum {
 #define UI_LIST_AUTO_SIZE_THRESHOLD 1
 
 /* uiList filter flags (dyn_data) */
+/* WARNING! Those values are used by integer RNA too, which does not handle well values > INT_MAX...
+ *          So please do not use 32nd bit here. */
 enum {
-	UILST_FLT_ITEM      = 1 << 31,  /* This item has passed the filter process successfully. */
+	UILST_FLT_ITEM      = 1 << 30,  /* This item has passed the filter process successfully. */
 };
 
 /* uiList filter options */
@@ -356,7 +365,7 @@ enum {
 
 /* uiList filter orderby type */
 enum {
-	UILST_FLT_SORT_ALPHA         = 1 << 0,
+	UILST_FLT_SORT_ALPHA        = 1 << 0,
 	UILST_FLT_SORT_REVERSE      = 1 << 31  /* Special value, bitflag used to reverse order! */
 };
 

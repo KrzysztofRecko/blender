@@ -64,6 +64,7 @@
 
 
 #include "BLI_strict_flags.h"
+#include "BLI_hash.h"
 
 /* Dupli-Geometry */
 
@@ -80,7 +81,6 @@ typedef struct DupliContext {
 
 	int persistent_id[MAX_DUPLI_RECUR];
 	int level;
-	int index;
 
 	const struct DupliGenerator *gen;
 
@@ -181,6 +181,23 @@ static DupliObject *make_dupli(const DupliContext *ctx,
 	if (ob->type == OB_MBALL)
 		dob->no_draw = true;
 
+	/* random number */
+	/* the logic here is designed to match Cycles */
+	dob->random_id = BLI_hash_string(dob->ob->id.name + 2);
+
+	if (dob->persistent_id[0] != INT_MAX) {
+		for (i = 0; i < MAX_DUPLI_RECUR * 2; i++) {
+			dob->random_id = BLI_hash_int_2d(dob->random_id, (unsigned int)dob->persistent_id[i]);
+		}
+	}
+	else {
+		dob->random_id = BLI_hash_int_2d(dob->random_id, 0);
+	}
+
+	if (ctx->object != ob) {
+		dob->random_id ^= BLI_hash_int(BLI_hash_string(ctx->object->id.name + 2));
+	}
+
 	return dob;
 }
 
@@ -222,31 +239,39 @@ static void make_child_duplis(const DupliContext *ctx, void *userdata, MakeChild
 
 	if (ctx->group) {
 		unsigned int lay = ctx->group->layer;
+		int groupid = 0;
 		GroupObject *go;
-		for (go = ctx->group->gobject.first; go; go = go->next) {
+		for (go = ctx->group->gobject.first; go; go = go->next, groupid++) {
 			Object *ob = go->ob;
 
 			if ((ob->lay & lay) && ob != obedit && is_child(ob, parent)) {
+				DupliContext pctx;
+				copy_dupli_context(&pctx, ctx, ctx->object, NULL, groupid, false);
+
 				/* mballs have a different dupli handling */
 				if (ob->type != OB_MBALL)
 					ob->flag |= OB_DONE;  /* doesnt render */
 
-				make_child_duplis_cb(ctx, userdata, ob);
+				make_child_duplis_cb(&pctx, userdata, ob);
 			}
 		}
 	}
 	else {
 		unsigned int lay = ctx->scene->lay;
+		int baseid = 0;
 		Base *base;
-		for (base = ctx->scene->base.first; base; base = base->next) {
+		for (base = ctx->scene->base.first; base; base = base->next, baseid++) {
 			Object *ob = base->object;
 
 			if ((base->lay & lay) && ob != obedit && is_child(ob, parent)) {
+				DupliContext pctx;
+				copy_dupli_context(&pctx, ctx, ctx->object, NULL, baseid, false);
+
 				/* mballs have a different dupli handling */
 				if (ob->type != OB_MBALL)
 					ob->flag |= OB_DONE;  /* doesnt render */
 
-				make_child_duplis_cb(ctx, userdata, ob);
+				make_child_duplis_cb(&pctx, userdata, ob);
 			}
 		}
 	}
@@ -354,7 +379,7 @@ static void make_duplis_frames(const DupliContext *ctx)
 
 	/* special flag to avoid setting recalc flags to notify the depsgraph of
 	 * updates, as this is not a permanent change to the object */
-	ob->id.flag |= LIB_ANIM_NO_RECALC;
+	ob->id.tag |= LIB_TAG_ANIM_NO_RECALC;
 
 	for (scene->r.cfra = ob->dupsta; scene->r.cfra <= dupend; scene->r.cfra++) {
 		int ok = 1;
@@ -635,8 +660,7 @@ static void make_duplis_font(const DupliContext *ctx)
 				float rmat[4][4];
 
 				zero_v3(obmat[3]);
-				unit_m4(rmat);
-				rotate_m4(rmat, 'Z', -ct->rot);
+				axis_angle_to_mat4_single(rmat, 'Z', -ct->rot);
 				mul_m4_m4m4(obmat, obmat, rmat);
 			}
 
@@ -792,8 +816,10 @@ static void make_duplis_faces(const DupliContext *ctx)
 			fdd.dm = mesh_get_derived_final(scene, parent, dm_mask);
 
 		if (use_texcoords) {
+			CustomData *ml_data = fdd.dm->getLoopDataLayout(fdd.dm);
+			const int uv_idx = CustomData_get_render_layer(ml_data, CD_MLOOPUV);
 			fdd.orco = fdd.dm->getVertDataArray(fdd.dm, CD_ORCO);
-			fdd.mloopuv = fdd.dm->getLoopDataArray(fdd.dm, CD_MLOOPUV);
+			fdd.mloopuv = CustomData_get_layer_n(ml_data, CD_MLOOPUV, uv_idx);
 		}
 		else {
 			fdd.orco = NULL;
@@ -849,7 +875,7 @@ static void make_duplis_particle_system(const DupliContext *ctx, ParticleSystem 
 	if (part == NULL)
 		return;
 
-	if (!psys_check_enabled(par, psys))
+	if (!psys_check_enabled(par, psys, (ctx->eval_ctx->mode == DAG_EVAL_RENDER)))
 		return;
 
 	if (!for_render)
@@ -1251,15 +1277,16 @@ DupliApplyData *duplilist_apply(Object *ob, Scene *scene, ListBase *duplilist)
 		                                "DupliObject apply extra data");
 
 		for (dob = duplilist->first, i = 0; dob; dob = dob->next, ++i) {
-			/* copy obmat from duplis */
-			copy_m4_m4(apply_data->extra[i].obmat, dob->ob->obmat);
-
 			/* make sure derivedmesh is calculated once, before drawing */
 			if (scene && !(dob->ob->transflag & OB_DUPLICALCDERIVED) && dob->ob->type == OB_MESH) {
 				mesh_get_derived_final(scene, dob->ob, scene->customdata_mask);
 				dob->ob->transflag |= OB_DUPLICALCDERIVED;
 			}
+		}
 
+		for (dob = duplilist->first, i = 0; dob; dob = dob->next, ++i) {
+			/* copy obmat from duplis */
+			copy_m4_m4(apply_data->extra[i].obmat, dob->ob->obmat);
 			copy_m4_m4(dob->ob->obmat, dob->mat);
 			
 			/* copy layers from the main duplicator object */

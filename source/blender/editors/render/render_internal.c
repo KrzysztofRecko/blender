@@ -33,21 +33,24 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_blenlib.h"
+#include "BLI_listbase.h"
+#include "BLI_rect.h"
+#include "BLI_timecode.h"
 #include "BLI_math.h"
 #include "BLI_threads.h"
 #include "BLI_utildefines.h"
 
 #include "PIL_time.h"
 
-#include "BLF_translation.h"
+#include "BLT_translation.h"
 
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_view3d_types.h"
 #include "DNA_userdef_types.h"
 
-#include "BKE_blender.h"
+#include "BKE_blender_undo.h"
+#include "BKE_blender_version.h"
 #include "BKE_camera.h"
 #include "BKE_context.h"
 #include "BKE_colortools.h"
@@ -113,6 +116,7 @@ typedef struct RenderJob {
 	ScrArea *sa;
 	ColorManagedViewSettings view_settings;
 	ColorManagedDisplaySettings display_settings;
+	bool supports_glsl_draw;
 	bool interface_locked;
 } RenderJob;
 
@@ -188,9 +192,9 @@ static void image_buffer_rect_update(RenderJob *rj, RenderResult *rr, ImBuf *ibu
 	 *                                              - sergey -
 	 */
 	/* TODO(sergey): Need to check has_combined here? */
-	if (iuser->passtype == SCE_PASS_COMBINED) {
+	if (iuser->pass == 0) {
 		RenderView *rv;
-		size_t view_id = BKE_scene_multiview_view_id_get(&scene->r, viewname);
+		const int view_id = BKE_scene_multiview_view_id_get(&scene->r, viewname);
 		rv = RE_RenderViewGetById(rr, view_id);
 
 		/* find current float rect for display, first case is after composite... still weak */
@@ -207,7 +211,7 @@ static void image_buffer_rect_update(RenderJob *rj, RenderResult *rr, ImBuf *ibu
 			}
 			else {
 				if (rr->renlay == NULL) return;
-				rectf = RE_RenderLayerGetPass(rr->renlay, SCE_PASS_COMBINED, viewname);
+				rectf = RE_RenderLayerGetPass(rr->renlay, RE_PASSNAME_COMBINED, viewname);
 			}
 		}
 		if (rectf == NULL) return;
@@ -309,7 +313,7 @@ static int screen_render_exec(bContext *C, wmOperator *op)
 
 	ima = BKE_image_verify_viewer(IMA_TYPE_R_RESULT, "Render Result");
 	BKE_image_signal(ima, NULL, IMA_SIGNAL_FREE);
-	BKE_image_backup_render(scene, ima);
+	BKE_image_backup_render(scene, ima, true);
 
 	/* cleanup sequencer caches before starting user triggered render.
 	 * otherwise, invalidated cache entries can make their way into
@@ -374,7 +378,7 @@ static void make_renderinfo_string(const RenderStats *rs,
 	spos += sprintf(spos, IFACE_("Frame:%d "), (scene->r.cfra));
 
 	/* previous and elapsed time */
-	BLI_timestr(rs->lastframetime, info_time_str, sizeof(info_time_str));
+	BLI_timecode_string_from_time_simple(info_time_str, sizeof(info_time_str), rs->lastframetime);
 
 	if (rs->infostr && rs->infostr[0]) {
 		if (rs->lastframetime != 0.0)
@@ -382,7 +386,7 @@ static void make_renderinfo_string(const RenderStats *rs,
 		else
 			spos += sprintf(spos, "| ");
 
-		BLI_timestr(PIL_check_seconds_timer() - rs->starttime, info_time_str, sizeof(info_time_str));
+		BLI_timecode_string_from_time_simple(info_time_str, sizeof(info_time_str), PIL_check_seconds_timer() - rs->starttime);
 	}
 	else
 		spos += sprintf(spos, "| ");
@@ -523,6 +527,7 @@ static void render_image_update_pass_and_layer(RenderJob *rj, RenderResult *rr, 
 			}
 		}
 
+		iuser->pass = sima->iuser.pass;
 		iuser->layer = sima->iuser.layer;
 
 		RE_ReleaseResult(rj->re);
@@ -565,6 +570,7 @@ static void image_rect_update(void *rjv, RenderResult *rr, volatile rcti *renrec
 		 * operate with.
 		 */
 		if (rr->do_exr_tile ||
+		    !rj->supports_glsl_draw ||
 		    ibuf->channels == 1 ||
 		    U.image_draw_method != IMAGE_DRAW_METHOD_GLSL)
 		{
@@ -783,24 +789,24 @@ static void clean_viewport_memory(Main *bmain, Scene *scene, int renderlay)
 	Base *base;
 
 	for (object = bmain->object.first; object; object = object->id.next) {
-		object->id.flag |= LIB_DOIT;
+		object->id.tag |= LIB_TAG_DOIT;
 	}
 
 	for (SETLOOPER(scene, sce_iter, base)) {
 		if ((base->lay & renderlay) == 0) {
 			continue;
 		}
-
 		if (RE_allow_render_generic_object(base->object)) {
-			base->object->id.flag &= ~LIB_DOIT;
+			base->object->id.tag &= ~LIB_TAG_DOIT;
 		}
 	}
 
-	for (object = bmain->object.first; object; object = object->id.next) {
-		if ((object->id.flag & LIB_DOIT) == 0) {
+	for (SETLOOPER(scene, sce_iter, base)) {
+		object = base->object;
+		if ((object->id.tag & LIB_TAG_DOIT) == 0) {
 			continue;
 		}
-		object->id.flag &= ~LIB_DOIT;
+		object->id.tag &= ~LIB_TAG_DOIT;
 
 		BKE_object_free_derived_caches(object);
 	}
@@ -874,7 +880,7 @@ static int screen_render_invoke(bContext *C, wmOperator *op, const wmEvent *even
 	// store spare
 
 	/* ensure at least 1 area shows result */
-	sa = render_view_open(C, event->x, event->y);
+	sa = render_view_open(C, event->x, event->y, op->reports);
 
 	jobflag = WM_JOB_EXCL_RENDER | WM_JOB_PRIORITY | WM_JOB_PROGRESS;
 	
@@ -896,11 +902,11 @@ static int screen_render_invoke(bContext *C, wmOperator *op, const wmEvent *even
 	rj->write_still = is_write_still && !is_animation;
 	rj->iuser.scene = scene;
 	rj->iuser.ok = 1;
-	rj->iuser.passtype = SCE_PASS_COMBINED;
 	rj->reports = op->reports;
 	rj->orig_layer = 0;
 	rj->last_layer = 0;
 	rj->sa = sa;
+	rj->supports_glsl_draw = IMB_colormanagement_support_glsl_draw(&scene->view_settings);
 
 	BKE_color_managed_display_settings_copy(&rj->display_settings, &scene->display_settings);
 	BKE_color_managed_view_settings_copy(&rj->view_settings, &scene->view_settings);
@@ -954,7 +960,7 @@ static int screen_render_invoke(bContext *C, wmOperator *op, const wmEvent *even
 	/* get a render result image, and make sure it is empty */
 	ima = BKE_image_verify_viewer(IMA_TYPE_R_RESULT, "Render Result");
 	BKE_image_signal(ima, NULL, IMA_SIGNAL_FREE);
-	BKE_image_backup_render(rj->scene, ima);
+	BKE_image_backup_render(rj->scene, ima, true);
 	rj->image = ima;
 
 	/* setup new render */
@@ -1186,6 +1192,7 @@ static void render_view3d_startjob(void *customdata, short *stop, short *do_upda
 	char name[32];
 	int update_flag;
 	bool use_border;
+	int ob_inst_update_flag = 0;
 
 	update_flag = rp->engine->job_update_flag;
 	rp->engine->job_update_flag = 0;
@@ -1297,6 +1304,13 @@ static void render_view3d_startjob(void *customdata, short *stop, short *do_upda
 	/* OK, can we enter render code? */
 	if (rstats->convertdone) {
 		bool first_time = true;
+
+		if (update_flag & PR_UPDATE_VIEW) {
+			ob_inst_update_flag |= RE_OBJECT_INSTANCES_UPDATE_VIEW;
+		}
+
+		RE_updateRenderInstances(re, ob_inst_update_flag);
+
 		for (;;) {
 			if (first_time == false) {
 				if (restore)
@@ -1471,7 +1485,7 @@ static void render_view3d_do(RenderEngine *engine, const bContext *C)
 void render_view3d_update(RenderEngine *engine, const bContext *C)
 {	
 	/* this shouldn't be needed and causes too many database rebuilds, but we
-	 * aren't actually tracking updates for all relevent datablocks so this is
+	 * aren't actually tracking updates for all relevant datablocks so this is
 	 * a catch-all for updates */
 	engine->update_flag |= RE_ENGINE_UPDATE_DATABASE;
 
@@ -1637,4 +1651,46 @@ Scene *ED_render_job_get_current_scene(const bContext *C)
 		return rj->current_scene;
 	}
 	return NULL;
+}
+
+/* Motion blur curve preset */
+
+static int render_shutter_curve_preset_exec(bContext *C, wmOperator *op)
+{
+	Scene *scene = CTX_data_scene(C);
+	CurveMapping *mblur_shutter_curve = &scene->r.mblur_shutter_curve;
+	CurveMap *cm = mblur_shutter_curve->cm;
+	int preset = RNA_enum_get(op->ptr, "shape");
+
+	cm->flag &= ~CUMA_EXTEND_EXTRAPOLATE;
+	mblur_shutter_curve->preset = preset;
+	curvemap_reset(cm,
+	               &mblur_shutter_curve->clipr,
+	               mblur_shutter_curve->preset,
+	               CURVEMAP_SLOPE_POS_NEG);
+	curvemapping_changed(mblur_shutter_curve, false);
+
+	return OPERATOR_FINISHED;
+}
+
+void RENDER_OT_shutter_curve_preset(wmOperatorType *ot)
+{
+	PropertyRNA *prop;
+	static EnumPropertyItem prop_shape_items[] = {
+		{CURVE_PRESET_SHARP, "SHARP", 0, "Sharp", ""},
+		{CURVE_PRESET_SMOOTH, "SMOOTH", 0, "Smooth", ""},
+		{CURVE_PRESET_MAX, "MAX", 0, "Max", ""},
+		{CURVE_PRESET_LINE, "LINE", 0, "Line", ""},
+		{CURVE_PRESET_ROUND, "ROUND", 0, "Round", ""},
+		{CURVE_PRESET_ROOT, "ROOT", 0, "Root", ""},
+		{0, NULL, 0, NULL, NULL}};
+
+	ot->name = "Shutter Curve Preset";
+	ot->description = "Set shutter curve";
+	ot->idname = "RENDER_OT_shutter_curve_preset";
+
+	ot->exec = render_shutter_curve_preset_exec;
+
+	prop = RNA_def_enum(ot->srna, "shape", prop_shape_items, CURVE_PRESET_SMOOTH, "Mode", "");
+	RNA_def_property_translation_context(prop, BLT_I18NCONTEXT_ID_CURVE); /* Abusing id_curve :/ */
 }

@@ -38,6 +38,7 @@ set(DEFSRC
 	rna_armature.c
 	rna_boid.c
 	rna_brush.c
+	rna_cachefile.c
 	rna_camera.c
 	rna_cloth.c
 	rna_color.c
@@ -175,9 +176,6 @@ set(INC_SYS
 
 if(WITH_CYCLES)
 	add_definitions(-DWITH_CYCLES)
-	if(WITH_CYCLES_DEBUG)
-		add_definitions(-DWITH_CYCLES_DEBUG)
-	endif()
 endif()
 
 if(WITH_PYTHON)
@@ -224,7 +222,11 @@ if(WITH_IMAGE_FRAMESERVER)
 endif()
 
 if(WITH_AUDASPACE)
-	add_definitions(-DWITH_AUDASPACE)
+	add_definitions(${AUDASPACE_DEFINITIONS})
+
+	list(APPEND INC_SYS
+		${AUDASPACE_C_INCLUDE_DIRS}
+	)
 endif()
 
 if(WITH_CODEC_QUICKTIME)
@@ -286,6 +288,13 @@ if(WITH_INTERNATIONAL)
 	add_definitions(-DWITH_INTERNATIONAL)
 endif()
 
+if(WITH_ALEMBIC)
+	list(APPEND INC
+		../../alembic
+	)
+	add_definitions(-DWITH_ALEMBIC)
+endif()
+
 if(WITH_BULLET)
 	list(APPEND INC
 		../../../../intern/rigidbody
@@ -300,14 +309,34 @@ if(WITH_FREESTYLE)
 	add_definitions(-DWITH_FREESTYLE)
 endif()
 
+if(WITH_OPENSUBDIV)
+	list(APPEND INC
+		../../../../intern/opensubdiv
+	)
+	add_definitions(-DWITH_OPENSUBDIV)
+endif()
+
+if(WITH_OPENVDB)
+	add_definitions(-DWITH_OPENVDB)
+
+	if(WITH_OPENVDB_BLOSC)
+		add_definitions(-DWITH_OPENVDB_BLOSC)
+	endif()
+endif()
+
+if(WITH_INPUT_NDOF)
+	add_definitions(-DWITH_INPUT_NDOF)
+endif()
+
 # Build makesrna executable
 blender_include_dirs(
 	.
 	..
+	../../blenfont
 	../../blenkernel
 	../../blenlib
 	../../bmesh
-	../../blenfont
+	../../blentranslation
 	../../depsgraph
 	../../gpu
 	../../imbuf
@@ -318,7 +347,6 @@ blender_include_dirs(
 	../../windowmanager
 	../../editors/include
 	../../render/extern/include
-	../../../../intern/audaspace/intern
 	../../../../intern/cycles/blender
 	../../../../intern/guardedalloc
 	../../../../intern/glew-mx
@@ -331,7 +359,10 @@ blender_include_dirs_sys(
 	"${GLEW_INCLUDE_PATH}"
 )
 
+add_cc_flags_custom_test(makesrna)
+
 add_executable(makesrna ${SRC} ${SRC_RNA_INC} ${SRC_DNA_INC})
+
 target_link_libraries(makesrna bf_dna)
 target_link_libraries(makesrna bf_dna_blenlib)
 
@@ -339,7 +370,7 @@ target_link_libraries(makesrna bf_dna_blenlib)
 # note (linux only): with crashes try add this after COMMAND: valgrind --leak-check=full --track-origins=yes
 add_custom_command(
 	OUTPUT ${GENSRC}
-	COMMAND ${CMAKE_BINARY_DIR}/bin/${CMAKE_CFG_INTDIR}/makesrna ${CMAKE_CURRENT_BINARY_DIR}/
+	COMMAND "$<TARGET_FILE:makesrna>" ${CMAKE_CURRENT_BINARY_DIR}/
 	DEPENDS makesrna
 )
 

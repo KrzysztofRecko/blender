@@ -42,6 +42,7 @@
 
 #include "BKE_cdderivedmesh.h"
 #include "BKE_global.h"
+#include "BKE_library_query.h"
 #include "BKE_modifier.h"
 #include "BKE_deform.h"
 #include "BKE_editmesh.h"
@@ -82,7 +83,7 @@ static void copyData(ModifierData *md, ModifierData *target)
 	MeshDeformModifierData *mmd = (MeshDeformModifierData *) md;
 	MeshDeformModifierData *tmmd = (MeshDeformModifierData *) target;
 
-	*tmmd = *mmd;
+	modifier_copyData_generic(md, target);
 
 	if (mmd->bindinfluences) tmmd->bindinfluences = MEM_dupallocN(mmd->bindinfluences);
 	if (mmd->bindoffsets) tmmd->bindoffsets = MEM_dupallocN(mmd->bindoffsets);
@@ -90,8 +91,8 @@ static void copyData(ModifierData *md, ModifierData *target)
 	if (mmd->dyngrid) tmmd->dyngrid = MEM_dupallocN(mmd->dyngrid);
 	if (mmd->dyninfluences) tmmd->dyninfluences = MEM_dupallocN(mmd->dyninfluences);
 	if (mmd->dynverts) tmmd->dynverts = MEM_dupallocN(mmd->dynverts);
-	if (mmd->bindweights) tmmd->dynverts = MEM_dupallocN(mmd->bindweights);  /* deprecated */
-	if (mmd->bindcos) tmmd->dynverts = MEM_dupallocN(mmd->bindcos);  /* deprecated */
+	if (mmd->bindweights) tmmd->bindweights = MEM_dupallocN(mmd->bindweights);  /* deprecated */
+	if (mmd->bindcos) tmmd->bindcos = MEM_dupallocN(mmd->bindcos);  /* deprecated */
 }
 
 static CustomDataMask requiredDataMask(Object *UNUSED(ob), ModifierData *md)
@@ -114,12 +115,11 @@ static bool isDisabled(ModifierData *md, int UNUSED(useRenderParams))
 
 static void foreachObjectLink(
         ModifierData *md, Object *ob,
-        void (*walk)(void *userData, Object *ob, Object **obpoin),
-        void *userData)
+        ObjectWalkFunc walk, void *userData)
 {
 	MeshDeformModifierData *mmd = (MeshDeformModifierData *) md;
 
-	walk(userData, ob, &mmd->object);
+	walk(userData, ob, &mmd->object, IDWALK_CB_NOP);
 }
 
 static void updateDepgraph(ModifierData *md, DagForest *forest,
@@ -234,7 +234,7 @@ typedef struct MeshdeformUserdata {
 	float (*icagemat)[3];
 } MeshdeformUserdata;
 
-static void meshdeform_vert_task(void * userdata, int iter)
+static void meshdeform_vert_task(void *userdata, const int iter)
 {
 	MeshdeformUserdata *data = userdata;
 	/*const*/ MeshDeformModifierData *mmd = data->mmd;
@@ -318,7 +318,7 @@ static void meshdeformModifier_do(
 	 */
 	if (mmd->object == md->scene->obedit) {
 		BMEditMesh *em = BKE_editmesh_from_object(mmd->object);
-		tmpdm = editbmesh_get_derived_cage_and_final(md->scene, mmd->object, em, &cagedm, 0);
+		tmpdm = editbmesh_get_derived_cage_and_final(md->scene, mmd->object, em, 0, &cagedm);
 		if (tmpdm)
 			tmpdm->release(tmpdm);
 	}
@@ -352,7 +352,7 @@ static void meshdeformModifier_do(
 		/* progress bar redraw can make this recursive .. */
 		if (!recursive) {
 			recursive = 1;
-			mmd->bindfunc(md->scene, mmd, (float *)vertexCos, numVerts, cagemat);
+			mmd->bindfunc(md->scene, mmd, cagedm, (float *)vertexCos, numVerts, cagemat);
 			recursive = 0;
 		}
 	}
@@ -413,7 +413,7 @@ static void meshdeformModifier_do(
 	data.icagemat = icagemat;
 
 	/* Do deformation. */
-	BLI_task_parallel_range(0, totvert, &data, meshdeform_vert_task);
+	BLI_task_parallel_range(0, totvert, &data, meshdeform_vert_task, totvert > 1000);
 
 	/* release cage derivedmesh */
 	MEM_freeN(dco);
@@ -520,6 +520,7 @@ ModifierTypeInfo modifierType_MeshDeform = {
 	/* structSize */        sizeof(MeshDeformModifierData),
 	/* type */              eModifierTypeType_OnlyDeform,
 	/* flags */             eModifierTypeFlag_AcceptsCVs |
+	                        eModifierTypeFlag_AcceptsLattice |
 	                        eModifierTypeFlag_SupportsEditmode,
 
 	/* copyData */          copyData,

@@ -61,7 +61,7 @@ void SceneExporter::exportHierarchy(Scene *sce)
 	// Ensure all objects in the export_set are marked
 	for (node = this->export_settings->export_set; node; node = node->next) {
 		Object *ob = (Object *) node->link;
-		ob->id.flag |= LIB_DOIT;
+		ob->id.tag |= LIB_TAG_DOIT;
 	}
 	
 	// Now find all exportable base ojects (highest in export hierarchy)
@@ -151,7 +151,10 @@ void SceneExporter::writeNodes(Object *ob, Scene *sce)
 			COLLADASW::InstanceGeometry instGeom(mSW);
 			instGeom.setUrl(COLLADASW::URI(COLLADABU::Utils::EMPTY_STRING, get_geometry_id(ob, this->export_settings->use_object_instantiation)));
 			instGeom.setName(translate_id(id_name(ob)));
-			InstanceWriter::add_material_bindings(instGeom.getBindMaterial(), ob, this->export_settings->active_uv_only);
+			InstanceWriter::add_material_bindings(instGeom.getBindMaterial(), 
+				    ob, 
+					this->export_settings->active_uv_only, 
+					this->export_settings->export_texture_type);
 
 			instGeom.add();
 		}

@@ -16,11 +16,10 @@
 
 #include <stdlib.h>
 
-#include "util_time.h"
+#include "util/util_time.h"
+#include "util/util_windows.h"
 
 #ifdef _WIN32
-
-#include <windows.h>
 
 CCL_NAMESPACE_BEGIN
 

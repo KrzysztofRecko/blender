@@ -183,16 +183,16 @@ typedef struct Object {
 	short transflag, protectflag;	/* transformation settings and transform locks  */
 	short trackflag, upflag;
 	short nlaflag;				/* used for DopeSheet filtering settings (expanded/collapsed) */
-	short ipoflag;				// xxx deprecated... old animation system
 	short scaflag;				/* ui state for game logic */
 	char scavisflag;			/* more display settings for game logic */
 	char depsflag;
 
+	/* did last modifier stack generation need mapping support? */
+	char lastNeedMapping;  /* bool */
+	char pad;
+
 	/* dupli-frame settings */
 	int dupon, dupoff, dupsta, dupend;
-
-	/* did last modifier stack generation need mapping support? */
-	int lastNeedMapping;
 
 	/* during realtime */
 
@@ -222,6 +222,8 @@ typedef struct Object {
 	float step_height;
 	float jump_speed;
 	float fall_speed;
+	unsigned char max_jumps;
+	char pad2[3];
 
 	/** Collision mask settings */
 	unsigned short col_group, col_mask;
@@ -295,6 +297,8 @@ typedef struct Object {
 
 	ListBase lodlevels;		/* contains data for levels of detail */
 	LodLevel *currentlod;
+
+	struct PreviewImage *preview;
 } Object;
 
 /* Warning, this is not used anymore because hooks are now modifiers */
@@ -327,10 +331,12 @@ typedef struct DupliObject {
 
 	/* persistent identifier for a dupli object, for inter-frame matching of
 	 * objects with motion blur, or inter-update matching for syncing */
-	int persistent_id[8]; /* MAX_DUPLI_RECUR */
+	int persistent_id[16]; /* 2*MAX_DUPLI_RECUR */
 
 	/* particle this dupli was generated from */
 	struct ParticleSystem *particle_system;
+	unsigned int random_id;
+	unsigned int pad;
 } DupliObject;
 
 /* **************** OBJECT ********************* */
@@ -380,7 +386,9 @@ enum {
 enum {
 	PARTYPE       = (1 << 4) - 1,
 	PAROBJECT     = 0,
+#ifdef DNA_DEPRECATED
 	PARCURVE      = 1,  /* Deprecated. */
+#endif
 	PARKEY        = 2,  /* XXX Unused, deprecated? */
 
 	PARSKEL       = 4,
@@ -411,13 +419,6 @@ enum {
 
 	OB_DUPLI            = OB_DUPLIFRAMES | OB_DUPLIVERTS | OB_DUPLIGROUP | OB_DUPLIFACES | OB_DUPLIPARTS,
 };
-
-/* (short) ipoflag */
-/* XXX: many old flags for features removed due to incompatibility
- * with new system and/or other design issues were here 
- */
-	/* for stride/path editing (XXX: NEEDS REVIEW) */
-#define OB_DISABLE_PATH     (1 << 10)
 
 /* (short) trackflag / upflag */
 enum {
@@ -676,6 +677,7 @@ typedef enum ObjectMode {
 	OB_MODE_TEXTURE_PAINT = 1 << 4,
 	OB_MODE_PARTICLE_EDIT = 1 << 5,
 	OB_MODE_POSE          = 1 << 6,
+	OB_MODE_GPENCIL       = 1 << 7,  /* NOTE: Just a dummy to make the UI nicer */
 } ObjectMode;
 
 /* any mode where the brush system is used */

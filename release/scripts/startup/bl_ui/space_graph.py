@@ -42,10 +42,11 @@ class GRAPH_HT_header(Header):
 
         dopesheet_filter(layout, context)
 
-        layout.prop(st, "use_normalization", text="Normalize")
-        row = layout.row()
-        row.active = st.use_normalization
-        row.prop(st, "use_auto_normalization", text="Auto")
+        row = layout.row(align=True)
+        row.prop(st, "use_normalization", icon='NORMALIZE_FCURVES', text="Normalize", toggle=True)
+        sub = row.row(align=True)
+        sub.active = st.use_normalization
+        sub.prop(st, "use_auto_normalization", icon='FILE_REFRESH', text="", toggle=True)
 
         row = layout.row(align=True)
 
@@ -129,8 +130,8 @@ class GRAPH_MT_view(Menu):
 
         layout.separator()
         layout.operator("screen.area_dupli")
-        layout.operator("screen.screen_full_area", text="Toggle Maximize Area")
-        layout.operator("screen.screen_full_area").use_hide_panels = True
+        layout.operator("screen.screen_full_area")
+        layout.operator("screen.screen_full_area", text="Toggle Fullscreen Area").use_hide_panels = True
 
 
 class GRAPH_MT_select(Menu):
@@ -153,6 +154,8 @@ class GRAPH_MT_select(Menu):
         props = layout.operator("graph.select_border", text="Border (Include Handles)")
         props.axis_range = False
         props.include_handles = True
+
+        layout.operator("graph.select_circle")
 
         layout.separator()
         layout.operator("graph.select_column", text="Columns on Selected Keys").mode = 'KEYS'
@@ -257,7 +260,8 @@ class GRAPH_MT_key(Menu):
         layout.operator_menu_enum("graph.easing_type", "type", text="Easing Type")
 
         layout.separator()
-        layout.operator("graph.clean")
+        layout.operator("graph.clean").channels = False
+        layout.operator("graph.clean", text="Clean Channels").channels = True
         layout.operator("graph.smooth")
         layout.operator("graph.sample")
         layout.operator("graph.bake")
@@ -292,8 +296,22 @@ class GRAPH_MT_delete(Menu):
 
         layout.separator()
 
-        layout.operator("graph.clean")
+        layout.operator("graph.clean").channels = False
+        layout.operator("graph.clean", text="Clean Channels").channels = True
 
+classes = (
+    GRAPH_HT_header,
+    GRAPH_MT_editor_menus,
+    GRAPH_MT_view,
+    GRAPH_MT_select,
+    GRAPH_MT_marker,
+    GRAPH_MT_channel,
+    GRAPH_MT_key,
+    GRAPH_MT_key_transform,
+    GRAPH_MT_delete,
+)
 
 if __name__ == "__main__":  # only for live edit.
-    bpy.utils.register_module(__name__)
+    from bpy.utils import register_class
+    for cls in classes:
+        register_class(cls)

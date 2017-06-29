@@ -16,15 +16,34 @@
 
 /* OpenCL kernel entry points - unfinished */
 
-#include "../../kernel_compat_opencl.h"
-#include "../../kernel_math.h"
-#include "../../kernel_types.h"
-#include "../../kernel_globals.h"
+#include "kernel/kernel_compat_opencl.h"
+#include "kernel/kernel_math.h"
+#include "kernel/kernel_types.h"
+#include "kernel/kernel_globals.h"
+#include "kernel/kernel_image_opencl.h"
 
-#include "../../kernel_film.h"
-#include "../../kernel_path.h"
-#include "../../kernel_path_branched.h"
-#include "../../kernel_bake.h"
+#include "kernel/kernel_film.h"
+
+#if defined(__COMPILE_ONLY_MEGAKERNEL__) || !defined(__NO_BAKING__)
+#  include "kernel/kernel_path.h"
+#  include "kernel/kernel_path_branched.h"
+#else  /* __COMPILE_ONLY_MEGAKERNEL__ */
+/* Include only actually used headers for the case
+ * when path tracing kernels are not needed.
+ */
+#  include "kernel/kernel_random.h"
+#  include "kernel/kernel_differential.h"
+#  include "kernel/kernel_montecarlo.h"
+#  include "kernel/kernel_projection.h"
+#  include "kernel/geom/geom.h"
+#  include "kernel/bvh/bvh.h"
+
+#  include "kernel/kernel_accumulate.h"
+#  include "kernel/kernel_camera.h"
+#  include "kernel/kernel_shader.h"
+#endif  /* defined(__COMPILE_ONLY_MEGAKERNEL__) || !defined(__NO_BAKING__) */
+
+#include "kernel/kernel_bake.h"
 
 #ifdef __COMPILE_ONLY_MEGAKERNEL__
 
@@ -35,7 +54,7 @@ __kernel void kernel_ocl_path_trace(
 
 #define KERNEL_TEX(type, ttype, name) \
 	ccl_global type *name,
-#include "../../kernel_textures.h"
+#include "kernel/kernel_textures.h"
 
 	int sample,
 	int sx, int sy, int sw, int sh, int offset, int stride)
@@ -46,25 +65,26 @@ __kernel void kernel_ocl_path_trace(
 
 #define KERNEL_TEX(type, ttype, name) \
 	kg->name = name;
-#include "../../kernel_textures.h"
+#include "kernel/kernel_textures.h"
 
-	int x = sx + get_global_id(0);
-	int y = sy + get_global_id(1);
+	int x = sx + ccl_global_id(0);
+	int y = sy + ccl_global_id(1);
 
 	if(x < sx + sw && y < sy + sh)
 		kernel_path_trace(kg, buffer, rng_state, sample, x, y, offset, stride);
 }
 
-#else // __COMPILE_ONLY_MEGAKERNEL__
+#else  /* __COMPILE_ONLY_MEGAKERNEL__ */
 
 __kernel void kernel_ocl_shader(
 	ccl_constant KernelData *data,
 	ccl_global uint4 *input,
 	ccl_global float4 *output,
+	ccl_global float *output_luma,
 
 #define KERNEL_TEX(type, ttype, name) \
 	ccl_global type *name,
-#include "../../kernel_textures.h"
+#include "kernel/kernel_textures.h"
 
 	int type, int sx, int sw, int offset, int sample)
 {
@@ -74,12 +94,19 @@ __kernel void kernel_ocl_shader(
 
 #define KERNEL_TEX(type, ttype, name) \
 	kg->name = name;
-#include "../../kernel_textures.h"
+#include "kernel/kernel_textures.h"
 
-	int x = sx + get_global_id(0);
+	int x = sx + ccl_global_id(0);
 
-	if(x < sx + sw)
-		kernel_shader_evaluate(kg, input, output, (ShaderEvalType)type, x, sample);
+	if(x < sx + sw) {
+		kernel_shader_evaluate(kg,
+		                       input,
+		                       output,
+		                       output_luma,
+		                       (ShaderEvalType)type,
+		                       x,
+		                       sample);
+	}
 }
 
 __kernel void kernel_ocl_bake(
@@ -89,9 +116,9 @@ __kernel void kernel_ocl_bake(
 
 #define KERNEL_TEX(type, ttype, name) \
 	ccl_global type *name,
-#include "../../kernel_textures.h"
+#include "kernel/kernel_textures.h"
 
-	int type, int sx, int sw, int offset, int sample)
+	int type, int filter, int sx, int sw, int offset, int sample)
 {
 	KernelGlobals kglobals, *kg = &kglobals;
 
@@ -99,21 +126,15 @@ __kernel void kernel_ocl_bake(
 
 #define KERNEL_TEX(type, ttype, name) \
 	kg->name = name;
-#include "../../kernel_textures.h"
+#include "kernel/kernel_textures.h"
 
-	int x = sx + get_global_id(0);
+	int x = sx + ccl_global_id(0);
 
 	if(x < sx + sw) {
-#if defined(__KERNEL_OPENCL_NVIDIA__) && __COMPUTE_CAPABILITY__ < 300
-		/* NVidia compiler is spending infinite amount of time trying
-		 * to deal with kernel_bake_evaluate() on architectures prior
-		 * to sm_30.
-		 * For now we disable baking kernel for those devices, so at
-		 * least rendering with split kernel could be compiled.
-		 */
+#ifdef __NO_BAKING__
 		output[x] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
 #else
-		kernel_bake_evaluate(kg, input, output, (ShaderEvalType)type, x, offset, sample);
+		kernel_bake_evaluate(kg, input, output, (ShaderEvalType)type, filter, x, offset, sample);
 #endif
 	}
 }
@@ -125,7 +146,7 @@ __kernel void kernel_ocl_convert_to_byte(
 
 #define KERNEL_TEX(type, ttype, name) \
 	ccl_global type *name,
-#include "../../kernel_textures.h"
+#include "kernel/kernel_textures.h"
 
 	float sample_scale,
 	int sx, int sy, int sw, int sh, int offset, int stride)
@@ -136,10 +157,10 @@ __kernel void kernel_ocl_convert_to_byte(
 
 #define KERNEL_TEX(type, ttype, name) \
 	kg->name = name;
-#include "../../kernel_textures.h"
+#include "kernel/kernel_textures.h"
 
-	int x = sx + get_global_id(0);
-	int y = sy + get_global_id(1);
+	int x = sx + ccl_global_id(0);
+	int y = sy + ccl_global_id(1);
 
 	if(x < sx + sw && y < sy + sh)
 		kernel_film_convert_to_byte(kg, rgba, buffer, sample_scale, x, y, offset, stride);
@@ -152,7 +173,7 @@ __kernel void kernel_ocl_convert_to_half_float(
 
 #define KERNEL_TEX(type, ttype, name) \
 	ccl_global type *name,
-#include "../../kernel_textures.h"
+#include "kernel/kernel_textures.h"
 
 	float sample_scale,
 	int sx, int sy, int sw, int sh, int offset, int stride)
@@ -163,13 +184,29 @@ __kernel void kernel_ocl_convert_to_half_float(
 
 #define KERNEL_TEX(type, ttype, name) \
 	kg->name = name;
-#include "../../kernel_textures.h"
+#include "kernel/kernel_textures.h"
 
-	int x = sx + get_global_id(0);
-	int y = sy + get_global_id(1);
+	int x = sx + ccl_global_id(0);
+	int y = sy + ccl_global_id(1);
 
 	if(x < sx + sw && y < sy + sh)
 		kernel_film_convert_to_half_float(kg, rgba, buffer, sample_scale, x, y, offset, stride);
 }
 
-#endif // __COMPILE_ONLY_MEGAKERNEL__
+__kernel void kernel_ocl_zero_buffer(ccl_global float4 *buffer, ulong size, ulong offset)
+{
+	size_t i = ccl_global_id(0) + ccl_global_id(1) * ccl_global_size(0);
+
+	if(i < size / sizeof(float4)) {
+		buffer[i+offset/sizeof(float4)] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+	}
+	else if(i == size / sizeof(float4)) {
+		ccl_global uchar *b = (ccl_global uchar*)&buffer[i+offset/sizeof(float4)];
+
+		for(i = 0; i < size % sizeof(float4); i++) {
+			*(b++) = 0;
+		}
+	}
+}
+
+#endif  /* __COMPILE_ONLY_MEGAKERNEL__ */

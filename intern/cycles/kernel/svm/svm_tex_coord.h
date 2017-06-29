@@ -31,9 +31,9 @@ ccl_device void svm_node_tex_coord(KernelGlobals *kg,
 
 	switch(type) {
 		case NODE_TEXCO_OBJECT: {
-			data = ccl_fetch(sd, P);
+			data = sd->P;
 			if(node.w == 0) {
-				if(ccl_fetch(sd, object) != OBJECT_NONE) {
+				if(sd->object != OBJECT_NONE) {
 					object_inverse_position_transform(kg, sd, &data);
 				}
 			}
@@ -48,48 +48,47 @@ ccl_device void svm_node_tex_coord(KernelGlobals *kg,
 			break;
 		}
 		case NODE_TEXCO_NORMAL: {
-			data = ccl_fetch(sd, N);
-			if(ccl_fetch(sd, object) != OBJECT_NONE)
-				object_inverse_normal_transform(kg, sd, &data);
+			data = sd->N;
+			object_inverse_normal_transform(kg, sd, &data);
 			break;
 		}
 		case NODE_TEXCO_CAMERA: {
 			Transform tfm = kernel_data.cam.worldtocamera;
 
-			if(ccl_fetch(sd, object) != OBJECT_NONE)
-				data = transform_point(&tfm, ccl_fetch(sd, P));
+			if(sd->object != OBJECT_NONE)
+				data = transform_point(&tfm, sd->P);
 			else
-				data = transform_point(&tfm, ccl_fetch(sd, P) + camera_position(kg));
+				data = transform_point(&tfm, sd->P + camera_position(kg));
 			break;
 		}
 		case NODE_TEXCO_WINDOW: {
-			if((path_flag & PATH_RAY_CAMERA) && ccl_fetch(sd, object) == OBJECT_NONE && kernel_data.cam.type == CAMERA_ORTHOGRAPHIC)
-				data = camera_world_to_ndc(kg, sd, ccl_fetch(sd, ray_P));
+			if((path_flag & PATH_RAY_CAMERA) && sd->object == OBJECT_NONE && kernel_data.cam.type == CAMERA_ORTHOGRAPHIC)
+				data = camera_world_to_ndc(kg, sd, sd->ray_P);
 			else
-				data = camera_world_to_ndc(kg, sd, ccl_fetch(sd, P));
+				data = camera_world_to_ndc(kg, sd, sd->P);
 			data.z = 0.0f;
 			break;
 		}
 		case NODE_TEXCO_REFLECTION: {
-			if(ccl_fetch(sd, object) != OBJECT_NONE)
-				data = 2.0f*dot(ccl_fetch(sd, N), ccl_fetch(sd, I))*ccl_fetch(sd, N) - ccl_fetch(sd, I);
+			if(sd->object != OBJECT_NONE)
+				data = 2.0f*dot(sd->N, sd->I)*sd->N - sd->I;
 			else
-				data = ccl_fetch(sd, I);
+				data = sd->I;
 			break;
 		}
 		case NODE_TEXCO_DUPLI_GENERATED: {
-			data = object_dupli_generated(kg, ccl_fetch(sd, object));
+			data = object_dupli_generated(kg, sd->object);
 			break;
 		}
 		case NODE_TEXCO_DUPLI_UV: {
-			data = object_dupli_uv(kg, ccl_fetch(sd, object));
+			data = object_dupli_uv(kg, sd->object);
 			break;
 		}
 		case NODE_TEXCO_VOLUME_GENERATED: {
-			data = ccl_fetch(sd, P);
+			data = sd->P;
 
 #ifdef __VOLUME__
-			if(ccl_fetch(sd, object) != OBJECT_NONE)
+			if(sd->object != OBJECT_NONE)
 				data = volume_normalized_position(kg, sd, data);
 #endif
 			break;
@@ -113,9 +112,9 @@ ccl_device void svm_node_tex_coord_bump_dx(KernelGlobals *kg,
 
 	switch(type) {
 		case NODE_TEXCO_OBJECT: {
-			data = ccl_fetch(sd, P) + ccl_fetch(sd, dP).dx;
+			data = sd->P + sd->dP.dx;
 			if(node.w == 0) {
-				if(ccl_fetch(sd, object) != OBJECT_NONE) {
+				if(sd->object != OBJECT_NONE) {
 					object_inverse_position_transform(kg, sd, &data);
 				}
 			}
@@ -130,48 +129,47 @@ ccl_device void svm_node_tex_coord_bump_dx(KernelGlobals *kg,
 			break;
 		}
 		case NODE_TEXCO_NORMAL: {
-			data = ccl_fetch(sd, N);
-			if(ccl_fetch(sd, object) != OBJECT_NONE)
-				object_inverse_normal_transform(kg, sd, &data);
+			data = sd->N;
+			object_inverse_normal_transform(kg, sd, &data);
 			break;
 		}
 		case NODE_TEXCO_CAMERA: {
 			Transform tfm = kernel_data.cam.worldtocamera;
 
-			if(ccl_fetch(sd, object) != OBJECT_NONE)
-				data = transform_point(&tfm, ccl_fetch(sd, P) + ccl_fetch(sd, dP).dx);
+			if(sd->object != OBJECT_NONE)
+				data = transform_point(&tfm, sd->P + sd->dP.dx);
 			else
-				data = transform_point(&tfm, ccl_fetch(sd, P) + ccl_fetch(sd, dP).dx + camera_position(kg));
+				data = transform_point(&tfm, sd->P + sd->dP.dx + camera_position(kg));
 			break;
 		}
 		case NODE_TEXCO_WINDOW: {
-			if((path_flag & PATH_RAY_CAMERA) && ccl_fetch(sd, object) == OBJECT_NONE && kernel_data.cam.type == CAMERA_ORTHOGRAPHIC)
-				data = camera_world_to_ndc(kg, sd, ccl_fetch(sd, ray_P) + ccl_fetch(sd, ray_dP).dx);
+			if((path_flag & PATH_RAY_CAMERA) && sd->object == OBJECT_NONE && kernel_data.cam.type == CAMERA_ORTHOGRAPHIC)
+				data = camera_world_to_ndc(kg, sd, sd->ray_P + sd->ray_dP.dx);
 			else
-				data = camera_world_to_ndc(kg, sd, ccl_fetch(sd, P) + ccl_fetch(sd, dP).dx);
+				data = camera_world_to_ndc(kg, sd, sd->P + sd->dP.dx);
 			data.z = 0.0f;
 			break;
 		}
 		case NODE_TEXCO_REFLECTION: {
-			if(ccl_fetch(sd, object) != OBJECT_NONE)
-				data = 2.0f*dot(ccl_fetch(sd, N), ccl_fetch(sd, I))*ccl_fetch(sd, N) - ccl_fetch(sd, I);
+			if(sd->object != OBJECT_NONE)
+				data = 2.0f*dot(sd->N, sd->I)*sd->N - sd->I;
 			else
-				data = ccl_fetch(sd, I);
+				data = sd->I;
 			break;
 		}
 		case NODE_TEXCO_DUPLI_GENERATED: {
-			data = object_dupli_generated(kg, ccl_fetch(sd, object));
+			data = object_dupli_generated(kg, sd->object);
 			break;
 		}
 		case NODE_TEXCO_DUPLI_UV: {
-			data = object_dupli_uv(kg, ccl_fetch(sd, object));
+			data = object_dupli_uv(kg, sd->object);
 			break;
 		}
 		case NODE_TEXCO_VOLUME_GENERATED: {
-			data = ccl_fetch(sd, P) + ccl_fetch(sd, dP).dx;
+			data = sd->P + sd->dP.dx;
 
 #ifdef __VOLUME__
-			if(ccl_fetch(sd, object) != OBJECT_NONE)
+			if(sd->object != OBJECT_NONE)
 				data = volume_normalized_position(kg, sd, data);
 #endif
 			break;
@@ -198,9 +196,9 @@ ccl_device void svm_node_tex_coord_bump_dy(KernelGlobals *kg,
 
 	switch(type) {
 		case NODE_TEXCO_OBJECT: {
-			data = ccl_fetch(sd, P) + ccl_fetch(sd, dP).dy;
+			data = sd->P + sd->dP.dy;
 			if(node.w == 0) {
-				if(ccl_fetch(sd, object) != OBJECT_NONE) {
+				if(sd->object != OBJECT_NONE) {
 					object_inverse_position_transform(kg, sd, &data);
 				}
 			}
@@ -215,48 +213,47 @@ ccl_device void svm_node_tex_coord_bump_dy(KernelGlobals *kg,
 			break;
 		}
 		case NODE_TEXCO_NORMAL: {
-			data = ccl_fetch(sd, N);
-			if(ccl_fetch(sd, object) != OBJECT_NONE)
-				object_inverse_normal_transform(kg, sd, &data);
+			data = sd->N;
+			object_inverse_normal_transform(kg, sd, &data);
 			break;
 		}
 		case NODE_TEXCO_CAMERA: {
 			Transform tfm = kernel_data.cam.worldtocamera;
 
-			if(ccl_fetch(sd, object) != OBJECT_NONE)
-				data = transform_point(&tfm, ccl_fetch(sd, P) + ccl_fetch(sd, dP).dy);
+			if(sd->object != OBJECT_NONE)
+				data = transform_point(&tfm, sd->P + sd->dP.dy);
 			else
-				data = transform_point(&tfm, ccl_fetch(sd, P) + ccl_fetch(sd, dP).dy + camera_position(kg));
+				data = transform_point(&tfm, sd->P + sd->dP.dy + camera_position(kg));
 			break;
 		}
 		case NODE_TEXCO_WINDOW: {
-			if((path_flag & PATH_RAY_CAMERA) && ccl_fetch(sd, object) == OBJECT_NONE && kernel_data.cam.type == CAMERA_ORTHOGRAPHIC)
-				data = camera_world_to_ndc(kg, sd, ccl_fetch(sd, ray_P) + ccl_fetch(sd, ray_dP).dy);
+			if((path_flag & PATH_RAY_CAMERA) && sd->object == OBJECT_NONE && kernel_data.cam.type == CAMERA_ORTHOGRAPHIC)
+				data = camera_world_to_ndc(kg, sd, sd->ray_P + sd->ray_dP.dy);
 			else
-				data = camera_world_to_ndc(kg, sd, ccl_fetch(sd, P) + ccl_fetch(sd, dP).dy);
+				data = camera_world_to_ndc(kg, sd, sd->P + sd->dP.dy);
 			data.z = 0.0f;
 			break;
 		}
 		case NODE_TEXCO_REFLECTION: {
-			if(ccl_fetch(sd, object) != OBJECT_NONE)
-				data = 2.0f*dot(ccl_fetch(sd, N), ccl_fetch(sd, I))*ccl_fetch(sd, N) - ccl_fetch(sd, I);
+			if(sd->object != OBJECT_NONE)
+				data = 2.0f*dot(sd->N, sd->I)*sd->N - sd->I;
 			else
-				data = ccl_fetch(sd, I);
+				data = sd->I;
 			break;
 		}
 		case NODE_TEXCO_DUPLI_GENERATED: {
-			data = object_dupli_generated(kg, ccl_fetch(sd, object));
+			data = object_dupli_generated(kg, sd->object);
 			break;
 		}
 		case NODE_TEXCO_DUPLI_UV: {
-			data = object_dupli_uv(kg, ccl_fetch(sd, object));
+			data = object_dupli_uv(kg, sd->object);
 			break;
 		}
 		case NODE_TEXCO_VOLUME_GENERATED: {
-			data = ccl_fetch(sd, P) + ccl_fetch(sd, dP).dy;
+			data = sd->P + sd->dP.dy;
 
 #ifdef __VOLUME__
-			if(ccl_fetch(sd, object) != OBJECT_NONE)
+			if(sd->object != OBJECT_NONE)
 				data = volume_normalized_position(kg, sd, data);
 #endif
 			break;
@@ -277,42 +274,48 @@ ccl_device void svm_node_normal_map(KernelGlobals *kg, ShaderData *sd, float *st
 	float3 color = stack_load_float3(stack, color_offset);
 	color = 2.0f*make_float3(color.x - 0.5f, color.y - 0.5f, color.z - 0.5f);
 
+	bool is_backfacing = (sd->flag & SD_BACKFACING) != 0;
 	float3 N;
 
 	if(space == NODE_NORMAL_MAP_TANGENT) {
 		/* tangent space */
-		if(ccl_fetch(sd, object) == OBJECT_NONE) {
+		if(sd->object == OBJECT_NONE) {
 			stack_store_float3(stack, normal_offset, make_float3(0.0f, 0.0f, 0.0f));
 			return;
 		}
 
 		/* first try to get tangent attribute */
-		AttributeElement attr_elem, attr_sign_elem, attr_normal_elem;
-		int attr_offset = find_attribute(kg, sd, node.z, &attr_elem);
-		int attr_sign_offset = find_attribute(kg, sd, node.w, &attr_sign_elem);
-		int attr_normal_offset = find_attribute(kg, sd, ATTR_STD_VERTEX_NORMAL, &attr_normal_elem);
+		const AttributeDescriptor attr = find_attribute(kg, sd, node.z);
+		const AttributeDescriptor attr_sign = find_attribute(kg, sd, node.w);
+		const AttributeDescriptor attr_normal = find_attribute(kg, sd, ATTR_STD_VERTEX_NORMAL);
 
-		if(attr_offset == ATTR_STD_NOT_FOUND || attr_sign_offset == ATTR_STD_NOT_FOUND || attr_normal_offset == ATTR_STD_NOT_FOUND) {
+		if(attr.offset == ATTR_STD_NOT_FOUND || attr_sign.offset == ATTR_STD_NOT_FOUND || attr_normal.offset == ATTR_STD_NOT_FOUND) {
 			stack_store_float3(stack, normal_offset, make_float3(0.0f, 0.0f, 0.0f));
 			return;
 		}
 
 		/* get _unnormalized_ interpolated normal and tangent */
-		float3 tangent = primitive_attribute_float3(kg, sd, attr_elem, attr_offset, NULL, NULL);
-		float sign = primitive_attribute_float(kg, sd, attr_sign_elem, attr_sign_offset, NULL, NULL);
+		float3 tangent = primitive_attribute_float3(kg, sd, attr, NULL, NULL);
+		float sign = primitive_attribute_float(kg, sd, attr_sign, NULL, NULL);
 		float3 normal;
 
-		if(ccl_fetch(sd, shader) & SHADER_SMOOTH_NORMAL) {
-			normal = primitive_attribute_float3(kg, sd, attr_normal_elem, attr_normal_offset, NULL, NULL);
+		if(sd->shader & SHADER_SMOOTH_NORMAL) {
+			normal = primitive_attribute_float3(kg, sd, attr_normal, NULL, NULL);
 		}
 		else {
-			normal = ccl_fetch(sd, Ng);
+			normal = sd->Ng;
+
+			/* the normal is already inverted, which is too soon for the math here */
+			if(is_backfacing) {
+				normal = -normal;
+			}
+
 			object_inverse_normal_transform(kg, sd, &normal);
 		}
 
 		/* apply normal map */
 		float3 B = sign * cross(normal, tangent);
-		N = normalize(color.x * tangent + color.y * B + color.z * normal);
+		N = safe_normalize(color.x * tangent + color.y * B + color.z * normal);
 
 		/* transform to world space */
 		object_normal_transform(kg, sd, &N);
@@ -330,14 +333,23 @@ ccl_device void svm_node_normal_map(KernelGlobals *kg, ShaderData *sd, float *st
 		if(space == NODE_NORMAL_MAP_OBJECT || space == NODE_NORMAL_MAP_BLENDER_OBJECT)
 			object_normal_transform(kg, sd, &N);
 		else
-			N = normalize(N);
+			N = safe_normalize(N);
+	}
+
+	/* invert normal for backfacing polygons */
+	if(is_backfacing) {
+		N = -N;
 	}
 
 	float strength = stack_load_float(stack, strength_offset);
 
 	if(strength != 1.0f) {
 		strength = max(strength, 0.0f);
-		N = normalize(ccl_fetch(sd, N) + (N - ccl_fetch(sd, N))*strength);
+		N = safe_normalize(sd->N + (N - sd->N)*strength);
+	}
+
+	if(is_zero(N)) {
+		N = sd->N;
 	}
 
 	stack_store_float3(stack, normal_offset, N);
@@ -352,24 +364,22 @@ ccl_device void svm_node_tangent(KernelGlobals *kg, ShaderData *sd, float *stack
 
 	if(direction_type == NODE_TANGENT_UVMAP) {
 		/* UV map */
-		AttributeElement attr_elem;
-		int attr_offset = find_attribute(kg, sd, node.z, &attr_elem);
+		const AttributeDescriptor desc = find_attribute(kg, sd, node.z);
 
-		if(attr_offset == ATTR_STD_NOT_FOUND)
+		if(desc.offset == ATTR_STD_NOT_FOUND)
 			tangent = make_float3(0.0f, 0.0f, 0.0f);
 		else
-			tangent = primitive_attribute_float3(kg, sd, attr_elem, attr_offset, NULL, NULL);
+			tangent = primitive_attribute_float3(kg, sd, desc, NULL, NULL);
 	}
 	else {
 		/* radial */
-		AttributeElement attr_elem;
-		int attr_offset = find_attribute(kg, sd, node.z, &attr_elem);
+		const AttributeDescriptor desc = find_attribute(kg, sd, node.z);
 		float3 generated;
 
-		if(attr_offset == ATTR_STD_NOT_FOUND)
-			generated = ccl_fetch(sd, P);
+		if(desc.offset == ATTR_STD_NOT_FOUND)
+			generated = sd->P;
 		else
-			generated = primitive_attribute_float3(kg, sd, attr_elem, attr_offset, NULL, NULL);
+			generated = primitive_attribute_float3(kg, sd, desc, NULL, NULL);
 
 		if(axis == NODE_TANGENT_AXIS_X)
 			tangent = make_float3(0.0f, -(generated.z - 0.5f), (generated.y - 0.5f));
@@ -380,7 +390,7 @@ ccl_device void svm_node_tangent(KernelGlobals *kg, ShaderData *sd, float *stack
 	}
 
 	object_normal_transform(kg, sd, &tangent);
-	tangent = cross(ccl_fetch(sd, N), normalize(cross(tangent, ccl_fetch(sd, N))));
+	tangent = cross(sd->N, normalize(cross(tangent, sd->N)));
 	stack_store_float3(stack, tangent_offset, tangent);
 }
 

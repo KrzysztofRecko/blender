@@ -52,6 +52,7 @@
 #include "BKE_material.h"
 #include "BKE_node.h"
 #include "BKE_paint.h"
+#include "BKE_scene.h"
 
 #include "GPU_material.h"
 #include "GPU_buffers.h"
@@ -142,6 +143,23 @@ void ED_render_scene_update(Main *bmain, Scene *scene, int updated)
 	recursive_check = false;
 }
 
+void ED_render_scene_update_pre(Main *bmain, Scene *scene, bool time)
+{
+	/* Blender internal might access to the data which is gonna to be freed
+	 * by the scene update functions. This applies for example to simulation
+	 * data like smoke and fire.
+	 */
+	if (time && !BKE_scene_use_new_shading_nodes(scene)) {
+		bScreen *sc;
+		ScrArea *sa;
+		for (sc = bmain->screen.first; sc; sc = sc->id.next) {
+			for (sa = sc->areabase.first; sa; sa = sa->next) {
+				ED_render_engine_area_exit(bmain, sa);
+			}
+		}
+	}
+}
+
 void ED_render_engine_area_exit(Main *bmain, ScrArea *sa)
 {
 	/* clear all render engines in this area */
@@ -171,8 +189,12 @@ void ED_render_engine_changed(Main *bmain)
 
 	RE_FreePersistentData();
 
-	for (scene = bmain->scene.first; scene; scene = scene->id.next)
+	for (scene = bmain->scene.first; scene; scene = scene->id.next) {
 		ED_render_id_flush_update(bmain, &scene->id);
+		if (scene->nodetree) {
+			ntreeCompositUpdateRLayers(scene->nodetree);
+		}
+	}
 }
 
 /***************************** Updates ***********************************

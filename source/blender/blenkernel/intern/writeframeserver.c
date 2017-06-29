@@ -218,7 +218,7 @@ static int handle_request(FrameserverContext *context, RenderData *rd, char *req
 
 	*p = 0;
 
-	if (STREQ(path, "/index.html") || strcmp(path, "/")) {
+	if (STREQ(path, "/index.html") || STREQ(path, "/")) {
 		safe_puts(context->connsock, index_page);
 		return -1;
 	}
@@ -268,11 +268,7 @@ int BKE_frameserver_loop(void *context_v, RenderData *rd, ReportList *UNUSED(rep
 	struct timeval tv;
 	struct sockaddr_in addr;
 	int len, rval;
-#ifdef FREE_WINDOWS
-	int socklen;
-#else
 	unsigned int socklen;
-#endif
 	char buf[4096];
 
 	FrameserverContext *context = context_v;

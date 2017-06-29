@@ -39,6 +39,7 @@
 #include "DNA_meshdata_types.h"
 
 #include "BLI_utildefines.h"
+#include "BLI_linklist.h"
 #include "BLI_math.h"
 
 #include "BKE_crazyspace.h"
@@ -108,7 +109,7 @@ float (*BKE_crazyspace_get_mapped_editverts(Scene *scene, Object *obedit))[3]
 	/* disable subsurf temporal, get mapped cos, and enable it */
 	if (modifiers_disable_subsurf_temporary(obedit)) {
 		/* need to make new derivemesh */
-		makeDerivedMesh(scene, obedit, me->edit_btmesh, CD_MASK_BAREMESH, 0);
+		makeDerivedMesh(scene, obedit, me->edit_btmesh, CD_MASK_BAREMESH, false);
 	}
 
 	/* now get the cage */
@@ -247,7 +248,9 @@ void BKE_crazyspace_set_quats_mesh(Mesh *me, float (*origcos)[3], float (*mapped
 	}
 }
 
-int editbmesh_get_first_deform_matrices(Scene *scene, Object *ob, BMEditMesh *em, 
+/** returns an array of deform matrices for crazyspace correction, and the
+ * number of modifiers left */
+int BKE_crazyspace_get_first_deform_matrices_editbmesh(Scene *scene, Object *ob, BMEditMesh *em,
                                         float (**deformmats)[3][3], float (**deformcos)[3])
 {
 	ModifierData *md;
@@ -273,7 +276,13 @@ int editbmesh_get_first_deform_matrices(Scene *scene, Object *ob, BMEditMesh *em
 
 		if (mti->type == eModifierTypeType_OnlyDeform && mti->deformMatricesEM) {
 			if (!defmats) {
-				dm = getEditDerivedBMesh(em, ob, NULL);
+				const int required_mode = eModifierMode_Realtime | eModifierMode_Editmode;
+				CustomDataMask data_mask = CD_MASK_BAREMESH;
+				CDMaskLink *datamasks = modifiers_calcDataMasks(scene, ob, md, data_mask, required_mode, NULL, 0);
+				data_mask = datamasks->mask;
+				BLI_linklist_free((LinkNode *)datamasks, NULL);
+
+				dm = getEditDerivedBMesh(em, ob, data_mask, NULL);
 				deformedVerts = editbmesh_get_vertex_cos(em, &numVerts);
 				defmats = MEM_mallocN(sizeof(*defmats) * numVerts, "defmats");
 

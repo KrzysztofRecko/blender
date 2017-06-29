@@ -170,6 +170,7 @@ static int mouse_nla_channels(bContext *C, bAnimContext *ac, float x, int channe
 		case ANIMTYPE_DSMAT:    /* Datablock AnimData Expanders */
 		case ANIMTYPE_DSLAM:
 		case ANIMTYPE_DSCAM:
+		case ANIMTYPE_DSCACHEFILE:
 		case ANIMTYPE_DSCUR:
 		case ANIMTYPE_DSSKEY:
 		case ANIMTYPE_DSWOR:
@@ -268,7 +269,7 @@ static int mouse_nla_channels(bContext *C, bAnimContext *ac, float x, int channe
 		{
 			AnimData *adt = BKE_animdata_from_id(ale->id);
 			
-			/* button area... */
+			/* button region... */
 			if (x >= (v2d->cur.xmax - NLACHANNEL_BUTTON_WIDTH)) {
 				if (nlaedit_is_tweakmode_on(ac) == 0) {
 					/* 'push-down' action - only usable when not in TweakMode */
@@ -424,7 +425,7 @@ static int nlachannels_pushdown_exec(bContext *C, wmOperator *op)
 		/* active animdata block */
 		if (nla_panel_context(C, &adt_ptr, NULL, NULL) == 0 || (adt_ptr.data == NULL)) {
 			BKE_report(op->reports, RPT_ERROR, "No active AnimData block to use "
-			           "(select a datablock expander first or set the appropriate flags on an AnimData block)");
+			           "(select a data-block expander first or set the appropriate flags on an AnimData block)");
 			return OPERATOR_CANCELLED;
 		}
 		else {
@@ -534,22 +535,38 @@ static int nla_action_unlink_exec(bContext *C, wmOperator *op)
 	
 	/* do unlinking */
 	if (adt && adt->action) {
-		ED_animedit_unlink_action(C, adt_ptr.id.data, adt, adt->action, op->reports);
+		bool force_delete = RNA_boolean_get(op->ptr, "force_delete");
+		ED_animedit_unlink_action(C, adt_ptr.id.data, adt, adt->action, op->reports, force_delete);
 	}
 	
 	return OPERATOR_FINISHED;
 }
 
+static int nla_action_unlink_invoke(bContext *C, wmOperator *op, const wmEvent *evt)
+{
+	/* NOTE: this is hardcoded to match the behaviour for the unlink button (in interface_templates.c) */
+	RNA_boolean_set(op->ptr, "force_delete", evt->shift != 0);
+	return nla_action_unlink_exec(C, op);
+}
+
 void NLA_OT_action_unlink(wmOperatorType *ot)
 {
+	PropertyRNA *prop;
+	
 	/* identifiers */
 	ot->name = "Unlink Action";
 	ot->idname = "NLA_OT_action_unlink";
 	ot->description = "Unlink this action from the active action slot (and/or exit Tweak Mode)";
 	
 	/* callbacks */
+	ot->invoke = nla_action_unlink_invoke;
 	ot->exec = nla_action_unlink_exec;
 	ot->poll = nla_action_unlink_poll;
+	
+	/* properties */
+	prop = RNA_def_boolean(ot->srna, "force_delete", false, "Force Delete", 
+	                       "Clear Fake User and remove copy stashed in this datablock's NLA stack");
+	RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
 
 /* ******************** Add Tracks Operator ***************************** */

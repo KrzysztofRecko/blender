@@ -29,17 +29,7 @@
  * be accesses from scripts.
  */
 
- 
-/* grr, python redefines */
-#ifdef _POSIX_C_SOURCE
-#  undef _POSIX_C_SOURCE
-#endif
-
 #include <Python.h>
-
-#ifdef WIN32
-#  include "BLI_math_base.h"  /* finite */
-#endif
 
 #include "MEM_guardedalloc.h"
 
@@ -430,8 +420,9 @@ typedef struct {
 } PyModuleObject;
 #endif
 
-static int python_script_exec(bContext *C, const char *fn, struct Text *text,
-                              struct ReportList *reports, const bool do_jump)
+static bool python_script_exec(
+        bContext *C, const char *fn, struct Text *text,
+        struct ReportList *reports, const bool do_jump)
 {
 	Main *bmain_old = CTX_data_main(C);
 	PyObject *main_mod = NULL;
@@ -489,9 +480,20 @@ static int python_script_exec(bContext *C, const char *fn, struct Text *text,
 			 * object, but as written in the Python/C API Ref Manual, chapter 2,
 			 * 'FILE structs for different C libraries can be different and
 			 * incompatible'.
-			 * So now we load the script file data to a buffer */
+			 * So now we load the script file data to a buffer.
+			 *
+			 * Note on use of 'globals()', it's important not copy the dictionary because
+			 * tools may inspect 'sys.modules["__main__"]' for variables defined in the code
+			 * where using a copy of 'globals()' causes code execution
+			 * to leave the main namespace untouched. see: T51444
+			 *
+			 * This leaves us with the problem of variables being included,
+			 * currently this is worked around using 'dict.__del__' it's ugly but works.
+			 */
 			{
-				const char *pystring = "with open(__file__, 'r') as f: exec(f.read())";
+				const char *pystring =
+				        "with open(__file__, 'rb') as f:"
+				        "exec(compile(f.read(), __file__, 'exec'), globals().__delitem__('f') or globals())";
 
 				fclose(fp);
 
@@ -547,13 +549,13 @@ static int python_script_exec(bContext *C, const char *fn, struct Text *text,
 }
 
 /* Can run a file or text block */
-int BPY_filepath_exec(bContext *C, const char *filepath, struct ReportList *reports)
+bool BPY_execute_filepath(bContext *C, const char *filepath, struct ReportList *reports)
 {
 	return python_script_exec(C, filepath, NULL, reports, false);
 }
 
 
-int BPY_text_exec(bContext *C, struct Text *text, struct ReportList *reports, const bool do_jump)
+bool BPY_execute_text(bContext *C, struct Text *text, struct ReportList *reports, const bool do_jump)
 {
 	return python_script_exec(C, NULL, text, reports, do_jump);
 }
@@ -576,24 +578,28 @@ void BPY_DECREF_RNA_INVALIDATE(void *pyob_ptr)
 	PyGILState_Release(gilstate);
 }
 
-/* return -1 on error, else 0 */
-int BPY_button_exec(bContext *C, const char *expr, double *value, const bool verbose)
+/**
+ * \return success
+ */
+bool BPY_execute_string_as_number(bContext *C, const char *expr, const bool verbose, double *r_value)
 {
 	PyGILState_STATE gilstate;
-	int error_ret = 0;
+	bool ok = true;
 
-	if (!value || !expr) return -1;
+	if (!r_value || !expr) {
+		return -1;
+	}
 
 	if (expr[0] == '\0') {
-		*value = 0.0;
-		return error_ret;
+		*r_value = 0.0;
+		return ok;
 	}
 
 	bpy_context_set(C, &gilstate);
 
-	error_ret = PyC_RunString_AsNumber(expr, value, "<blender button>");
+	ok = PyC_RunString_AsNumber(expr, "<blender button>", r_value);
 
-	if (error_ret) {
+	if (ok == false) {
 		if (verbose) {
 			BPy_errors_to_report_ex(CTX_wm_reports(C), false, false);
 		}
@@ -604,21 +610,57 @@ int BPY_button_exec(bContext *C, const char *expr, double *value, const bool ver
 
 	bpy_context_clear(C, &gilstate);
 
-	return error_ret;
+	return ok;
 }
 
-int BPY_string_exec_ex(bContext *C, const char *expr, bool use_eval)
+/**
+ * \return success
+ */
+bool BPY_execute_string_as_string(bContext *C, const char *expr, const bool verbose, char **r_value)
+{
+	PyGILState_STATE gilstate;
+	bool ok = true;
+
+	if (!r_value || !expr) {
+		return -1;
+	}
+
+	if (expr[0] == '\0') {
+		*r_value = NULL;
+		return ok;
+	}
+
+	bpy_context_set(C, &gilstate);
+
+	ok = PyC_RunString_AsString(expr, "<blender button>", r_value);
+
+	if (ok == false) {
+		if (verbose) {
+			BPy_errors_to_report_ex(CTX_wm_reports(C), false, false);
+		}
+		else {
+			PyErr_Clear();
+		}
+	}
+
+	bpy_context_clear(C, &gilstate);
+
+	return ok;
+}
+
+
+bool BPY_execute_string_ex(bContext *C, const char *expr, bool use_eval)
 {
 	PyGILState_STATE gilstate;
 	PyObject *main_mod = NULL;
 	PyObject *py_dict, *retval;
-	int error_ret = 0;
+	bool ok = true;
 	Main *bmain_back; /* XXX, quick fix for release (Copy Settings crash), needs further investigation */
 
 	if (!expr) return -1;
 
 	if (expr[0] == '\0') {
-		return error_ret;
+		return ok;
 	}
 
 	bpy_context_set(C, &gilstate);
@@ -635,7 +677,7 @@ int BPY_string_exec_ex(bContext *C, const char *expr, bool use_eval)
 	bpy_import_main_set(bmain_back);
 
 	if (retval == NULL) {
-		error_ret = -1;
+		ok = false;
 
 		BPy_errors_to_report(CTX_wm_reports(C));
 	}
@@ -647,12 +689,12 @@ int BPY_string_exec_ex(bContext *C, const char *expr, bool use_eval)
 
 	bpy_context_clear(C, &gilstate);
 	
-	return error_ret;
+	return ok;
 }
 
-int BPY_string_exec(bContext *C, const char *expr)
+bool BPY_execute_string(bContext *C, const char *expr)
 {
-	return BPY_string_exec_ex(C, expr, true);
+	return BPY_execute_string_ex(C, expr, true);
 }
 
 void BPY_modules_load_user(bContext *C)
@@ -742,9 +784,11 @@ int BPY_context_member_get(bContext *C, const char *member, bContextDataResult *
 		}
 		else {
 			int len = PySequence_Fast_GET_SIZE(seq_fast);
+			PyObject **seq_fast_items = PySequence_Fast_ITEMS(seq_fast);
 			int i;
+
 			for (i = 0; i < len; i++) {
-				PyObject *list_item = PySequence_Fast_GET_ITEM(seq_fast, i);
+				PyObject *list_item = seq_fast_items[i];
 
 				if (BPy_StructRNA_Check(list_item)) {
 #if 0
@@ -824,7 +868,7 @@ static void bpy_module_delay_init(PyObject *bpy_proxy)
 	char filename_abs[1024];
 
 	BLI_strncpy(filename_abs, filename_rel, sizeof(filename_abs));
-	BLI_path_cwd(filename_abs);
+	BLI_path_cwd(filename_abs, sizeof(filename_abs));
 
 	argv[0] = filename_abs;
 	argv[1] = NULL;
@@ -897,6 +941,32 @@ static void bpy_module_free(void *UNUSED(mod))
 }
 
 #endif
+
+/**
+ * Avoids duplicating keyword list.
+ */
+bool BPY_string_is_keyword(const char *str)
+{
+	/* list is from...
+	 * ", ".join(['"%s"' % kw for kw in  __import__("keyword").kwlist])
+	 */
+	const char *kwlist[] = {
+	    "False", "None", "True",
+	    "and", "as", "assert", "break",
+	    "class", "continue", "def", "del", "elif", "else", "except",
+	    "finally", "for", "from", "global", "if", "import", "in",
+	    "is", "lambda", "nonlocal", "not", "or", "pass", "raise",
+	    "return", "try", "while", "with", "yield", NULL,
+	};
+
+	for (int i = 0; kwlist[i]; i++) {
+		if (STREQ(str, kwlist[i])) {
+			return true;
+		}
+	}
+
+	return false;
+}
 
 
 /* EVIL, define text.c functions here... */

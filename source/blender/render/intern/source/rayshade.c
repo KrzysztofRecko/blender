@@ -45,7 +45,7 @@
 #include "BLI_rand.h"
 #include "BLI_utildefines.h"
 
-#include "BLF_translation.h"
+#include "BLT_translation.h"
 
 #include "BKE_node.h"
 
@@ -174,17 +174,18 @@ void freeraytree(Render *re)
 	
 #ifdef RE_RAYCOUNTER
 	{
+		const int num_threads = re->r.threads;
 		RayCounter sum;
 		memset(&sum, 0, sizeof(sum));
 		int i;
-		for (i=0; i<BLENDER_MAX_THREADS; i++)
+		for (i=0; i<num_threads; i++)
 			RE_RC_MERGE(&sum, re_rc_counter+i);
 		RE_RC_INFO(&sum);
 	}
 #endif
 }
 
-static int is_raytraceable_vlr(Render *re, VlakRen *vlr)
+static bool is_raytraceable_vlr(Render *re, VlakRen *vlr)
 {
 	/* note: volumetric must be tracable, wire must not */
 	if ((re->flag & R_BAKE_TRACE) || (vlr->flag & R_TRACEBLE) || (vlr->mat->material_type == MA_TYPE_VOLUME))
@@ -193,7 +194,7 @@ static int is_raytraceable_vlr(Render *re, VlakRen *vlr)
 	return 0;
 }
 
-static int is_raytraceable(Render *re, ObjectInstanceRen *obi)
+static bool is_raytraceable(Render *re, ObjectInstanceRen *obi)
 {
 	int v;
 	ObjectRen *obr = obi->obr;
@@ -736,6 +737,7 @@ static void traceray(ShadeInput *origshi, ShadeResult *origshr, short depth, con
 		//shi.sample= 0; // memset above, so don't need this
 		shi.xs= origshi->xs;
 		shi.ys= origshi->ys;
+		shi.do_manage= origshi->do_manage;
 		shi.lay= origshi->lay;
 		shi.passflag= SCE_PASS_COMBINED; /* result of tracing needs no pass info */
 		shi.combinedflag= 0xFFFFFF;		 /* ray trace does all options */
@@ -749,7 +751,7 @@ static void traceray(ShadeInput *origshi, ShadeResult *origshr, short depth, con
 			d= shade_by_transmission(&isec, &shi, &shr);
 		
 		if (depth>0) {
-			float fr, fg, fb, f, f1;
+			float fr, fg, fb, f1;
 
 			if ((shi.mat->mode_l & MA_TRANSP) && shr.alpha < 1.0f && (shi.mat->mode_l & (MA_ZTRANSP | MA_RAYTRANSP))) {
 				float nf, f, refract[3], tracol[4];
@@ -809,9 +811,11 @@ static void traceray(ShadeInput *origshi, ShadeResult *origshr, short depth, con
 
 				col[3]= f1*tracol[3] + f;
 			}
-			else 
+			else {
 				col[3]= 1.0f;
+			}
 
+			float f;
 			if (shi.mat->mode_l & MA_RAYMIRROR) {
 				f= shi.ray_mirror;
 				if (f!=0.0f) f*= fresnel_fac(shi.view, shi.vn, shi.mat->fresnel_mir_i, shi.mat->fresnel_mir);
@@ -1183,7 +1187,9 @@ static void QMC_sampleHemiCosine(float vec[3], QMCSampler *qsa, int thread, int 
 /* called from convertBlenderScene.c */
 void init_render_qmcsampler(Render *re)
 {
-	re->qmcsamplers= MEM_callocN(sizeof(ListBase)*BLENDER_MAX_THREADS, "QMCListBase");
+	const int num_threads = re->r.threads;
+	re->qmcsamplers= MEM_callocN(sizeof(ListBase)*num_threads, "QMCListBase");
+	re->num_qmc_samplers = num_threads;
 }
 
 static QMCSampler *get_thread_qmcsampler(Render *re, int thread, int type, int tot)
@@ -1217,7 +1223,7 @@ void free_render_qmcsampler(Render *re)
 	if (re->qmcsamplers) {
 		QMCSampler *qsa, *next;
 		int a;
-		for (a=0; a<BLENDER_MAX_THREADS; a++) {
+		for (a = 0; a < re->num_qmc_samplers; a++) {
 			for (qsa=re->qmcsamplers[a].first; qsa; qsa=next) {
 				next= qsa->next;
 				QMC_freeSampler(qsa);
@@ -1622,6 +1628,7 @@ static void ray_trace_shadow_tra(Isect *is, ShadeInput *origshi, int depth, int 
 	
 		shi.xs= origshi->xs;
 		shi.ys= origshi->ys;
+		shi.do_manage= origshi->do_manage;
 		shi.lay= origshi->lay;
 		shi.nodes= origshi->nodes;
 		
@@ -1691,9 +1698,10 @@ static void DS_energy(float *sphere, int tot, float vec[3])
 /* called from convertBlenderScene.c */
 /* creates an equally distributed spherical sample pattern */
 /* and allocates threadsafe memory */
-void init_ao_sphere(World *wrld)
+void init_ao_sphere(Render *re, World *wrld)
 {
 	/* fixed random */
+	const int num_threads = re->r.threads;
 	RNG *rng;
 	float *fp;
 	int a, tot, iter= 16;
@@ -1717,7 +1725,7 @@ void init_ao_sphere(World *wrld)
 	}
 	
 	/* tables */
-	wrld->aotables= MEM_mallocN(BLENDER_MAX_THREADS*3*tot*sizeof(float), "AO tables");
+	wrld->aotables= MEM_mallocN(num_threads*3*tot*sizeof(float), "AO tables");
 
 	BLI_rng_free(rng);
 }

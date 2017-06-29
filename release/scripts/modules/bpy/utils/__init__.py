@@ -32,6 +32,7 @@ __all__ = (
     "preset_find",
     "preset_paths",
     "refresh_script_paths",
+    "app_template_paths",
     "register_class",
     "register_module",
     "register_manual_map",
@@ -49,18 +50,18 @@ __all__ = (
     "unregister_class",
     "unregister_module",
     "user_resource",
-    )
+)
 
 from _bpy import (
-        escape_identifier,
-        register_class,
-        unregister_class,
-        blend_paths,
-        resource_path,
-        )
-from _bpy import script_paths as _bpy_script_paths
-from _bpy import user_resource as _user_resource
-from _bpy import _utils_units as units
+    _utils_units as units,
+    blend_paths,
+    escape_identifier,
+    register_class,
+    resource_path,
+    script_paths as _bpy_script_paths,
+    unregister_class,
+    user_resource as _user_resource,
+)
 
 import bpy as _bpy
 import os as _os
@@ -142,7 +143,7 @@ def load_scripts(reload_scripts=False, refresh_scripts=False):
        as modules.
     :type refresh_scripts: bool
     """
-    use_time = _bpy.app.debug_python
+    use_time = use_class_register_check = _bpy.app.debug_python
 
     if use_time:
         import time
@@ -154,14 +155,16 @@ def load_scripts(reload_scripts=False, refresh_scripts=False):
         original_modules = _sys.modules.values()
 
     if reload_scripts:
-        _bpy_types.TypeMap.clear()
-
         # just unload, don't change user defaults, this means we can sync
         # to reload. note that they will only actually reload of the
         # modification time changes. This `won't` work for packages so...
         # its not perfect.
         for module_name in [ext.module for ext in _user_preferences.addons]:
             _addon_utils.disable(module_name)
+
+        # *AFTER* unregistering all add-ons, otherwise all calls to
+        # unregister_module() will silently fail (do nothing).
+        _bpy_types.TypeMap.clear()
 
     def register_module_call(mod):
         register = getattr(mod, "register", None)
@@ -244,6 +247,12 @@ def load_scripts(reload_scripts=False, refresh_scripts=False):
                     for mod in modules_from_path(path, loaded_modules):
                         test_register(mod)
 
+    # load template (if set)
+    if any(_bpy.utils.app_template_paths()):
+        import bl_app_template_utils
+        bl_app_template_utils.reset(reload_scripts=reload_scripts)
+        del bl_app_template_utils
+
     # deal with addons separately
     _initialize = getattr(_addon_utils, "_initialize", None)
     if _initialize is not None:
@@ -251,7 +260,7 @@ def load_scripts(reload_scripts=False, refresh_scripts=False):
         _initialize()
         del _addon_utils._initialize
     else:
-        _addon_utils.reset_all(reload_scripts)
+        _addon_utils.reset_all(reload_scripts=reload_scripts)
     del _initialize
 
     # run the active integration preset
@@ -268,13 +277,21 @@ def load_scripts(reload_scripts=False, refresh_scripts=False):
     if use_time:
         print("Python Script Load Time %.4f" % (time.time() - t_main))
 
+    if use_class_register_check:
+        for cls in _bpy.types.bpy_struct.__subclasses__():
+            if getattr(cls, "is_registered", False):
+                for subcls in cls.__subclasses__():
+                    if not subcls.is_registered:
+                        print(
+                            "Warning, unregistered class: %s(%s)" %
+                            (subcls.__name__, cls.__name__)
+                        )
+
 
 # base scripts
-_scripts = _os.path.join(_os.path.dirname(__file__),
-                         _os.path.pardir,
-                         _os.path.pardir,
-                         )
-_scripts = (_os.path.normpath(_scripts), )
+_scripts = (
+    _os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))),
+)
 
 
 def script_path_user():
@@ -305,15 +322,21 @@ def script_paths(subdir=None, user_pref=True, check_all=False):
     """
     scripts = list(_scripts)
 
-    if check_all:
-        # all possible paths
-        base_paths = tuple(_os.path.join(resource_path(res), "scripts")
-                           for res in ('LOCAL', 'USER', 'SYSTEM'))
-    else:
-        # only paths blender uses
-        base_paths = _bpy_script_paths()
+    # Only paths Blender uses.
+    #
+    # Needed this is needed even when 'check_all' is enabled,
+    # so the 'BLENDER_SYSTEM_SCRIPTS' environment variable will be used.
+    base_paths = _bpy_script_paths()
 
-    for path in base_paths + (script_path_user(), script_path_pref()):
+    if check_all:
+        # All possible paths, no duplicates, keep order.
+        base_paths = (
+            *(path for path in (_os.path.join(resource_path(res), "scripts")
+              for res in ('LOCAL', 'USER', 'SYSTEM')) if path not in base_paths),
+            *base_paths,
+            )
+
+    for path in (*base_paths, script_path_user(), script_path_pref()):
         if path:
             path = _os.path.normpath(path)
             if path not in scripts and _os.path.isdir(path):
@@ -349,6 +372,38 @@ def refresh_script_paths():
             _sys_path_ensure(path)
 
 
+def app_template_paths(subdir=None):
+    """
+    Returns valid application template paths.
+
+    :arg subdir: Optional subdir.
+    :type subdir: string
+    :return: app template paths.
+    :rtype: generator
+    """
+
+    # note: LOCAL, USER, SYSTEM order matches script resolution order.
+    subdir_tuple = (subdir,) if subdir is not None else ()
+
+    path = _os.path.join(*(
+        resource_path('LOCAL'), "scripts", "startup",
+        "bl_app_templates_user", *subdir_tuple))
+    if _os.path.isdir(path):
+        yield path
+    else:
+        path = _os.path.join(*(
+            resource_path('USER'), "scripts", "startup",
+            "bl_app_templates_user", *subdir_tuple))
+        if _os.path.isdir(path):
+            yield path
+
+    path = _os.path.join(*(
+        resource_path('SYSTEM'), "scripts", "startup",
+        "bl_app_templates_system", *subdir_tuple))
+    if _os.path.isdir(path):
+        yield path
+
+
 def preset_paths(subdir):
     """
     Returns a list of paths for a specific preset.
@@ -377,46 +432,31 @@ def preset_paths(subdir):
 
 def smpte_from_seconds(time, fps=None):
     """
-    Returns an SMPTE formatted string from the time in seconds: "HH:MM:SS:FF".
+    Returns an SMPTE formatted string from the *time*:
+    ``HH:MM:SS:FF``.
 
     If the *fps* is not given the current scene is used.
+
+    :arg time: time in seconds.
+    :type time: int, float or ``datetime.timedelta``.
+    :return: the frame string.
+    :rtype: string
     """
-    import math
 
-    if fps is None:
-        fps = _bpy.context.scene.render.fps
-
-    hours = minutes = seconds = frames = 0
-
-    if time < 0:
-        time = - time
-        neg = "-"
-    else:
-        neg = ""
-
-    if time >= 3600.0:  # hours
-        hours = int(time / 3600.0)
-        time = time % 3600.0
-    if time >= 60.0:  # minutes
-        minutes = int(time / 60.0)
-        time = time % 60.0
-
-    seconds = int(time)
-    frames = int(round(math.floor(((time - seconds) * fps))))
-
-    return "%s%02d:%02d:%02d:%02d" % (neg, hours, minutes, seconds, frames)
+    return smpte_from_frame(time_to_frame(time, fps=fps), fps)
 
 
 def smpte_from_frame(frame, fps=None, fps_base=None):
     """
-    Returns an SMPTE formatted string from the frame: "HH:MM:SS:FF".
+    Returns an SMPTE formatted string from the *frame*:
+    ``HH:MM:SS:FF``.
 
     If *fps* and *fps_base* are not given the current scene is used.
 
-    :arg time: time in seconds.
-    :type time: number or timedelta object
-    :return: the frame.
-    :rtype: float
+    :arg frame: frame number.
+    :type frame: int or float.
+    :return: the frame string.
+    :rtype: string
     """
 
     if fps is None:
@@ -425,7 +465,17 @@ def smpte_from_frame(frame, fps=None, fps_base=None):
     if fps_base is None:
         fps_base = _bpy.context.scene.render.fps_base
 
-    return smpte_from_seconds((frame * fps_base) / fps, fps)
+    sign = "-" if frame < 0 else ""
+    frame = abs(frame * fps_base)
+
+    return (
+        "%s%02d:%02d:%02d:%02d" % (
+        sign,
+        int(frame / (3600 * fps)),          # HH
+        int((frame / (60 * fps)) % 60),     # MM
+        int((frame / fps) % 60),            # SS
+        int(frame % fps),                   # FF
+        ))
 
 
 def time_from_frame(frame, fps=None, fps_base=None):
@@ -435,7 +485,7 @@ def time_from_frame(frame, fps=None, fps_base=None):
     If *fps* and *fps_base* are not given the current scene is used.
 
     :arg frame: number.
-    :type frame: the frame number
+    :type frame: int or float.
     :return: the time in seconds.
     :rtype: datetime.timedelta
     """
@@ -459,7 +509,7 @@ def time_to_frame(time, fps=None, fps_base=None):
     If *fps* and *fps_base* are not given the current scene is used.
 
     :arg time: time in seconds.
-    :type time: number or a datetime.timedelta object
+    :type time: number or a ``datetime.timedelta`` object
     :return: the frame.
     :rtype: float
     """
@@ -640,11 +690,10 @@ def unregister_module(module, verbose=False):
 
 # we start with the built-in default mapping
 def _blender_default_map():
-    import sys
     import rna_manual_reference as ref_mod
     ret = (ref_mod.url_manual_prefix, ref_mod.url_manual_mapping)
     # avoid storing in memory
-    del sys.modules["rna_manual_reference"]
+    del _sys.modules["rna_manual_reference"]
     return ret
 
 # hooks for doc lookups

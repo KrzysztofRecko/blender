@@ -70,6 +70,7 @@
 #include "BKE_icons.h"
 #include "BKE_lamp.h"
 #include "BKE_library.h"
+#include "BKE_library_remap.h"
 #include "BKE_main.h"
 #include "BKE_material.h"
 #include "BKE_node.h"
@@ -94,7 +95,10 @@
 #include "ED_datafiles.h"
 #include "ED_render.h"
 
-
+#ifndef NDEBUG
+/* Used for database init assert(). */
+#  include "BLI_threads.h"
+#endif
 
 ImBuf *get_brush_icon(Brush *brush)
 {
@@ -192,7 +196,7 @@ static Main *load_main_from_memory(const void *blend, int blend_size)
 	BlendFileData *bfd;
 
 	G.fileflags |= G_FILE_NO_UI;
-	bfd = BLO_read_from_memory(blend, blend_size, NULL);
+	bfd = BLO_read_from_memory(blend, blend_size, NULL, BLO_READ_SKIP_NONE);
 	if (bfd) {
 		bmain = bfd->main;
 
@@ -204,11 +208,16 @@ static Main *load_main_from_memory(const void *blend, int blend_size)
 }
 #endif
 
-void ED_preview_init_dbase(void)
+void ED_preview_ensure_dbase(void)
 {
 #ifndef WITH_HEADLESS
-	G_pr_main = load_main_from_memory(datatoc_preview_blend, datatoc_preview_blend_size);
-	G_pr_main_cycles = load_main_from_memory(datatoc_preview_cycles_blend, datatoc_preview_cycles_blend_size);
+	static bool base_initialized = false;
+	BLI_assert(BLI_thread_is_main());
+	if (!base_initialized) {
+		G_pr_main = load_main_from_memory(datatoc_preview_blend, datatoc_preview_blend_size);
+		G_pr_main_cycles = load_main_from_memory(datatoc_preview_cycles_blend, datatoc_preview_cycles_blend_size);
+		base_initialized = true;
+	}
 #endif
 }
 
@@ -517,7 +526,7 @@ static Scene *preview_prepare_scene(Main *bmain, Scene *scene, ID *id, int id_ty
 				BKE_node_preview_init_tree(origwrld->nodetree, sp->sizex, sp->sizey, true);
 			}
 		}
-		
+
 		return sce;
 	}
 	
@@ -559,10 +568,16 @@ static bool ed_preview_draw_rect(ScrArea *sa, int split, int first, rcti *rect, 
 
 	RE_AcquireResultImageViews(re, &rres);
 
-	/* material preview only needs monoscopy (view 0) */
-	rv = RE_RenderViewGetById(&rres, 0);
+	if (!BLI_listbase_is_empty(&rres.views)) {
+		/* material preview only needs monoscopy (view 0) */
+		rv = RE_RenderViewGetById(&rres, 0);
+	}
+	else {
+		/* possible the job clears the views but we're still drawing T45496 */
+		rv = NULL;
+	}
 
-	if (rv->rectf) {
+	if (rv && rv->rectf) {
 		
 		if (ABS(rres.rectx - newx) < 2 && ABS(rres.recty - newy) < 2) {
 
@@ -600,7 +615,7 @@ void ED_preview_draw(const bContext *C, void *idp, void *parentp, void *slotp, r
 		ID *id = (ID *)idp;
 		ID *parent = (ID *)parentp;
 		MTex *slot = (MTex *)slotp;
-		SpaceButs *sbuts = sa->spacedata.first;
+		SpaceButs *sbuts = CTX_wm_space_buts(C);
 		ShaderPreview *sp = WM_jobs_customdata(wm, sa);
 		rcti newrect;
 		int ok;
@@ -625,11 +640,13 @@ void ED_preview_draw(const bContext *C, void *idp, void *parentp, void *slotp, r
 		/* start a new preview render job if signalled through sbuts->preview,
 		 * if no render result was found and no preview render job is running,
 		 * or if the job is running and the size of preview changed */
-		if ((sbuts->spacetype == SPACE_BUTS && sbuts->preview) ||
+		if ((sbuts != NULL && sbuts->preview) ||
 		    (!ok && !WM_jobs_test(wm, sa, WM_JOB_TYPE_RENDER_PREVIEW)) ||
 		    (sp && (ABS(sp->sizex - newx) >= 2 || ABS(sp->sizey - newy) > 2)))
 		{
-			sbuts->preview = 0;
+			if (sbuts != NULL) {
+				sbuts->preview = 0;
+			}
 			ED_preview_shader_job(C, sa, id, parent, slot, newx, newy, PR_BUTS_RENDER);
 		}
 	}
@@ -814,7 +831,7 @@ static void shader_preview_free(void *customdata)
 		/* get rid of copied material */
 		BLI_remlink(&pr_main->mat, sp->matcopy);
 		
-		BKE_material_free_ex(sp->matcopy, false);
+		BKE_material_free(sp->matcopy);
 
 		properties = IDP_GetProperties((ID *)sp->matcopy, false);
 		if (properties) {
@@ -846,7 +863,7 @@ static void shader_preview_free(void *customdata)
 		
 		/* get rid of copied world */
 		BLI_remlink(&pr_main->world, sp->worldcopy);
-		BKE_world_free_ex(sp->worldcopy, true); /* [#32865] - we need to unlink the texture copies, unlike for materials */
+		BKE_world_free(sp->worldcopy);
 		
 		properties = IDP_GetProperties((ID *)sp->worldcopy, false);
 		if (properties) {
@@ -1063,13 +1080,19 @@ static void icon_preview_add_size(IconPreview *ip, unsigned int *rect, int sizex
 static void icon_preview_startjob_all_sizes(void *customdata, short *stop, short *do_update, float *progress)
 {
 	IconPreview *ip = (IconPreview *)customdata;
-	IconPreviewSize *cur_size = ip->sizes.first;
+	IconPreviewSize *cur_size;
 	const bool use_new_shading = BKE_scene_use_new_shading_nodes(ip->scene);
 
-	while (cur_size) {
+	for (cur_size = ip->sizes.first; cur_size; cur_size = cur_size->next) {
 		PreviewImage *prv = ip->owner;
+
+		if (prv->tag & PRV_TAG_DEFFERED_DELETE) {
+			/* Non-thread-protected reading is not an issue here. */
+			continue;
+		}
+
 		ShaderPreview *sp = MEM_callocN(sizeof(ShaderPreview), "Icon ShaderPreview");
-		const bool is_render = !prv->use_deferred;
+		const bool is_render = !(prv->tag & PRV_TAG_DEFFERED);
 
 		/* construct shader preview from image size and previewcustomdata */
 		sp->scene = ip->scene;
@@ -1100,8 +1123,6 @@ static void icon_preview_startjob_all_sizes(void *customdata, short *stop, short
 
 		common_preview_startjob(sp, stop, do_update, progress);
 		shader_preview_free(sp);
-
-		cur_size = cur_size->next;
 	}
 }
 
@@ -1130,6 +1151,15 @@ static void icon_preview_endjob(void *customdata)
 		}
 #endif
 	}
+
+	if (ip->owner) {
+		PreviewImage *prv_img = ip->owner;
+		prv_img->tag &= ~PRV_TAG_DEFFERED_RENDERING;
+		if (prv_img->tag & PRV_TAG_DEFFERED_DELETE) {
+			BLI_assert(prv_img->tag & PRV_TAG_DEFFERED);
+			BKE_previewimg_cached_release_pointer(prv_img);
+		}
+	}
 }
 
 static void icon_preview_free(void *customdata)
@@ -1145,6 +1175,8 @@ void ED_preview_icon_render(Main *bmain, Scene *scene, ID *id, unsigned int *rec
 	IconPreview ip = {NULL};
 	short stop = false, update = false;
 	float progress = 0.0f;
+
+	ED_preview_ensure_dbase();
 
 	ip.bmain = bmain;
 	ip.scene = scene;
@@ -1164,7 +1196,9 @@ void ED_preview_icon_job(const bContext *C, void *owner, ID *id, unsigned int *r
 {
 	wmJob *wm_job;
 	IconPreview *ip, *old_ip;
-	
+
+	ED_preview_ensure_dbase();
+
 	/* suspended start means it starts after 1 timer step, see WM_jobs_timer below */
 	wm_job = WM_jobs_get(CTX_wm_manager(C), CTX_wm_window(C), owner, "Icon Preview",
 	                     WM_JOB_EXCL_RENDER | WM_JOB_SUSPEND, WM_JOB_TYPE_RENDER_PREVIEW);
@@ -1184,9 +1218,17 @@ void ED_preview_icon_job(const bContext *C, void *owner, ID *id, unsigned int *r
 
 	icon_preview_add_size(ip, rect, sizex, sizey);
 
+	/* Special threading hack: warn main code that this preview is being rendered and cannot be freed... */
+	{
+		PreviewImage *prv_img = owner;
+		if (prv_img->tag & PRV_TAG_DEFFERED) {
+			prv_img->tag |= PRV_TAG_DEFFERED_RENDERING;
+		}
+	}
+
 	/* setup job */
 	WM_jobs_customdata_set(wm_job, ip, icon_preview_free);
-	WM_jobs_timer(wm_job, 0.1, NC_MATERIAL, NC_MATERIAL);
+	WM_jobs_timer(wm_job, 0.1, NC_WINDOW, NC_WINDOW);
 	WM_jobs_callbacks(wm_job, icon_preview_startjob_all_sizes, NULL, NULL, icon_preview_endjob);
 
 	WM_jobs_start(CTX_wm_manager(C), wm_job);
@@ -1205,6 +1247,8 @@ void ED_preview_shader_job(const bContext *C, void *owner, ID *id, ID *parent, M
 	if (use_new_shading && method == PR_NODE_RENDER && id_type != ID_TE) {
 		return;
 	}
+
+	ED_preview_ensure_dbase();
 
 	wm_job = WM_jobs_get(CTX_wm_manager(C), CTX_wm_window(C), owner, "Shader Preview",
 	                    WM_JOB_EXCL_RENDER, WM_JOB_TYPE_RENDER_PREVIEW);
